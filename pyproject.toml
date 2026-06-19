@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "milky-frog"
+version = "0.1.0"
+description = "A lightweight local coding agent CLI"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = [
+  "openai>=1.68.0",
+  "pydantic>=2.10.0",
+  "pyyaml>=6.0.2",
+  "rich>=13.9.0",
+  "typer>=0.15.0",
+]
+
+[project.scripts]
+milky-frog = "milky_frog.cli:app"
+
+[dependency-groups]
+dev = [
+  "mypy>=1.15.0",
+  "pytest>=8.3.0",
+  "pytest-asyncio>=0.25.0",
+  "ruff>=0.11.0",
+  "types-pyyaml>=6.0.12.20250516",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/milky_frog"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["milky_frog"]
