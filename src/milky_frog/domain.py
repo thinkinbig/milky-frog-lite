@@ -50,6 +50,7 @@ class ModelResponse:
     content: str = ""
     tool_calls: tuple[ToolCall, ...] = ()
     usage: dict[str, int] = field(default_factory=dict)
+    model: str = ""
     reasoning: str = ""
 
 

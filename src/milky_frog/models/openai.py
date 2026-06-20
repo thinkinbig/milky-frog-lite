@@ -100,6 +100,7 @@ class OpenAIModel:
                 content="".join(content_parts),
                 tool_calls=tool_calls,
                 usage=usage,
+                model=self._model,
                 reasoning="".join(reasoning_parts),
             )
         )
