@@ -8,12 +8,11 @@ import typer
 
 from milky_frog import __version__
 from milky_frog.checkpoint import SqliteCheckpointStore
+from milky_frog.diagnostics import CheckStatus, Diagnostic
 from milky_frog.project import CONFIG_FILENAME, CONFIG_TEMPLATE, PROJECT_DIRNAME
 from milky_frog.runtime import MilkyFrog, MissingModelConfiguration
 from milky_frog.settings import Settings
 from milky_frog.ui import (
-    CheckStatus,
-    Diagnostic,
     render_assistant,
     render_diagnostics,
     render_error,
@@ -22,6 +21,7 @@ from milky_frog.ui import (
     render_runs,
     run_interactive,
 )
+from milky_frog.ui.prompt import configure_history
 
 app = typer.Typer(
     no_args_is_help=False,
@@ -58,6 +58,7 @@ def interactive() -> None:
         _render_configuration_error()
         raise typer.Exit(code=2) from None
     workspace = Path.cwd()
+    configure_history(settings.home / "prompt_history")
     run_interactive(
         lambda task: frog.run(task, workspace),
         model=settings.model or "unknown",

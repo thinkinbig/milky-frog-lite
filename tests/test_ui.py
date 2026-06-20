@@ -7,36 +7,48 @@ from pathlib import Path
 from rich.console import Console
 
 from milky_frog.checkpoint import RunEvent, StoredRun
+from milky_frog.diagnostics import CheckStatus, Diagnostic
 from milky_frog.domain import RunStatus
-from milky_frog.ui import presenter
+from milky_frog.ui.presenter import Presenter
 
 
-def _capture_consoles(monkeypatch: object) -> tuple[StringIO, StringIO]:
+def _presenter() -> tuple[Presenter, StringIO, StringIO]:
     stdout = StringIO()
     stderr = StringIO()
-    monkeypatch.setattr(presenter, "console", Console(file=stdout, color_system=None, width=120))
-    monkeypatch.setattr(
-        presenter,
-        "error_console",
-        Console(file=stderr, color_system=None, width=120),
+    presenter = Presenter(
+        out=Console(file=stdout, color_system=None, width=120),
+        err=Console(file=stderr, color_system=None, width=120),
     )
-    return stdout, stderr
+    return presenter, stdout, stderr
 
 
-def test_render_runs_shows_actionable_empty_state(monkeypatch: object) -> None:
-    stdout, _ = _capture_consoles(monkeypatch)
+def test_render_runs_shows_actionable_empty_state() -> None:
+    presenter, stdout, _ = _presenter()
 
-    presenter.render_runs(())
+    presenter.runs(())
 
     assert stdout.getvalue() == "No runs yet.\nStart one with: milky-frog run TASK\n"
 
 
-def test_render_interactive_welcome_shows_context(monkeypatch: object) -> None:
-    stdout, _ = _capture_consoles(monkeypatch)
+def test_render_diagnostics_summarizes_failures() -> None:
+    presenter, stdout, _ = _presenter()
 
-    presenter.render_interactive_welcome(
-        model="deepseek-v4-flash", workspace=Path("/workspace/milky-frog")
+    presenter.diagnostics(
+        (
+            Diagnostic("API key", CheckStatus.FAIL, "missing"),
+            Diagnostic("Base URL", CheckStatus.WARN, "default"),
+        )
     )
+
+    rendered = stdout.getvalue()
+    assert "API key" in rendered
+    assert "Doctor found 1 failure(s) and 1 warning(s)." in rendered
+
+
+def test_render_interactive_welcome_shows_context() -> None:
+    presenter, stdout, _ = _presenter()
+
+    presenter.welcome(model="deepseek-v4-flash", workspace=Path("/workspace/milky-frog"))
 
     rendered = stdout.getvalue()
     assert "MILKY FROG" in rendered
@@ -46,10 +58,10 @@ def test_render_interactive_welcome_shows_context(monkeypatch: object) -> None:
     assert "████" in rendered
 
 
-def test_render_interactive_statusbar_shows_model_workspace_and_state(monkeypatch: object) -> None:
-    stdout, _ = _capture_consoles(monkeypatch)
+def test_render_interactive_statusbar_shows_model_workspace_and_state() -> None:
+    presenter, stdout, _ = _presenter()
 
-    presenter.render_interactive_statusbar(
+    presenter.statusbar(
         model="deepseek-v4-flash",
         workspace=Path.home() / "CodeProject" / "milky-frog-lite",
         state="ready",
@@ -61,10 +73,10 @@ def test_render_interactive_statusbar_shows_model_workspace_and_state(monkeypatc
     assert "ready" in rendered
 
 
-def test_render_interactive_help_lists_local_commands(monkeypatch: object) -> None:
-    stdout, _ = _capture_consoles(monkeypatch)
+def test_render_interactive_help_lists_local_commands() -> None:
+    presenter, stdout, _ = _presenter()
 
-    presenter.render_interactive_help()
+    presenter.help()
 
     rendered = stdout.getvalue()
     assert "/help" in rendered
@@ -72,13 +84,13 @@ def test_render_interactive_help_lists_local_commands(monkeypatch: object) -> No
     assert "/exit" in rendered
 
 
-def test_render_run_shows_summary_and_events_without_payload(monkeypatch: object) -> None:
-    stdout, _ = _capture_consoles(monkeypatch)
+def test_render_run_shows_summary_and_events_without_payload() -> None:
+    presenter, stdout, _ = _presenter()
     now = datetime(2026, 6, 20, 12, 0, tzinfo=UTC)
     run = StoredRun("run-123", Path("/workspace"), RunStatus.COMPLETED, now, now)
     events = (RunEvent("RunStarted", {"prompt": "secret"}, sequence=1, created_at=now),)
 
-    presenter.render_run(run, events)
+    presenter.run(run, events)
 
     output = stdout.getvalue()
     assert "run-123" in output
@@ -87,10 +99,10 @@ def test_render_run_shows_summary_and_events_without_payload(monkeypatch: object
     assert "secret" not in output
 
 
-def test_render_error_uses_stderr_and_escapes_markup(monkeypatch: object) -> None:
-    stdout, stderr = _capture_consoles(monkeypatch)
+def test_render_error_uses_stderr_and_escapes_markup() -> None:
+    presenter, stdout, stderr = _presenter()
 
-    presenter.render_error("Unknown Run: [bold]not markup[/]", hint="Run milky-frog runs")
+    presenter.error("Unknown Run: [bold]not markup[/]", hint="Run milky-frog runs")
 
     assert stdout.getvalue() == ""
     assert "[bold]not markup[/]" in stderr.getvalue()

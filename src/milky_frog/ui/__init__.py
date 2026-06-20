@@ -1,8 +1,7 @@
 from milky_frog.ui.console import console, error_console
 from milky_frog.ui.interactive import run_interactive
 from milky_frog.ui.presenter import (
-    CheckStatus,
-    Diagnostic,
+    Presenter,
     render_assistant,
     render_diagnostics,
     render_error,
@@ -14,8 +13,7 @@ from milky_frog.ui.presenter import (
 )
 
 __all__ = [
-    "CheckStatus",
-    "Diagnostic",
+    "Presenter",
     "console",
     "error_console",
     "render_assistant",
