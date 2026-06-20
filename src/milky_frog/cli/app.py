@@ -13,6 +13,7 @@ from milky_frog.project import CONFIG_FILENAME, CONFIG_TEMPLATE, PROJECT_DIRNAME
 from milky_frog.runtime import MilkyFrog, MissingModelConfiguration
 from milky_frog.settings import Settings
 from milky_frog.ui import (
+    StreamingPrinter,
     render_assistant,
     render_diagnostics,
     render_error,
@@ -63,6 +64,7 @@ def interactive() -> None:
         lambda task: frog.run(task, workspace),
         model=settings.model or "unknown",
         workspace=workspace,
+        printer=StreamingPrinter(),
     )
 
 
