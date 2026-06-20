@@ -1,4 +1,4 @@
-from milky_frog.handlers.assembly import build_infrastructure_handlers
+from milky_frog.handlers.assembly import InfrastructureHandlerAssembly
 from milky_frog.handlers.base import BaseEvent
 from milky_frog.handlers.events import (
     AfterModel,
@@ -26,6 +26,7 @@ __all__ = [
     "BeforeTool",
     "BlockTool",
     "HandlerRegistry",
+    "InfrastructureHandlerAssembly",
     "LangfuseHandler",
     "OnModelChunk",
     "OnModelReasoning",
@@ -36,5 +37,4 @@ __all__ = [
     "RunPaused",
     "RunStarted",
     "TransformContext",
-    "build_infrastructure_handlers",
 ]

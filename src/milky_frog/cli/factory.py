@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from milky_frog.handlers import BaseHandler, HandlerRegistry, build_infrastructure_handlers
+from milky_frog.handlers import BaseHandler, HandlerRegistry, InfrastructureHandlerAssembly
 from milky_frog.settings import Settings
 from milky_frog.ui.handlers import StreamingHandlers
 from milky_frog.ui.streaming import StreamingPrinter
@@ -30,5 +30,5 @@ class HandlerFactory:
     def _build_bundles(self) -> list[BaseHandler]:
         return [
             StreamingHandlers(self._printer),
-            *build_infrastructure_handlers(self._settings),
+            *InfrastructureHandlerAssembly(self._settings).build(),
         ]

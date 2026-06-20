@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from milky_frog.handlers import build_infrastructure_handlers
+from milky_frog.handlers import InfrastructureHandlerAssembly
 from milky_frog.handlers.langfuse import LangfuseHandler
 from milky_frog.settings import LangfuseSettings, Settings
 
@@ -22,13 +22,13 @@ def _settings(tmp_path: Path, langfuse: LangfuseSettings) -> Settings:
 
 
 def test_build_skips_inactive_infrastructure(tmp_path: Path) -> None:
-    assert build_infrastructure_handlers(_settings(tmp_path, _INACTIVE)) == []
+    assert InfrastructureHandlerAssembly(_settings(tmp_path, _INACTIVE)).build() == []
 
 
 def test_build_includes_active_langfuse(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr("milky_frog.handlers.langfuse.Langfuse", lambda **kwargs: object())
 
-    bundles = build_infrastructure_handlers(_settings(tmp_path, _ACTIVE))
+    bundles = InfrastructureHandlerAssembly(_settings(tmp_path, _ACTIVE)).build()
 
     assert len(bundles) == 1
     assert isinstance(bundles[0], LangfuseHandler)
@@ -42,6 +42,6 @@ def test_build_does_not_register(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
         "milky_frog.handlers.langfuse.Langfuse", lambda **kwargs: calls.append(kwargs) or object()
     )
 
-    build_infrastructure_handlers(_settings(tmp_path, _ACTIVE))
+    InfrastructureHandlerAssembly(_settings(tmp_path, _ACTIVE)).build()
 
     assert len(calls) == 1  # constructed once, nothing else

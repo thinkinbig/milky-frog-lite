@@ -24,15 +24,15 @@ from milky_frog.settings import LangfuseSettings, Settings
 logger = logging.getLogger(__name__)
 
 
-def build_langfuse_handler(settings: Settings) -> LangfuseHandler | None:
-    """Build the Langfuse Handler when observability is configured, else None."""
-    if not settings.langfuse.active:
-        return None
-    return LangfuseHandler(settings.langfuse)
-
-
 class LangfuseHandler(BaseHandler):
     """Records each Run as a Langfuse trace with generation and tool spans."""
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> LangfuseHandler | None:
+        """Build the Langfuse Handler when observability is configured, else None."""
+        if not settings.langfuse.active:
+            return None
+        return cls(settings.langfuse)
 
     def __init__(self, settings: LangfuseSettings) -> None:
         self._client = Langfuse(
