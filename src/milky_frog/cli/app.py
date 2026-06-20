@@ -108,9 +108,16 @@ def initialize(
     workspace: Annotated[Path | None, typer.Argument()] = None,
 ) -> None:
     """Create declarative project configuration and Skill directories."""
-    root = (workspace or Path.cwd()).resolve(strict=True) / PROJECT_DIRNAME
-    root.mkdir(exist_ok=True)
-    (root / "skills").mkdir(exist_ok=True)
+    root = (workspace or Path.cwd()).expanduser().resolve() / PROJECT_DIRNAME
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "skills").mkdir(exist_ok=True)
+    except OSError as error:
+        render_error(
+            f"Could not initialize workspace: {error}",
+            hint="Choose a writable directory path.",
+        )
+        raise typer.Exit(code=1) from error
     config = root / CONFIG_FILENAME
     if config.exists():
         render_initialized(root, already_exists=True)

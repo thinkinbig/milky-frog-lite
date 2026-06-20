@@ -21,6 +21,27 @@ def test_help_includes_compact_brand() -> None:
     assert "奶蛙" in result.stdout
 
 
+def test_init_creates_a_not_yet_existing_workspace(tmp_path: Path) -> None:
+    target = tmp_path / "new" / "project"
+
+    result = runner.invoke(app, ["init", str(target)], env={"NO_COLOR": "1"})
+
+    assert result.exit_code == 0
+    assert (target / ".milky-frog" / "config.toml").is_file()
+    assert (target / ".milky-frog" / "skills").is_dir()
+
+
+def test_init_reports_filesystem_error_without_traceback(tmp_path: Path) -> None:
+    blocker = tmp_path / "occupied"
+    blocker.write_text("not a directory", encoding="utf-8")
+
+    result = runner.invoke(app, ["init", str(blocker)], env={"NO_COLOR": "1"})
+
+    assert result.exit_code == 1
+    assert "Could not initialize workspace" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
 def test_no_arguments_starts_interactive_mode(monkeypatch: object, tmp_path: Path) -> None:
     cli_module = import_module("milky_frog.cli.app")
 
