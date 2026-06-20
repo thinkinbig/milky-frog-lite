@@ -151,6 +151,7 @@ class Harness:
                 await self._handlers.dispatch(OnModelReasoning(run_id, request, chunk))
             elif isinstance(chunk, StreamDone):
                 response = chunk.response
+                break
         if response is None:
             raise RuntimeError("model stream ended without a StreamDone chunk")
         return response
