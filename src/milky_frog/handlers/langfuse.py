@@ -7,7 +7,17 @@ from typing import Any
 from langfuse import Langfuse
 from langfuse.types import TraceContext
 
-from milky_frog.handlers.events import AfterModel, AfterTool, BeforeModel, BeforeTool, RunFailed
+from milky_frog.handlers.events import (
+    AfterModel,
+    AfterTool,
+    BeforeModel,
+    BeforeTool,
+    RunCancelled,
+    RunCompleted,
+    RunFailed,
+    RunPaused,
+    RunStarted,
+)
 from milky_frog.handlers.registry import HandlerRegistry
 from milky_frog.settings import LangfuseSettings
 
@@ -28,6 +38,10 @@ class LangfuseHandler:
         self._tool_spans: dict[str, Any] = {}
 
     def register(self, registry: HandlerRegistry) -> None:
+        registry.on(RunStarted)(self._run_started)
+        registry.on(RunCompleted)(self._run_completed)
+        registry.on(RunCancelled)(self._run_cancelled)
+        registry.on(RunPaused)(self._run_paused)
         registry.on(BeforeModel)(self._before_model)
         registry.on(AfterModel)(self._after_model)
         registry.on(BeforeTool)(self._before_tool)
@@ -53,6 +67,59 @@ class LangfuseHandler:
             span = self._tool_spans.pop(k)
             with contextlib.suppress(Exception):
                 span.end()
+
+    async def _run_started(self, event: RunStarted) -> None:
+        try:
+            self._trace_ids.setdefault(event.run_id, self._client.create_trace_id())
+        except Exception:
+            logger.exception("Langfuse run_started error")
+
+    async def _run_completed(self, event: RunCompleted) -> None:
+        try:
+            trace_id = self._trace_ids.get(event.run_id)
+            if trace_id:
+                self._client.start_observation(
+                    trace_context=TraceContext(trace_id=trace_id),
+                    name="run_completed",
+                    as_type="span",
+                    output=event.result.final_message,
+                ).end()
+        except Exception:
+            logger.exception("Langfuse run_completed error")
+        finally:
+            self._cleanup_run(event.run_id)
+
+    async def _run_cancelled(self, event: RunCancelled) -> None:
+        try:
+            trace_id = self._trace_ids.get(event.run_id)
+            if trace_id:
+                self._client.start_observation(
+                    trace_context=TraceContext(trace_id=trace_id),
+                    name="run_cancelled",
+                    as_type="span",
+                    level="WARNING",
+                    status_message=event.reason,
+                ).end()
+        except Exception:
+            logger.exception("Langfuse run_cancelled error")
+        finally:
+            self._cleanup_run(event.run_id)
+
+    async def _run_paused(self, event: RunPaused) -> None:
+        try:
+            trace_id = self._trace_ids.get(event.run_id)
+            if trace_id:
+                self._client.start_observation(
+                    trace_context=TraceContext(trace_id=trace_id),
+                    name="run_paused",
+                    as_type="span",
+                    level="WARNING",
+                    status_message=event.reason,
+                ).end()
+        except Exception:
+            logger.exception("Langfuse run_paused error")
+        finally:
+            self._cleanup_run(event.run_id)
 
     async def _before_model(self, event: BeforeModel) -> None:
         try:

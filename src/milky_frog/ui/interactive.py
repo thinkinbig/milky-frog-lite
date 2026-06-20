@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from milky_frog.domain import RunResult
+from milky_frog.domain import RunResult, RunStatus
 from milky_frog.ui.console import console
 from milky_frog.ui.presenter import (
     render_assistant,
@@ -23,6 +23,7 @@ def run_interactive(
     model: str,
     workspace: Path,
     printer: StreamingPrinter,
+    cancel: Callable[[], None] | None = None,
 ) -> None:
     """Own one foreground Terminal UI interaction loop."""
     render_interactive_welcome(model=model, workspace=workspace)
@@ -49,6 +50,8 @@ def run_interactive(
         try:
             result = execute(task)
         except KeyboardInterrupt:
+            if cancel is not None:
+                cancel()
             printer.finish()
             render_error(
                 "Cancelled the current task.",
@@ -58,6 +61,13 @@ def run_interactive(
         except Exception as error:
             printer.finish()
             render_error(f"{type(error).__name__}: {error}")
+            continue
+        if result.status is RunStatus.CANCELLED:
+            printer.finish()
+            render_error(
+                "Cancelled the current task.",
+                hint="Press Ctrl+C again at the prompt to exit.",
+            )
             continue
         if printer.finish():
             render_assistant_footer(result.run_id)

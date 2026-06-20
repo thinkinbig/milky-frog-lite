@@ -69,6 +69,9 @@ def test_no_arguments_starts_interactive_mode(monkeypatch: object, tmp_path: Pat
             assert task == "hello frog"
             return RunResult("run-interactive", RunStatus.COMPLETED, "hello human", 1)
 
+        def cancel(self) -> None:
+            pass
+
     monkeypatch.setattr(cli_module, "MilkyFrog", FakeMilkyFrog)  # type: ignore[attr-defined]
     result = runner.invoke(
         app,

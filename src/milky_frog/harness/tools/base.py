@@ -6,17 +6,17 @@ from typing import Protocol
 
 from pydantic import BaseModel
 
+from milky_frog.domain import RunCancellation, ToolResult
+
 
 @dataclass(frozen=True, slots=True)
 class ToolContext:
     run_id: str
     workspace: Path
+    cancellation: RunCancellation | None = None
 
-
-@dataclass(frozen=True, slots=True)
-class ToolResult:
-    content: str
-    is_error: bool = False
+    def is_cancelled(self) -> bool:
+        return self.cancellation is not None and self.cancellation.is_cancelled
 
 
 class Tool(Protocol):

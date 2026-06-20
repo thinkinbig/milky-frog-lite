@@ -32,6 +32,12 @@ class ToolCall:
 
 
 @dataclass(frozen=True, slots=True)
+class ToolResult:
+    content: str
+    is_error: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class Message:
     role: MessageRole
     content: str
@@ -87,11 +93,26 @@ ModelChunk = TextDelta | ReasoningDelta | StreamDone
 DEFAULT_MAX_MODEL_CALLS = 30
 
 
+@dataclass(slots=True)
+class RunCancellation:
+    """Cooperative cancellation token for a foreground Run."""
+
+    _cancelled: bool = field(default=False, repr=False)
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self._cancelled
+
+
 @dataclass(frozen=True, slots=True)
 class RunRequest:
     prompt: str
     workspace: Path
     max_model_calls: int = DEFAULT_MAX_MODEL_CALLS
+    cancellation: RunCancellation | None = None
 
 
 @dataclass(frozen=True, slots=True)
