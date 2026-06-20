@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 from prompt_toolkit.application import Application, get_app
 from prompt_toolkit.buffer import Buffer
-from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.history import FileHistory, History, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Layout, VSplit, Window
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import Frame, TextArea
 
-_BOX_WIDTH = 92
+from milky_frog.ui.console import BOX_WIDTH as _BOX_WIDTH
 
 _STYLE = Style.from_dict(
     {
@@ -20,8 +21,17 @@ _STYLE = Style.from_dict(
     }
 )
 
-# Shared across the session so Up/Down recall earlier inputs the way Claude's prompt does.
-_HISTORY = InMemoryHistory()
+# Up/Down recall earlier inputs the way Claude's prompt does. In-memory by default so it
+# works without any setup (and in tests); configure_history() upgrades it to a file so recall
+# survives across Runs instead of resetting every time the process restarts.
+_history: History = InMemoryHistory()
+
+
+def configure_history(path: Path) -> None:
+    """Persist prompt history to ``path`` so Up/Down recall survives process restarts."""
+    global _history
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _history = FileHistory(str(path))
 
 
 def prompt_in_box() -> str:
@@ -39,10 +49,9 @@ def prompt_in_box() -> str:
     captured: list[str] = []
 
     def accept(buffer: Buffer) -> bool:
-        text = buffer.text
-        captured.append(text)
-        if text.strip():
-            _HISTORY.append_string(text)
+        # prompt_toolkit appends accepted, non-empty input to the bound history itself
+        # (Buffer.validate_and_handle), so we only capture the text and leave.
+        captured.append(buffer.text)
         get_app().exit()
         return False
 
@@ -51,7 +60,7 @@ def prompt_in_box() -> str:
         wrap_lines=False,
         prompt=[("class:prompt", "> ")],
         accept_handler=accept,
-        history=_HISTORY,
+        history=_history,
     )
 
     bindings = KeyBindings()

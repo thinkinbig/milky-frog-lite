@@ -3,25 +3,37 @@ from __future__ import annotations
 from rich.text import Text
 
 _PALETTE = {
-    "Y": ("██", "bright_yellow"),
-    "W": ("▓▓", "bright_white"),
-    "G": ("▒▒", "bright_green"),
-    "K": ("  ", "black"),
-    "R": ("▄▄", "bright_red"),
-    "B": ("░░", "blue"),
-    "C": ("░░", "bright_cyan"),
+    "Y": ("██", "bright_yellow"),  # signature blonde comb-over
+    "S": ("██", "yellow"),  # golden frog skin
+    "G": ("▒▒", "bright_green"),  # green eye patches
+    "K": ("██", "black"),  # pupils / open-mouth rim
+    "M": ("▓▓", "red"),  # open mouth interior
+    "W": ("▓▓", "bright_white"),  # shirt collar
+    "R": ("██", "bright_red"),  # the long red tie
+    "N": ("██", "blue"),  # navy suit
+    "T": ("░░", "bright_cyan"),  # laughing-to-tears droplets
 }
 
+# A Trump-frog: blonde swept hair up top, golden-yellow skin with green eyes,
+# laughing-to-tears droplets, a wide open mouth, white collar, long red tie
+# and a navy suit below.
 _FROG = (
-    "    YYYYYY    ",
+    "   YYYYYYYY   ",
     "  YYYYYYYYYY  ",
-    "CYYYGGYYGGYYYC",
-    "CYYYGKYYKGYYYC",
-    " YYYKKKKKKYYY ",
-    " YYYYKRRKYYYY ",
-    "   WWYYYYWW   ",
-    "  BBWWRRWWBB  ",
-    " BBBBBRRBBBBB ",
+    " YYYYYYYYYYYY ",
+    " GGGSSSSSSGGG ",
+    "TGKGSSSSSSGKGT",
+    "T SSSSSSSSSS T",
+    "  SKKKKKKKKS  ",
+    "  SKMMMMMMKS  ",
+    "  SKMMMMMMKS  ",
+    "  SSKKKKKKSS  ",
+    "  SWWWRRWWWS  ",
+    " NNWWWRRWWWNN ",
+    " NNNNNRRNNNNN ",
+    "NNNNNNRRNNNNNN",
+    "NNNNNNNNNNNNNN",
+    " NNNNNNNNNNNN ",
 )
 
 

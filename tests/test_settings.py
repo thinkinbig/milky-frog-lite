@@ -13,7 +13,7 @@ def test_reads_configuration_from_dotenv_file(
     (tmp_path / ".env").write_text(
         "MILKY_FROG_API_KEY=from-dotenv\n"
         "export MILKY_FROG_MODEL='deepseek-v4-flash'\n"
-        "MILKY_FROG_BASE_URL=\"https://api.deepseek.com\"\n"
+        'MILKY_FROG_BASE_URL="https://api.deepseek.com"\n'
         "# a comment\n"
         "\n",
         encoding="utf-8",
@@ -29,9 +29,7 @@ def test_reads_configuration_from_dotenv_file(
     assert settings.base_url == "https://api.deepseek.com"
 
 
-def test_real_environment_overrides_dotenv(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_real_environment_overrides_dotenv(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     (tmp_path / ".env").write_text("MILKY_FROG_API_KEY=from-dotenv\n", encoding="utf-8")
     monkeypatch.setenv("MILKY_FROG_API_KEY", "from-environment")
     monkeypatch.chdir(tmp_path)
@@ -44,9 +42,7 @@ def test_real_environment_overrides_dotenv(
 def test_empty_real_environment_overrides_dotenv(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    (tmp_path / ".env").write_text(
-        "MILKY_FROG_BASE_URL=https://stale.example\n", encoding="utf-8"
-    )
+    (tmp_path / ".env").write_text("MILKY_FROG_BASE_URL=https://stale.example\n", encoding="utf-8")
     monkeypatch.setenv("MILKY_FROG_BASE_URL", "")
     monkeypatch.chdir(tmp_path)
 
@@ -55,9 +51,7 @@ def test_empty_real_environment_overrides_dotenv(
     assert settings.base_url is None
 
 
-def test_missing_dotenv_is_not_an_error(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_missing_dotenv_is_not_an_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("MILKY_FROG_API_KEY", raising=False)
     monkeypatch.chdir(tmp_path)
 
