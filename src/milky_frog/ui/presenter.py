@@ -5,6 +5,7 @@ from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 
+from rich import box
 from rich.console import Group
 from rich.markdown import Markdown
 from rich.panel import Panel
@@ -78,18 +79,53 @@ def render_initialized(root: Path, *, already_exists: bool = False) -> None:
     console.print(message)
 
 
+def _short_workspace(workspace: Path) -> str:
+    resolved = workspace.expanduser().resolve()
+    try:
+        relative = resolved.relative_to(Path.home())
+    except ValueError:
+        return resolved.as_posix()
+    return f"~/{relative.as_posix()}" if relative.parts else "~"
+
+
+_PROMPT_BOX_WIDTH = 92
+
+
+def render_prompt_box(*, top: bool) -> None:
+    """Draw the rounded top or bottom edge that frames the interactive input."""
+    width = min(console.size.width, _PROMPT_BOX_WIDTH)
+    if width < 4:
+        return
+    left, right = ("╭", "╮") if top else ("╰", "╯")
+    console.print(Text(left + "─" * (width - 2) + right, style="bright_black"))
+
+
+def render_interactive_statusbar(*, model: str, workspace: Path, state: str = "ready") -> None:
+    status = Text("  ")
+    status.append(model, style="dim")
+    status.append("  ·  ", style="bright_black")
+    status.append(_short_workspace(workspace), style="dim")
+    status.append("  ·  ", style="bright_black")
+    status.append(state, style="green" if state == "ready" else "yellow")
+    console.print(status)
+
+
 def render_interactive_welcome(*, model: str, workspace: Path) -> None:
     details = Table.grid(padding=(0, 1))
     details.add_column()
-    title = Text("Welcome to MILKY FROG", style="bold yellow")
+    title = Text("✻ ", style="bold yellow")
+    title.append("Welcome to MILKY FROG", style="bold yellow")
     title.append(" · 奶蛙", style="bold white")
     details.add_row(title)
     details.add_row(Text("Local coding agent", style="dim"))
     details.add_row("")
-    details.add_row(Text(f"model      {model}"))
-    details.add_row(Text(f"workspace  {workspace}", overflow="fold"))
-    details.add_row("")
-    details.add_row(Text("/help for commands", style="dim"))
+
+    meta = Table.grid(padding=(0, 2))
+    meta.add_column(style="dim", no_wrap=True)
+    meta.add_column(overflow="fold")
+    meta.add_row("model", model)
+    meta.add_row("workspace", _short_workspace(workspace))
+    details.add_row(meta)
 
     welcome = Table.grid(padding=(0, 3))
     welcome.add_column(no_wrap=True)
@@ -99,24 +135,31 @@ def render_interactive_welcome(*, model: str, workspace: Path) -> None:
     console.print(
         Panel(
             welcome,
-            border_style="bright_black",
-            padding=(1, 1),
+            border_style="yellow",
+            box=box.ROUNDED,
+            padding=(1, 2),
             expand=False,
         )
     )
-    console.print(Text("What should Milky Frog build?", style="bold"))
+
+    tips = Table.grid(padding=(0, 1))
+    tips.add_column()
+    tips.add_row(Text("Tips for getting started", style="bold"))
+    tips.add_row(Text("• Describe what to build, fix, or explain — be specific", style="dim"))
+    tips.add_row(Text("• /help lists commands · /clear resets the screen · /exit leaves", style="dim"))
+    console.print(tips)
     console.print()
 
 
 def render_assistant(message: str, *, run_id: str | None = None) -> None:
     body = Markdown(message) if message else Text("No response content.", style="dim")
     response = Table.grid(padding=(0, 1))
-    response.add_column(no_wrap=True)
+    response.add_column(no_wrap=True, vertical="top")
     response.add_column(ratio=1)
     response.add_row(Text("●", style="bold yellow"), body)
     console.print(response)
     if run_id:
-        console.print(Text(f"  run {run_id[:8]}", style="dim"))
+        console.print(Text(f"  ⎿ run {run_id[:8]}", style="bright_black"))
 
 
 def render_interactive_help() -> None:
@@ -127,7 +170,9 @@ def render_interactive_help() -> None:
     commands.add_row("/clear", "Clear the terminal")
     commands.add_row("/exit", "Leave Milky Frog")
     commands.add_row("exit · quit", "Leave Milky Frog")
-    console.print(Panel(commands, title="Commands", border_style="bright_black", expand=False))
+    console.print(
+        Panel(commands, title="Commands", border_style="bright_black", box=box.ROUNDED, expand=False)
+    )
 
 
 def render_runs(runs: tuple[StoredRun, ...]) -> None:

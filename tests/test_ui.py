@@ -46,6 +46,21 @@ def test_render_interactive_welcome_shows_context(monkeypatch: object) -> None:
     assert "████" in rendered
 
 
+def test_render_interactive_statusbar_shows_model_workspace_and_state(monkeypatch: object) -> None:
+    stdout, _ = _capture_consoles(monkeypatch)
+
+    presenter.render_interactive_statusbar(
+        model="deepseek-v4-flash",
+        workspace=Path.home() / "CodeProject" / "milky-frog-lite",
+        state="ready",
+    )
+
+    rendered = stdout.getvalue()
+    assert "deepseek-v4-flash" in rendered
+    assert "~/CodeProject/milky-frog-lite" in rendered
+    assert "ready" in rendered
+
+
 def test_render_interactive_help_lists_local_commands(monkeypatch: object) -> None:
     stdout, _ = _capture_consoles(monkeypatch)
 

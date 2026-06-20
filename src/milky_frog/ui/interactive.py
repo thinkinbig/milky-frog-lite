@@ -4,7 +4,6 @@ from collections.abc import Callable
 from pathlib import Path
 
 import typer
-from rich.rule import Rule
 
 from milky_frog.domain import RunResult
 from milky_frog.ui.console import console
@@ -12,7 +11,15 @@ from milky_frog.ui.presenter import (
     render_assistant,
     render_error,
     render_interactive_help,
+    render_interactive_statusbar,
     render_interactive_welcome,
+    render_prompt_box,
+)
+
+_PROMPT = (
+    typer.style("│", fg=typer.colors.BRIGHT_BLACK)
+    + " "
+    + typer.style(">", fg=typer.colors.CYAN, bold=True)
 )
 
 
@@ -25,15 +32,14 @@ def run_interactive(
     """Own one foreground Terminal UI interaction loop."""
     render_interactive_welcome(model=model, workspace=workspace)
     while True:
-        console.print(Rule(style="bright_black"))
+        render_prompt_box(top=True)
         try:
-            task = typer.prompt(
-                typer.style("You", fg=typer.colors.CYAN, bold=True),
-                prompt_suffix="  > ",
-            ).strip()
+            task = typer.prompt(_PROMPT, prompt_suffix=" ").strip()
         except (typer.Abort, EOFError, KeyboardInterrupt):
+            render_prompt_box(top=False)
             typer.echo()
             return
+        render_prompt_box(top=False)
         if not task:
             continue
 
@@ -48,6 +54,7 @@ def run_interactive(
             console.clear()
             continue
 
+        render_interactive_statusbar(model=model, workspace=workspace, state="working")
         try:
             with console.status(
                 "[yellow]Milky Frog is thinking…[/]",
