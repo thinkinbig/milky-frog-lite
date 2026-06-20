@@ -55,6 +55,9 @@ def run_interactive(
                 spinner_style="yellow",
             ):
                 result = execute(task)
+        except KeyboardInterrupt:
+            typer.echo()
+            return
         except Exception as error:
             render_error(f"{type(error).__name__}: {error}")
             continue
