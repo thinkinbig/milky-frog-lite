@@ -20,12 +20,13 @@ class MissingModelConfiguration(ValueError):
 class MilkyFrog:
     """Runs configured Milky Frog goals while hiding runtime assembly."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, handlers: HandlerRegistry | None = None) -> None:
         api_key = settings.api_key
         model = settings.model
         if not api_key or not model:
             raise MissingModelConfiguration("model configuration is missing")
-        handlers = HandlerRegistry()
+        if handlers is None:
+            handlers = HandlerRegistry()
         self._langfuse: LangfuseHandler | None = None
         if settings.langfuse.active:
             self._langfuse = LangfuseHandler(settings.langfuse)
@@ -39,8 +40,10 @@ class MilkyFrog:
         self._loop: asyncio.AbstractEventLoop | None = None
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> MilkyFrog:
-        return cls(settings)
+    def from_settings(
+        cls, settings: Settings, handlers: HandlerRegistry | None = None
+    ) -> MilkyFrog:
+        return cls(settings, handlers)
 
     def run(self, prompt: str, workspace: Path) -> RunResult:
         """Run one goal synchronously.

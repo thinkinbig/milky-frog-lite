@@ -3,6 +3,8 @@ from milky_frog.handlers.events import (
     AfterTool,
     BeforeModel,
     BeforeTool,
+    OnModelChunk,
+    OnModelReasoning,
     RunFailed,
 )
 from milky_frog.handlers.langfuse import LangfuseHandler
@@ -15,5 +17,7 @@ __all__ = [
     "BeforeTool",
     "HandlerRegistry",
     "LangfuseHandler",
+    "OnModelChunk",
+    "OnModelReasoning",
     "RunFailed",
 ]

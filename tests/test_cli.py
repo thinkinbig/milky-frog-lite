@@ -60,8 +60,8 @@ def test_no_arguments_starts_interactive_mode(monkeypatch: object, tmp_path: Pat
 
     class FakeMilkyFrog:
         @classmethod
-        def from_settings(cls, settings: object) -> FakeMilkyFrog:
-            del settings
+        def from_settings(cls, settings: object, handlers: object = None) -> FakeMilkyFrog:
+            del settings, handlers
             return cls()
 
         def run(self, task: str, workspace: Path) -> RunResult:
