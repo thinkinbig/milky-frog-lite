@@ -1,9 +1,15 @@
+from collections.abc import AsyncIterator
 from typing import Protocol
 
-from milky_frog.domain import ModelRequest, ModelResponse
+from milky_frog.domain import ModelChunk, ModelRequest
 
 
 class Model(Protocol):
-    """Seam between the Harness and a model provider adapter."""
+    """Seam between the Harness and a model provider adapter.
 
-    async def complete(self, request: ModelRequest) -> ModelResponse: ...
+    A Model streams a Run forward: it yields ``TextDelta`` fragments as the
+    provider produces them, then exactly one ``StreamDone`` carrying the
+    assembled ``ModelResponse`` (content, tool calls, usage).
+    """
+
+    def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]: ...
