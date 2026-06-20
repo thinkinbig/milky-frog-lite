@@ -1,5 +1,5 @@
 {
   "langfuse": {
-    "enabled": true
+    "enabled": false
   }
 }

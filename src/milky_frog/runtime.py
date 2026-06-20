@@ -26,8 +26,10 @@ class MilkyFrog:
         if not api_key or not model:
             raise MissingModelConfiguration("model configuration is missing")
         handlers = HandlerRegistry()
+        self._langfuse: LangfuseHandler | None = None
         if settings.langfuse.active:
-            LangfuseHandler(settings.langfuse).register(handlers)
+            self._langfuse = LangfuseHandler(settings.langfuse)
+            self._langfuse.register(handlers)
         self._harness = Harness(
             model=OpenAIModel(api_key=api_key, model=model, base_url=settings.base_url),
             tools=ToolRegistry(),
@@ -50,4 +52,12 @@ class MilkyFrog:
             self._loop = asyncio.new_event_loop()
         config = load_project_config(workspace)
         request = RunRequest(prompt, workspace, max_model_calls=config.max_model_calls)
-        return self._loop.run_until_complete(self._harness.run(request))
+        try:
+            result = self._loop.run_until_complete(self._harness.run(request))
+        except Exception:
+            if self._langfuse:
+                self._langfuse.flush()
+            raise
+        if self._langfuse:
+            self._langfuse.finalize(result.run_id)
+        return result

@@ -62,7 +62,7 @@ def _load_langfuse_settings(
     values: Mapping[str, str | None], toggles: dict[str, object]
 ) -> LangfuseSettings:
     section = toggles.get("langfuse")
-    enabled = bool(section.get("enabled", True)) if isinstance(section, dict) else True
+    enabled = bool(section.get("enabled", False)) if isinstance(section, dict) else False
     return LangfuseSettings(
         enabled=enabled,
         public_key=_get("LANGFUSE_PUBLIC_KEY", values),

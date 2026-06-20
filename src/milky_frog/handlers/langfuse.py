@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import Any
 
@@ -20,7 +21,7 @@ class LangfuseHandler:
         self._client = Langfuse(
             public_key=settings.public_key,
             secret_key=settings.secret_key,
-            host=settings.host,
+            base_url=settings.host,
         )
         self._trace_ids: dict[str, str] = {}
         self._generations: dict[str, Any] = {}
@@ -35,6 +36,23 @@ class LangfuseHandler:
 
     def flush(self) -> None:
         self._client.flush()
+
+    def finalize(self, run_id: str) -> None:
+        """Close any open observations for the run, then flush the client."""
+        self._cleanup_run(run_id)
+        self._client.flush()
+
+    def _cleanup_run(self, run_id: str) -> None:
+        self._trace_ids.pop(run_id, None)
+        gen = self._generations.pop(run_id, None)
+        if gen:
+            with contextlib.suppress(Exception):
+                gen.end()
+        orphaned = [k for k in self._tool_spans if k.startswith(f"{run_id}:")]
+        for k in orphaned:
+            span = self._tool_spans.pop(k)
+            with contextlib.suppress(Exception):
+                span.end()
 
     async def _before_model(self, event: BeforeModel) -> None:
         try:
@@ -107,3 +125,5 @@ class LangfuseHandler:
                 ).end()
         except Exception:
             logger.exception("Langfuse run_failed error")
+        finally:
+            self._cleanup_run(event.run_id)
