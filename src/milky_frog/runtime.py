@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import signal
 from pathlib import Path
 from types import FrameType, TracebackType
@@ -13,6 +14,8 @@ from milky_frog.harness.tools import ToolRegistry
 from milky_frog.models import OpenAIModel
 from milky_frog.project import load_project_config
 from milky_frog.settings import Settings
+
+logger = logging.getLogger(__name__)
 
 
 class MissingModelConfiguration(ValueError):
@@ -36,10 +39,7 @@ class MilkyFrog:
         handlers: HandlerRegistry | None = None,
         bundles: list[BaseHandler] | None = None,
     ) -> None:
-        api_key = settings.api_key
-        model = settings.model
-        if not api_key or not model:
-            raise MissingModelConfiguration("model configuration is missing")
+        api_key, model = self.require_model_configuration(settings)
         # Handler composition is the caller's (the HandlerFactory's) job; the
         # runtime only owns the bundles' resource lifetime via ``aclose``.
         self._handlers: list[BaseHandler] = list(bundles) if bundles else []
@@ -51,6 +51,19 @@ class MilkyFrog:
         )
         self._loop: asyncio.AbstractEventLoop | None = None
         self._cancellation: RunCancellation | None = None
+
+    @staticmethod
+    def require_model_configuration(settings: Settings) -> tuple[str, str]:
+        """Return (api_key, model), or raise if either is missing.
+
+        Call before composing resource-holding Handlers so a missing
+        configuration fails fast without leaking half-built infrastructure.
+        """
+        api_key = settings.api_key
+        model = settings.model
+        if not api_key or not model:
+            raise MissingModelConfiguration("model configuration is missing")
+        return api_key, model
 
     @classmethod
     def from_settings(
@@ -78,10 +91,19 @@ class MilkyFrog:
             self._loop = asyncio.new_event_loop()
         try:
             for handler in self._handlers:
-                self._loop.run_until_complete(handler.aclose())
+                # Isolate each bundle: one bundle's aclose failure must not abort
+                # releasing the rest, nor mask an exception that is exiting the
+                # ``with`` block.
+                try:
+                    self._loop.run_until_complete(handler.aclose())
+                except Exception:
+                    logger.exception("Handler aclose failed: %s", type(handler).__name__)
         finally:
             self._handlers = []
             self._loop.close()
+            # Reset so a later run() recreates a fresh loop instead of reusing a
+            # closed one; close() stays idempotent (no handlers left to release).
+            self._loop = None
 
     def cancel(self) -> None:
         """Request cooperative cancellation of the foreground Run."""

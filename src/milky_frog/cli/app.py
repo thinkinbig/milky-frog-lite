@@ -29,6 +29,9 @@ from milky_frog.ui.prompt import configure_history
 
 def _build_streaming_frog(settings: Settings) -> tuple[MilkyFrog, StreamingPrinter]:
     """Assemble a MilkyFrog whose model text streams live to the console."""
+    # Fail fast before HandlerFactory builds resource-holding bundles (e.g. the
+    # Langfuse client), so a missing configuration doesn't leak them.
+    MilkyFrog.require_model_configuration(settings)
     printer = StreamingPrinter()
     registry, bundles = HandlerFactory(settings, printer).build()
     return MilkyFrog.from_settings(settings, registry, bundles), printer

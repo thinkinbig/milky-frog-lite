@@ -55,10 +55,40 @@ def test_init_reports_filesystem_error_without_traceback(tmp_path: Path) -> None
     assert "Traceback" not in result.stderr
 
 
+def test_build_streaming_frog_does_not_leak_handlers_on_missing_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from milky_frog.cli.app import _build_streaming_frog
+    from milky_frog.runtime import MissingModelConfiguration
+    from milky_frog.settings import LangfuseSettings, Settings
+
+    constructed: list[object] = []
+    monkeypatch.setattr(
+        "milky_frog.handlers.langfuse.Langfuse",
+        lambda **kwargs: constructed.append(kwargs) or object(),
+    )
+    langfuse = LangfuseSettings(
+        enabled=True, public_key="public", secret_key="secret", host="https://langfuse.test"
+    )
+    settings = Settings(tmp_path, None, None, None, langfuse)
+
+    with pytest.raises(MissingModelConfiguration):
+        _build_streaming_frog(settings)
+
+    # Validation must run before HandlerFactory builds the Langfuse client, so
+    # nothing resource-holding is constructed and orphaned.
+    assert constructed == []
+
+
 def test_no_arguments_starts_interactive_mode(monkeypatch: object, tmp_path: Path) -> None:
     cli_module = import_module("milky_frog.cli.app")
 
     class FakeMilkyFrog:
+        @staticmethod
+        def require_model_configuration(settings: object) -> tuple[str, str]:
+            del settings
+            return "test-key", "test-model"
+
         @classmethod
         def from_settings(
             cls, settings: object, handlers: object = None, bundles: object = None

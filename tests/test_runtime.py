@@ -104,6 +104,46 @@ def test_milky_frog_context_manager_closes_its_bundles(tmp_path: Path) -> None:
     assert spy.closed == 1
 
 
+def test_milky_frog_close_isolates_failing_bundle(tmp_path: Path) -> None:
+    class FailingHandler(BaseHandler):
+        def register(self, registry: HandlerRegistry) -> None:
+            del registry
+
+        async def aclose(self) -> None:
+            raise RuntimeError("boom")
+
+    class SpyHandler(BaseHandler):
+        def __init__(self) -> None:
+            self.closed = 0
+
+        def register(self, registry: HandlerRegistry) -> None:
+            del registry
+
+        async def aclose(self) -> None:
+            self.closed += 1
+
+    spy = SpyHandler()
+    settings = Settings(tmp_path, "test-key", None, "test-model", _NO_LANGFUSE)
+
+    # A failing bundle must neither abort releasing the rest nor escape close().
+    with MilkyFrog.from_settings(settings, bundles=[FailingHandler(), spy]):
+        pass
+
+    assert spy.closed == 1
+
+
+def test_milky_frog_close_allows_reuse(tmp_path: Path) -> None:
+    settings = Settings(tmp_path, "test-key", None, "test-model", _NO_LANGFUSE)
+    frog = MilkyFrog.from_settings(settings)
+
+    # close() must not leave a closed loop behind; the instance stays usable.
+    frog.close()
+
+    assert frog._loop is None
+    frog.close()  # idempotent
+    assert frog._loop is None
+
+
 def test_milky_frog_rejects_missing_model_configuration(tmp_path: Path) -> None:
     settings = Settings(tmp_path, None, None, None, _NO_LANGFUSE)
 
