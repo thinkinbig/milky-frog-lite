@@ -22,7 +22,7 @@ class MilkyFrog:
     def __init__(self, settings: Settings) -> None:
         api_key = settings.api_key
         model = settings.model
-        if api_key is None or model is None:
+        if not api_key or not model:
             raise MissingModelConfiguration("model configuration is missing")
         self._api_key = api_key
         self._model = model

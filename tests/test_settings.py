@@ -50,3 +50,20 @@ def test_missing_dotenv_is_not_an_error(
     settings = Settings.from_environment()
 
     assert settings.api_key is None
+
+
+def test_empty_environment_values_are_treated_as_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".env").write_text(
+        "MILKY_FROG_API_KEY=\nMILKY_FROG_MODEL=\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MILKY_FROG_API_KEY", "")
+    monkeypatch.setenv("MILKY_FROG_MODEL", "")
+    monkeypatch.chdir(tmp_path)
+
+    settings = Settings.from_environment()
+
+    assert settings.api_key is None
+    assert settings.model is None

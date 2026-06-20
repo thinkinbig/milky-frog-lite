@@ -30,7 +30,8 @@ class Settings:
 
 def _get(key: str, dotenv: dict[str, str]) -> str | None:
     """Resolve a setting, preferring the real environment over the .env file."""
-    return os.environ.get(key) or dotenv.get(key)
+    value = os.environ.get(key) or dotenv.get(key)
+    return value or None
 
 
 def _load_dotenv(path: Path) -> dict[str, str]:

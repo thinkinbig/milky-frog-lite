@@ -38,3 +38,13 @@ def test_milky_frog_rejects_missing_model_configuration(tmp_path: Path) -> None:
 
     with pytest.raises(MissingModelConfiguration, match="model configuration is missing"):
         MilkyFrog.from_settings(settings)
+
+
+@pytest.mark.parametrize("api_key,model", [("", "test-model"), ("test-key", ""), ("", "")])
+def test_milky_frog_rejects_empty_model_configuration(
+    tmp_path: Path, api_key: str, model: str
+) -> None:
+    settings = Settings(tmp_path, api_key, None, model)
+
+    with pytest.raises(MissingModelConfiguration, match="model configuration is missing"):
+        MilkyFrog.from_settings(settings)
