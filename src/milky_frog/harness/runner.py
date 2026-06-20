@@ -26,7 +26,7 @@ from milky_frog.handlers import (
 )
 from milky_frog.harness.prompt import system_prompt
 from milky_frog.models import Model
-from milky_frog.tools import ToolContext, ToolRegistry, ToolResult
+from milky_frog.harness.tools import ToolContext, ToolRegistry, ToolResult
 
 
 class Harness:

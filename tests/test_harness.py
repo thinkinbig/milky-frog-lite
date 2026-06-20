@@ -7,7 +7,7 @@ from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import ModelRequest, ModelResponse, RunRequest, RunStatus, ToolCall
 from milky_frog.handlers import HandlerRegistry
 from milky_frog.harness import Harness
-from milky_frog.tools import ToolContext, ToolRegistry, ToolResult
+from milky_frog.harness.tools import ToolContext, ToolRegistry, ToolResult
 
 
 class EchoInput(BaseModel):
