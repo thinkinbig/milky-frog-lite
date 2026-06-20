@@ -8,9 +8,11 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from milky_frog.domain import RunUsage
 from milky_frog.ui.console import get_box_width
 from milky_frog.ui.logo import pixel_frog_logo
 from milky_frog.ui.presenter._base import _Surface
+from milky_frog.ui.usage import format_run_usage
 
 
 def _short_workspace(workspace: Path) -> str:
@@ -93,7 +95,9 @@ class _SessionSurface(_Surface):
             )
         )
 
-    def assistant(self, message: str, *, run_id: str | None = None) -> None:
+    def assistant(
+        self, message: str, *, run_id: str | None = None, usage: RunUsage | None = None
+    ) -> None:
         body = Markdown(message) if message else Text("No response content.", style="dim")
         response = Table.grid(padding=(0, 1))
         response.add_column(no_wrap=True, vertical="top")
@@ -101,7 +105,11 @@ class _SessionSurface(_Surface):
         response.add_row(Text("●", style="bold yellow"), body)
         self.out.print(response)
         if run_id:
-            self.assistant_footer(run_id)
+            self.assistant_footer(run_id, usage=usage)
 
-    def assistant_footer(self, run_id: str) -> None:
-        self.out.print(Text(f"  ⎿ run {run_id[:8]}", style="bright_black"))
+    def assistant_footer(self, run_id: str, *, usage: RunUsage | None = None) -> None:
+        footer = f"  ⎿ run {run_id[:8]}"
+        summary = format_run_usage(usage) if usage is not None else None
+        if summary is not None:
+            footer = f"{footer} · {summary}"
+        self.out.print(Text(footer, style="bright_black"))

@@ -70,7 +70,7 @@ def run_interactive(
             )
             continue
         if printer.finish():
-            render_assistant_footer(result.run_id)
+            render_assistant_footer(result.run_id, usage=result.usage)
         else:
-            render_assistant(result.final_message, run_id=result.run_id)
+            render_assistant(result.final_message, run_id=result.run_id, usage=result.usage)
         console.print()

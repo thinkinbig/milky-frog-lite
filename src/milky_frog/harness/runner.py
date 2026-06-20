@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 from collections.abc import Coroutine
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 from uuid import uuid4
 
 from pydantic import JsonValue
@@ -19,8 +19,10 @@ from milky_frog.domain import (
     RunRequest,
     RunResult,
     RunStatus,
+    RunUsage,
     StreamDone,
     TextDelta,
+    TokenUsage,
     ToolCall,
     ToolResult,
 )
@@ -42,6 +44,17 @@ from milky_frog.handlers import (
 from milky_frog.harness.prompt import system_prompt
 from milky_frog.harness.tools import ToolContext, ToolRegistry
 from milky_frog.models import Model
+
+
+def _usage_payload(usage: TokenUsage) -> dict[str, JsonValue]:
+    """Serialize a call's token usage for an append-only Checkpoint event."""
+    return {
+        "input_tokens": usage.input_tokens,
+        "output_tokens": usage.output_tokens,
+        "cached_tokens": usage.cached_tokens,
+        "reasoning_tokens": usage.reasoning_tokens,
+        "total_tokens": usage.total_tokens,
+    }
 
 
 class _ToolRunCancelled(Exception):
@@ -67,6 +80,7 @@ class Harness:
         run_id = uuid4().hex
         workspace = run_request.workspace.resolve(strict=True)
         completed_model_calls = 0
+        run_usage = RunUsage()
         self._checkpoints.create_run(run_id, workspace)
         self._checkpoints.append(
             run_id,
@@ -84,7 +98,9 @@ class Harness:
         try:
             for model_call in range(1, run_request.max_model_calls + 1):
                 if self._should_cancel(run_request):
-                    return await self._finish_cancelled(run_id, "cancelled", completed_model_calls)
+                    return await self._finish_cancelled(
+                        run_id, "cancelled", completed_model_calls, run_usage
+                    )
                 request = ModelRequest(tuple(messages), self._tools.schemas())
                 before_model = BeforeModel(run_id=run_id, request=request)
                 await self._handlers.dispatch(before_model)
@@ -96,6 +112,7 @@ class Harness:
                         response=response,
                     )
                 )
+                run_usage = run_usage.record(response.usage)
                 self._checkpoints.append(
                     run_id,
                     RunEvent(
@@ -111,7 +128,7 @@ class Harness:
                                 }
                                 for call in response.tool_calls
                             ],
-                            "usage": cast(JsonValue, response.usage),
+                            "usage": _usage_payload(response.usage),
                         },
                     ),
                 )
@@ -123,7 +140,9 @@ class Harness:
                 completed_model_calls = model_call
 
                 if not response.tool_calls:
-                    result = RunResult(run_id, RunStatus.COMPLETED, response.content, model_call)
+                    result = RunResult(
+                        run_id, RunStatus.COMPLETED, response.content, model_call, run_usage
+                    )
                     self._checkpoints.append(
                         run_id,
                         RunEvent("RunCompleted", {"final_message": response.content}),
@@ -135,13 +154,13 @@ class Harness:
                 for call in response.tool_calls:
                     if self._should_cancel(run_request):
                         return await self._finish_cancelled(
-                            run_id, "cancelled", completed_model_calls
+                            run_id, "cancelled", completed_model_calls, run_usage
                         )
                     try:
                         tool_result = await self._execute_tool(run_id, workspace, call, run_request)
                     except _ToolRunCancelled:
                         return await self._finish_cancelled(
-                            run_id, "cancelled", completed_model_calls
+                            run_id, "cancelled", completed_model_calls, run_usage
                         )
                     messages.append(
                         Message(
@@ -157,6 +176,7 @@ class Harness:
                 RunStatus.PAUSED_LIMIT,
                 message,
                 run_request.max_model_calls,
+                run_usage,
             )
             self._checkpoints.append(
                 run_id,
@@ -177,7 +197,9 @@ class Harness:
             return result
         except asyncio.CancelledError:
             if self._should_cancel(run_request):
-                return await self._finish_cancelled(run_id, "cancelled", completed_model_calls)
+                return await self._finish_cancelled(
+                    run_id, "cancelled", completed_model_calls, run_usage
+                )
             raise
         except Exception as error:
             self._checkpoints.append(
@@ -285,7 +307,9 @@ class Harness:
     def _should_cancel(run_request: RunRequest) -> bool:
         return run_request.cancellation is not None and run_request.cancellation.is_cancelled
 
-    async def _finish_cancelled(self, run_id: str, reason: str, model_calls: int) -> RunResult:
+    async def _finish_cancelled(
+        self, run_id: str, reason: str, model_calls: int, usage: RunUsage
+    ) -> RunResult:
         self._checkpoints.append(
             run_id,
             RunEvent("RunCancelled", {"reason": reason, "model_calls": model_calls}),
@@ -294,4 +318,4 @@ class Harness:
         await self._handlers.dispatch(
             RunCancelled(run_id=run_id, reason=reason, model_calls=model_calls)
         )
-        return RunResult(run_id, RunStatus.CANCELLED, reason, model_calls)
+        return RunResult(run_id, RunStatus.CANCELLED, reason, model_calls, usage)
