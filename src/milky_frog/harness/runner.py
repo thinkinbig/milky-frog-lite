@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+from collections.abc import Coroutine
 from pathlib import Path
+from typing import Any
 from typing import cast
 from uuid import uuid4
 
@@ -40,6 +43,10 @@ from milky_frog.handlers import (
 from milky_frog.harness.prompt import system_prompt
 from milky_frog.harness.tools import ToolContext, ToolRegistry
 from milky_frog.models import Model
+
+
+class _ToolRunCancelled(Exception):
+    """Cooperative cancel arrived while a Tool was executing."""
 
 
 class Harness:
@@ -131,7 +138,12 @@ class Harness:
                         return await self._finish_cancelled(
                             run_id, "cancelled", completed_model_calls
                         )
-                    tool_result = await self._execute_tool(run_id, workspace, call)
+                    try:
+                        tool_result = await self._execute_tool(run_id, workspace, call, run_request)
+                    except _ToolRunCancelled:
+                        return await self._finish_cancelled(
+                            run_id, "cancelled", completed_model_calls
+                        )
                     messages.append(
                         Message(
                             MessageRole.TOOL,
@@ -213,6 +225,7 @@ class Harness:
         run_id: str,
         workspace: Path,
         call: ToolCall,
+        run_request: RunRequest,
     ) -> ToolResult:
         block = await self._handlers.dispatch(BeforeTool(run_id=run_id, call=call))
         self._checkpoints.append(
@@ -225,11 +238,16 @@ class Harness:
         if isinstance(block, BlockTool):
             result = ToolResult(block.reason, is_error=True)
         else:
-            # Cooperative cancellation is not polled during tool execution (MVP).
             tool = self._tools.get(call.name)
             input_model = tool.input_model.model_validate(call.arguments)
+            context = ToolContext(run_id, workspace, run_request.cancellation)
             try:
-                result = await tool.execute(ToolContext(run_id, workspace), input_model)
+                result = await self._run_tool_with_cancellation(
+                    tool.execute(context, input_model),
+                    run_request,
+                )
+            except _ToolRunCancelled:
+                raise
             except Exception as error:
                 result = ToolResult(f"{type(error).__name__}: {error}", is_error=True)
         after_tool = AfterTool(run_id=run_id, call=call, result=result)
@@ -248,6 +266,21 @@ class Harness:
             ),
         )
         return result
+
+    async def _run_tool_with_cancellation(
+        self,
+        coro: Coroutine[Any, Any, ToolResult],
+        run_request: RunRequest,
+    ) -> ToolResult:
+        task: asyncio.Task[ToolResult] = asyncio.create_task(coro)
+        while not task.done():
+            if self._should_cancel(run_request):
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+                raise _ToolRunCancelled
+            await asyncio.sleep(0)
+        return await task
 
     @staticmethod
     def _should_cancel(run_request: RunRequest) -> bool:

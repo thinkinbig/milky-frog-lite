@@ -79,7 +79,6 @@ class HandlerRegistry:
     async def dispatch(self, event: BaseEvent) -> InterceptOutcome | None:
         """Run intercept Handlers, apply outcomes, observe Handlers, return intercept outcome."""
         outcome = await self._dispatch_intercept(event)
-        self._apply_intercept_outcome(event, outcome)
         await self._dispatch_observe(event)
         return outcome
 
@@ -152,7 +151,7 @@ class HandlerRegistry:
         for registration in registrations:
             outcome = await registration.handler(event)
             if isinstance(outcome, TransformContext):
-                event.request = ModelRequest(outcome.messages, event.request.tools)
+                self._apply_intercept_outcome(event, outcome)
                 last_outcome = TransformContext(event.request.messages)
             elif outcome is not None:
                 self._warn_ignored_intercept_outcome(outcome, event, "TransformContext")
@@ -165,13 +164,12 @@ class HandlerRegistry:
         for registration in registrations:
             outcome = await registration.handler(event)
             if isinstance(outcome, PatchToolResult):
-                content = outcome.content if outcome.content is not None else event.result.content
-                is_error = (
-                    outcome.is_error if outcome.is_error is not None else event.result.is_error
-                )
                 if outcome.content is not None or outcome.is_error is not None:
-                    event.result = ToolResult(content, is_error)
-                    last_outcome = PatchToolResult(content=content, is_error=is_error)
+                    self._apply_intercept_outcome(event, outcome)
+                    last_outcome = PatchToolResult(
+                        content=event.result.content,
+                        is_error=event.result.is_error,
+                    )
             elif outcome is not None:
                 self._warn_ignored_intercept_outcome(outcome, event, "PatchToolResult")
         return last_outcome

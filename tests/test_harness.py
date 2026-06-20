@@ -366,6 +366,58 @@ async def test_harness_cancellation_stops_run(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_harness_cancellation_during_tool_execution(tmp_path: Path) -> None:
+    class SlowToolInput(BaseModel):
+        pass
+
+    class SlowTool:
+        name = "slow"
+        description = "Slow tool"
+        input_model = SlowToolInput
+
+        async def execute(self, context: ToolContext, input: BaseModel) -> ToolResult:
+            del input
+            await asyncio.sleep(0.1)
+            return ToolResult("done")
+
+    class SlowToolModel:
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            del request
+            yield StreamDone(ModelResponse(tool_calls=(ToolCall("call-1", "slow", {}),)))
+
+    cancellation = RunCancellation()
+    harness = Harness(
+        model=SlowToolModel(),
+        tools=ToolRegistry((SlowTool(),)),
+        checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
+        handlers=HandlerRegistry(),
+    )
+
+    async def run_and_cancel() -> RunResult:
+        task = asyncio.create_task(
+            harness.run(RunRequest("slow tool", tmp_path, cancellation=cancellation))
+        )
+        await asyncio.sleep(0.01)
+        cancellation.cancel()
+        return await task
+
+    result = await run_and_cancel()
+
+    assert result.status is RunStatus.CANCELLED
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    assert not any(event.event_type == "ToolCallCompleted" for event in store.events(result.run_id))
+
+
+def test_tool_context_exposes_cancellation_poll() -> None:
+    cancellation = RunCancellation()
+    context = ToolContext("run-1", Path("."), cancellation)
+
+    assert context.is_cancelled() is False
+    cancellation.cancel()
+    assert context.is_cancelled() is True
+
+
+@pytest.mark.asyncio
 async def test_run_cancelled_handler_runs_after_checkpoint(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
     registry = HandlerRegistry()
