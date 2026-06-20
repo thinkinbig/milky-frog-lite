@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
 
 from milky_frog.checkpoint import SqliteCheckpointStore
-from milky_frog.domain import ModelRequest, ModelResponse, RunStatus
+from milky_frog.domain import ModelChunk, ModelRequest, ModelResponse, RunStatus, StreamDone
 from milky_frog.models import OpenAIModel
 from milky_frog.runtime import MilkyFrog, MissingModelConfiguration
 from milky_frog.settings import Settings
@@ -16,12 +17,14 @@ def test_milky_frog_runs_through_configured_runtime(
 ) -> None:
     requests: list[ModelRequest] = []
 
-    async def fake_complete(self: OpenAIModel, request: ModelRequest) -> ModelResponse:
+    async def fake_stream(
+        self: OpenAIModel, request: ModelRequest
+    ) -> AsyncIterator[ModelChunk]:
         del self
         requests.append(request)
-        return ModelResponse(content="done")
+        yield StreamDone(ModelResponse(content="done"))
 
-    monkeypatch.setattr(OpenAIModel, "complete", fake_complete)
+    monkeypatch.setattr(OpenAIModel, "stream", fake_stream)
     settings = Settings(tmp_path, "test-key", "https://example.test", "test-model")
 
     result = MilkyFrog.from_settings(settings).run("build it", tmp_path)

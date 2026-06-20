@@ -50,6 +50,25 @@ class ModelResponse:
     content: str = ""
     tool_calls: tuple[ToolCall, ...] = ()
     usage: dict[str, int] = field(default_factory=dict)
+    reasoning: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class TextDelta:
+    content: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReasoningDelta:
+    content: str
+
+
+@dataclass(frozen=True, slots=True)
+class StreamDone:
+    response: ModelResponse
+
+
+ModelChunk = TextDelta | ReasoningDelta | StreamDone
 
 
 DEFAULT_MAX_MODEL_CALLS = 30
