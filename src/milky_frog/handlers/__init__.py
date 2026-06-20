@@ -1,3 +1,4 @@
+from milky_frog.handlers.assembly import InfrastructureHandlerAssembly
 from milky_frog.handlers.base import BaseEvent
 from milky_frog.handlers.events import (
     AfterModel,
@@ -13,17 +14,19 @@ from milky_frog.handlers.events import (
     RunStarted,
 )
 from milky_frog.handlers.langfuse import LangfuseHandler
-from milky_frog.handlers.registry import HandlerRegistry
+from milky_frog.handlers.registry import BaseHandler, HandlerRegistry
 from milky_frog.handlers.results import BlockTool, PatchToolResult, TransformContext
 
 __all__ = [
     "AfterModel",
     "AfterTool",
     "BaseEvent",
+    "BaseHandler",
     "BeforeModel",
     "BeforeTool",
     "BlockTool",
     "HandlerRegistry",
+    "InfrastructureHandlerAssembly",
     "LangfuseHandler",
     "OnModelChunk",
     "OnModelReasoning",

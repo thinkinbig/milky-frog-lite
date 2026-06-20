@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -177,3 +178,20 @@ class HandlerRegistry:
     @staticmethod
     def _sorted(registrations: list[_Registration]) -> list[_Registration]:
         return sorted(registrations, key=lambda item: (-item.priority, item.order))
+
+
+class BaseHandler(ABC):
+    """A cross-cutting bundle of Handlers with an optional resource lifetime.
+
+    A bundle wires several callbacks onto a HandlerRegistry in one place (its
+    own file) via ``register``. Bundles that hold resources for the process's
+    lifetime (clients, connections) override ``aclose``; the rest inherit the
+    no-op default so the runtime can release every bundle uniformly.
+    """
+
+    @abstractmethod
+    def register(self, registry: HandlerRegistry) -> None:
+        """Wire this bundle's callbacks onto the registry."""
+
+    async def aclose(self) -> None:  # noqa: B027 - intentional no-op default; resource-holding bundles override
+        """Release resources held for the bundle's lifetime. Default: no-op."""

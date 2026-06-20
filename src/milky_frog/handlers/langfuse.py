@@ -18,14 +18,21 @@ from milky_frog.handlers.events import (
     RunPaused,
     RunStarted,
 )
-from milky_frog.handlers.registry import HandlerRegistry
-from milky_frog.settings import LangfuseSettings
+from milky_frog.handlers.registry import BaseHandler, HandlerRegistry
+from milky_frog.settings import LangfuseSettings, Settings
 
 logger = logging.getLogger(__name__)
 
 
-class LangfuseHandler:
+class LangfuseHandler(BaseHandler):
     """Records each Run as a Langfuse trace with generation and tool spans."""
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> LangfuseHandler | None:
+        """Build the Langfuse Handler when observability is configured, else None."""
+        if not settings.langfuse.active:
+            return None
+        return cls(settings.langfuse)
 
     def __init__(self, settings: LangfuseSettings) -> None:
         self._client = Langfuse(
@@ -48,13 +55,20 @@ class LangfuseHandler:
         registry.on(AfterTool)(self._after_tool)
         registry.on(RunFailed)(self._run_failed)
 
-    def flush(self) -> None:
-        self._client.flush()
+    async def aclose(self) -> None:
+        """Flush buffered observations and shut down the client at session end."""
+        with contextlib.suppress(Exception):
+            self._client.flush()
+        shutdown = getattr(self._client, "shutdown", None)
+        if callable(shutdown):
+            with contextlib.suppress(Exception):
+                shutdown()
 
-    def finalize(self, run_id: str) -> None:
-        """Close any open observations for the run, then flush the client."""
+    def _finalize_run(self, run_id: str) -> None:
+        """Close any open observations for the run, then flush its batch."""
         self._cleanup_run(run_id)
-        self._client.flush()
+        with contextlib.suppress(Exception):
+            self._client.flush()
 
     def _cleanup_run(self, run_id: str) -> None:
         self._trace_ids.pop(run_id, None)
@@ -87,7 +101,7 @@ class LangfuseHandler:
         except Exception:
             logger.exception("Langfuse run_completed error")
         finally:
-            self._cleanup_run(event.run_id)
+            self._finalize_run(event.run_id)
 
     async def _run_cancelled(self, event: RunCancelled) -> None:
         try:
@@ -103,7 +117,7 @@ class LangfuseHandler:
         except Exception:
             logger.exception("Langfuse run_cancelled error")
         finally:
-            self._cleanup_run(event.run_id)
+            self._finalize_run(event.run_id)
 
     async def _run_paused(self, event: RunPaused) -> None:
         try:
@@ -119,7 +133,7 @@ class LangfuseHandler:
         except Exception:
             logger.exception("Langfuse run_paused error")
         finally:
-            self._cleanup_run(event.run_id)
+            self._finalize_run(event.run_id)
 
     async def _before_model(self, event: BeforeModel) -> None:
         try:
@@ -193,4 +207,4 @@ class LangfuseHandler:
         except Exception:
             logger.exception("Langfuse run_failed error")
         finally:
-            self._cleanup_run(event.run_id)
+            self._finalize_run(event.run_id)
