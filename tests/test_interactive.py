@@ -52,6 +52,7 @@ def test_interactive_terminal_owns_commands_and_run_turn(
         execute,
         model="test-model",
         workspace=Path("/workspace"),
+        printer=interactive.StreamingPrinter(),
     )
 
     assert events == [

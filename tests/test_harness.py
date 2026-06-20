@@ -9,6 +9,7 @@ from milky_frog.domain import (
     ModelChunk,
     ModelRequest,
     ModelResponse,
+    ReasoningDelta,
     RunRequest,
     RunStatus,
     StreamDone,
@@ -46,9 +47,18 @@ class FakeModel:
             yield StreamDone(
                 ModelResponse(tool_calls=(ToolCall("call-1", "echo", {"text": "hello"}),))
             )
-        else:
-            assert request.messages[-1].content == "hello"
-            yield StreamDone(ModelResponse(content="done"))
+            return
+        assert request.messages[-1].content == "hello"
+        yield TextDelta("done")
+        yield StreamDone(ModelResponse(content="done"))
+
+
+class ReasoningModel:
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        del request
+        yield ReasoningDelta("weighing options")
+        yield TextDelta("the answer")
+        yield StreamDone(ModelResponse(content="the answer", reasoning="weighing options"))
 
 
 class IdentityCapturingModel:
@@ -58,6 +68,7 @@ class IdentityCapturingModel:
         assert "奶蛙" in request.messages[0].content
         assert request.messages[1].role.value == "user"
         assert request.messages[1].content == "Who are you?"
+        yield TextDelta("I am Milky Frog.")
         yield StreamDone(ModelResponse(content="I am Milky Frog."))
 
 
@@ -113,6 +124,28 @@ async def test_harness_stops_model_stream_after_stream_done(tmp_path: Path) -> N
 
     assert result.final_message == "done"
     assert model.extra_chunks_yielded == 0
+
+
+@pytest.mark.asyncio
+async def test_harness_persists_reasoning_in_checkpoint(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    harness = Harness(
+        model=ReasoningModel(),
+        tools=ToolRegistry(),
+        checkpoints=store,
+        handlers=HandlerRegistry(),
+    )
+
+    result = await harness.run(RunRequest("solve it", tmp_path))
+
+    assert result.final_message == "the answer"
+    completed = next(
+        event
+        for event in store.events(result.run_id)
+        if event.event_type == "ModelMessageCompleted"
+    )
+    assert completed.payload["reasoning"] == "weighing options"
+    assert completed.payload["content"] == "the answer"
 
 
 @pytest.mark.asyncio

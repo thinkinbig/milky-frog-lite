@@ -83,7 +83,7 @@ def interactive() -> None:
         lambda task: frog.run(task, workspace),
         model=settings.model or "unknown",
         workspace=workspace,
-        printer=printer,
+        printer=StreamingPrinter(),
     )
 
 

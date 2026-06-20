@@ -74,6 +74,7 @@ class Harness:
                         "ModelMessageCompleted",
                         {
                             "content": response.content,
+                            "reasoning": response.reasoning,
                             "tool_calls": [
                                 {
                                     "id": call.id,
