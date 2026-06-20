@@ -123,6 +123,22 @@ async def test_stream_surfaces_reasoning_before_answer() -> None:
 
 
 @pytest.mark.asyncio
+async def test_stream_omits_stream_options_for_compatible_base_url() -> None:
+    client = _FakeClient([_chunk(content="ok")])
+    model = OpenAIModel(
+        api_key="k",
+        model="m",
+        base_url="https://example.test/v1",
+        client=client,  # type: ignore[arg-type]
+    )
+
+    async for _ in model.stream(ModelRequest((Message(MessageRole.USER, "hi"),), ())):
+        pass
+
+    assert "stream_options" not in client.captured
+
+
+@pytest.mark.asyncio
 async def test_stream_omits_tools_when_none_requested() -> None:
     client = _FakeClient([_chunk(content="ok")])
     model = OpenAIModel(api_key="k", model="m", client=client)  # type: ignore[arg-type]

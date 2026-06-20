@@ -30,9 +30,14 @@ class OpenAIModel:
         model: str,
         base_url: str | None = None,
         client: AsyncOpenAI | None = None,
+        include_stream_usage: bool | None = None,
     ) -> None:
         self._model = model
         self._client = client or AsyncOpenAI(api_key=api_key, base_url=base_url)
+        # Official OpenAI supports stream usage; many compatible gateways reject it.
+        self._include_stream_usage = (
+            include_stream_usage if include_stream_usage is not None else base_url is None
+        )
 
     async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
         messages = [_message_payload(message) for message in request.messages]
@@ -40,8 +45,9 @@ class OpenAIModel:
             "model": self._model,
             "messages": messages,
             "stream": True,
-            "stream_options": {"include_usage": True},
         }
+        if self._include_stream_usage:
+            arguments["stream_options"] = {"include_usage": True}
         if request.tools:
             arguments["tools"] = list(request.tools)
 
