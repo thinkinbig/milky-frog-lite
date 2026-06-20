@@ -65,10 +65,11 @@ def interactive() -> None:
     )
 
 
-def _render_configuration_error() -> None:
+def _render_configuration_error(*, run_doctor_again: bool = False) -> None:
+    suffix = " again" if run_doctor_again else ""
     render_error(
         "Required model configuration is missing.",
-        hint="Set MILKY_FROG_API_KEY and MILKY_FROG_MODEL, then run doctor.",
+        hint=f"Set MILKY_FROG_API_KEY and MILKY_FROG_MODEL, then run doctor{suffix}.",
     )
 
 
@@ -96,10 +97,7 @@ def doctor() -> None:
     )
     render_diagnostics(diagnostics)
     if not settings.api_key or not settings.model:
-        render_error(
-            "Required model configuration is missing.",
-            hint="Set MILKY_FROG_API_KEY and MILKY_FROG_MODEL, then run doctor again.",
-        )
+        _render_configuration_error(run_doctor_again=True)
         raise typer.Exit(code=2)
 
 
