@@ -162,13 +162,28 @@ async def test_langfuse_run_failed_records_error_span_and_cleans_up(
     assert "run-1" not in handler._trace_ids
 
 
-def test_langfuse_finalize_flushes_client(
+@pytest.mark.asyncio
+async def test_langfuse_terminal_event_flushes_and_cleans_up(
     langfuse_handler: tuple[LangfuseHandler, FakeLangfuseClient],
 ) -> None:
     handler, client = langfuse_handler
-    handler._trace_ids["run-1"] = "trace-0"
+    registry = HandlerRegistry()
+    handler.register(registry)
+    await registry.dispatch(RunStarted(run_id="run-1", request=_run_request()))
 
-    handler.finalize("run-1")
+    result = RunResult("run-1", RunStatus.COMPLETED, "done", 1)
+    await registry.dispatch(RunCompleted(run_id="run-1", result=result))
 
     assert client.flushed == 1
     assert "run-1" not in handler._trace_ids
+
+
+@pytest.mark.asyncio
+async def test_langfuse_aclose_flushes_client(
+    langfuse_handler: tuple[LangfuseHandler, FakeLangfuseClient],
+) -> None:
+    handler, client = langfuse_handler
+
+    await handler.aclose()
+
+    assert client.flushed == 1

@@ -17,7 +17,7 @@ from milky_frog.domain import (
     StreamDone,
     TextDelta,
 )
-from milky_frog.handlers import HandlerRegistry, RunCancelled
+from milky_frog.handlers import BaseHandler, HandlerRegistry, RunCancelled
 from milky_frog.models import OpenAIModel
 from milky_frog.runtime import MilkyFrog, MissingModelConfiguration
 from milky_frog.settings import LangfuseSettings, Settings
@@ -82,6 +82,26 @@ def test_milky_frog_cancel_stops_foreground_run(
     assert len(cancelled) == 1
     store = SqliteCheckpointStore(settings.database_path)
     assert any(event.event_type == "RunCancelled" for event in store.events(result.run_id))
+
+
+def test_milky_frog_context_manager_closes_its_bundles(tmp_path: Path) -> None:
+    class SpyHandler(BaseHandler):
+        def __init__(self) -> None:
+            self.closed = 0
+
+        def register(self, registry: HandlerRegistry) -> None:
+            del registry
+
+        async def aclose(self) -> None:
+            self.closed += 1
+
+    spy = SpyHandler()
+    settings = Settings(tmp_path, "test-key", None, "test-model", _NO_LANGFUSE)
+
+    with MilkyFrog.from_settings(settings, bundles=[spy]):
+        pass
+
+    assert spy.closed == 1
 
 
 def test_milky_frog_rejects_missing_model_configuration(tmp_path: Path) -> None:

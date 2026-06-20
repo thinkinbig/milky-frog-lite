@@ -60,9 +60,17 @@ def test_no_arguments_starts_interactive_mode(monkeypatch: object, tmp_path: Pat
 
     class FakeMilkyFrog:
         @classmethod
-        def from_settings(cls, settings: object, handlers: object = None) -> FakeMilkyFrog:
-            del settings, handlers
+        def from_settings(
+            cls, settings: object, handlers: object = None, bundles: object = None
+        ) -> FakeMilkyFrog:
+            del settings, handlers, bundles
             return cls()
+
+        def __enter__(self) -> FakeMilkyFrog:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            pass
 
         def run(self, task: str, workspace: Path) -> RunResult:
             assert workspace.is_dir()
