@@ -9,11 +9,14 @@ import typer
 from milky_frog import __version__
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.diagnostics import CheckStatus, Diagnostic
+from milky_frog.handlers import HandlerRegistry, OnModelChunk, OnModelReasoning
 from milky_frog.project import CONFIG_FILENAME, CONFIG_TEMPLATE, PROJECT_DIRNAME
 from milky_frog.runtime import MilkyFrog, MissingModelConfiguration
 from milky_frog.settings import Settings
 from milky_frog.ui import (
+    StreamingPrinter,
     render_assistant,
+    render_assistant_footer,
     render_diagnostics,
     render_error,
     render_initialized,
@@ -22,6 +25,23 @@ from milky_frog.ui import (
     run_interactive,
 )
 from milky_frog.ui.prompt import configure_history
+
+
+def _build_streaming_frog(settings: Settings) -> tuple[MilkyFrog, StreamingPrinter]:
+    """Assemble a MilkyFrog whose model text streams live to the console."""
+    printer = StreamingPrinter()
+    handlers = HandlerRegistry()
+
+    @handlers.on(OnModelReasoning)
+    async def _print_reasoning(event: OnModelReasoning) -> None:
+        printer.on_reasoning(event.chunk.content)
+
+    @handlers.on(OnModelChunk)
+    async def _print_chunk(event: OnModelChunk) -> None:
+        printer.on_delta(event.chunk.content)
+
+    return MilkyFrog.from_settings(settings, handlers), printer
+
 
 app = typer.Typer(
     no_args_is_help=False,
@@ -53,7 +73,7 @@ def interactive() -> None:
     """Run the foreground interactive task loop."""
     settings = Settings.from_environment()
     try:
-        frog = MilkyFrog.from_settings(settings)
+        frog, printer = _build_streaming_frog(settings)
     except MissingModelConfiguration:
         _render_configuration_error()
         raise typer.Exit(code=2) from None
@@ -63,6 +83,7 @@ def interactive() -> None:
         lambda task: frog.run(task, workspace),
         model=settings.model or "unknown",
         workspace=workspace,
+        printer=printer,
     )
 
 
@@ -173,14 +194,20 @@ def run(task: Annotated[str, typer.Argument()]) -> None:
     """Start one foreground Run."""
     settings = Settings.from_environment()
     try:
-        result = MilkyFrog.from_settings(settings).run(task, Path.cwd())
+        frog, printer = _build_streaming_frog(settings)
     except MissingModelConfiguration:
         _render_configuration_error()
         raise typer.Exit(code=2) from None
+    try:
+        result = frog.run(task, Path.cwd())
     except Exception as error:
+        printer.finish()
         render_error(f"{type(error).__name__}: {error}")
         raise typer.Exit(code=1) from error
-    render_assistant(result.final_message, run_id=result.run_id)
+    if printer.finish():
+        render_assistant_footer(result.run_id)
+    else:
+        render_assistant(result.final_message, run_id=result.run_id)
 
 
 @app.command()

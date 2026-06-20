@@ -7,6 +7,7 @@ from milky_frog.handlers.events import (
     OnModelReasoning,
     RunFailed,
 )
+from milky_frog.handlers.langfuse import LangfuseHandler
 from milky_frog.handlers.registry import HandlerRegistry
 
 __all__ = [
@@ -15,6 +16,7 @@ __all__ = [
     "BeforeModel",
     "BeforeTool",
     "HandlerRegistry",
+    "LangfuseHandler",
     "OnModelChunk",
     "OnModelReasoning",
     "RunFailed",

@@ -53,3 +53,15 @@ class AfterTool:
 class RunFailed:
     run_id: str
     error: Exception
+
+
+@dataclass(slots=True)
+class OnModelChunk:
+    run_id: str
+    chunk: TextDelta
+
+
+@dataclass(slots=True)
+class OnModelReasoning:
+    run_id: str
+    chunk: ReasoningDelta

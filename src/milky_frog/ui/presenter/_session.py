@@ -100,4 +100,7 @@ class _SessionSurface(_Surface):
         response.add_row(Text("●", style="bold yellow"), body)
         self.out.print(response)
         if run_id:
-            self.out.print(Text(f"  ⎿ run {run_id[:8]}", style="bright_black"))
+            self.assistant_footer(run_id)
+
+    def assistant_footer(self, run_id: str) -> None:
+        self.out.print(Text(f"  ⎿ run {run_id[:8]}", style="bright_black"))

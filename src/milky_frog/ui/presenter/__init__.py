@@ -39,12 +39,14 @@ render_interactive_welcome = _default.welcome
 render_interactive_statusbar = _default.statusbar
 render_interactive_help = _default.help
 render_assistant = _default.assistant
+render_assistant_footer = _default.assistant_footer
 render_error = _default.error
 render_initialized = _default.initialized
 
 __all__ = [
     "Presenter",
     "render_assistant",
+    "render_assistant_footer",
     "render_diagnostics",
     "render_error",
     "render_initialized",
