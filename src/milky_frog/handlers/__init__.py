@@ -3,6 +3,8 @@ from milky_frog.handlers.events import (
     AfterTool,
     BeforeModel,
     BeforeTool,
+    OnModelChunk,
+    OnModelReasoning,
     RunFailed,
 )
 from milky_frog.handlers.registry import HandlerRegistry
@@ -13,5 +15,7 @@ __all__ = [
     "BeforeModel",
     "BeforeTool",
     "HandlerRegistry",
+    "OnModelChunk",
+    "OnModelReasoning",
     "RunFailed",
 ]
