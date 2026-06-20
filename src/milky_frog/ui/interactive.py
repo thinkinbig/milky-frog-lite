@@ -7,12 +7,14 @@ from milky_frog.domain import RunResult
 from milky_frog.ui.console import console
 from milky_frog.ui.presenter import (
     render_assistant,
+    render_assistant_footer,
     render_error,
     render_interactive_help,
     render_interactive_statusbar,
     render_interactive_welcome,
 )
 from milky_frog.ui.prompt import prompt_in_box
+from milky_frog.ui.streaming import StreamingPrinter
 
 
 def run_interactive(
@@ -20,6 +22,7 @@ def run_interactive(
     *,
     model: str,
     workspace: Path,
+    printer: StreamingPrinter,
 ) -> None:
     """Own one foreground Terminal UI interaction loop."""
     render_interactive_welcome(model=model, workspace=workspace)
@@ -44,21 +47,20 @@ def run_interactive(
 
         render_interactive_statusbar(model=model, workspace=workspace, state="working")
         try:
-            with console.status(
-                "[yellow]Milky Frog is thinking…[/]",
-                spinner="dots",
-                spinner_style="yellow",
-            ):
-                result = execute(task)
+            result = execute(task)
         except KeyboardInterrupt:
-            console.print()
+            printer.finish()
             render_error(
                 "Cancelled the current task.",
                 hint="Press Ctrl+C again at the prompt to exit.",
             )
             continue
         except Exception as error:
+            printer.finish()
             render_error(f"{type(error).__name__}: {error}")
             continue
-        render_assistant(result.final_message, run_id=result.run_id)
+        if printer.finish():
+            render_assistant_footer(result.run_id)
+        else:
+            render_assistant(result.final_message, run_id=result.run_id)
         console.print()
