@@ -60,7 +60,7 @@ class Harness:
     async def run(self, run_request: RunRequest) -> RunResult:
         run_id = uuid4().hex
         workspace = run_request.workspace.resolve(strict=True)
-        model_calls = 0
+        completed_model_calls = 0
         self._checkpoints.create_run(run_id, workspace)
         self._checkpoints.append(
             run_id,
@@ -77,9 +77,8 @@ class Harness:
 
         try:
             for model_call in range(1, run_request.max_model_calls + 1):
-                model_calls = model_call
                 if self._should_cancel(run_request):
-                    return await self._finish_cancelled(run_id, "cancelled", model_call - 1)
+                    return await self._finish_cancelled(run_id, "cancelled", completed_model_calls)
                 request = ModelRequest(tuple(messages), self._tools.schemas())
                 before_model = BeforeModel(run_id=run_id, request=request)
                 await self._handlers.dispatch(before_model)
@@ -115,6 +114,7 @@ class Harness:
                 messages.append(
                     Message(MessageRole.ASSISTANT, response.content, response.tool_calls)
                 )
+                completed_model_calls = model_call
 
                 if not response.tool_calls:
                     result = RunResult(run_id, RunStatus.COMPLETED, response.content, model_call)
@@ -128,7 +128,9 @@ class Harness:
 
                 for call in response.tool_calls:
                     if self._should_cancel(run_request):
-                        return await self._finish_cancelled(run_id, "cancelled", model_call)
+                        return await self._finish_cancelled(
+                            run_id, "cancelled", completed_model_calls
+                        )
                     tool_result = await self._execute_tool(run_id, workspace, call)
                     messages.append(
                         Message(
@@ -147,7 +149,10 @@ class Harness:
             )
             self._checkpoints.append(
                 run_id,
-                RunEvent("RunPaused", {"reason": message}),
+                RunEvent(
+                    "RunPaused",
+                    {"reason": message, "model_calls": run_request.max_model_calls},
+                ),
                 RunStatus.PAUSED_LIMIT,
             )
             await self._handlers.dispatch(
@@ -160,14 +165,16 @@ class Harness:
             )
             return result
         except asyncio.CancelledError:
-            return await self._finish_cancelled(run_id, "cancelled", model_calls)
+            if self._should_cancel(run_request):
+                return await self._finish_cancelled(run_id, "cancelled", completed_model_calls)
+            raise
         except Exception as error:
-            await self._handlers.dispatch(RunFailed(run_id=run_id, error=error))
             self._checkpoints.append(
                 run_id,
                 RunEvent("RunFailed", {"error_type": type(error).__name__, "message": str(error)}),
                 RunStatus.FAILED,
             )
+            await self._handlers.dispatch(RunFailed(run_id=run_id, error=error))
             raise
 
     async def _consume_stream(
@@ -218,6 +225,7 @@ class Harness:
         if isinstance(block, BlockTool):
             result = ToolResult(block.reason, is_error=True)
         else:
+            # Cooperative cancellation is not polled during tool execution (MVP).
             tool = self._tools.get(call.name)
             input_model = tool.input_model.model_validate(call.arguments)
             try:
@@ -246,12 +254,12 @@ class Harness:
         return run_request.cancellation is not None and run_request.cancellation.is_cancelled
 
     async def _finish_cancelled(self, run_id: str, reason: str, model_calls: int) -> RunResult:
-        await self._handlers.dispatch(
-            RunCancelled(run_id=run_id, reason=reason, model_calls=model_calls)
-        )
         self._checkpoints.append(
             run_id,
-            RunEvent("RunCancelled", {"reason": reason}),
+            RunEvent("RunCancelled", {"reason": reason, "model_calls": model_calls}),
             RunStatus.CANCELLED,
+        )
+        await self._handlers.dispatch(
+            RunCancelled(run_id=run_id, reason=reason, model_calls=model_calls)
         )
         return RunResult(run_id, RunStatus.CANCELLED, reason, model_calls)

@@ -84,6 +84,7 @@ def interactive() -> None:
         model=settings.model or "unknown",
         workspace=workspace,
         printer=printer,
+        cancel=frog.cancel,
     )
 
 

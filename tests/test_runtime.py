@@ -1,12 +1,23 @@
 from __future__ import annotations
 
+import asyncio
+import threading
+import time
 from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
 
 from milky_frog.checkpoint import SqliteCheckpointStore
-from milky_frog.domain import ModelChunk, ModelRequest, ModelResponse, RunStatus, StreamDone
+from milky_frog.domain import (
+    ModelChunk,
+    ModelRequest,
+    ModelResponse,
+    RunStatus,
+    StreamDone,
+    TextDelta,
+)
+from milky_frog.handlers import HandlerRegistry, RunCancelled
 from milky_frog.models import OpenAIModel
 from milky_frog.runtime import MilkyFrog, MissingModelConfiguration
 from milky_frog.settings import LangfuseSettings, Settings
@@ -36,6 +47,41 @@ def test_milky_frog_runs_through_configured_runtime(
     assert requests[0].messages[0].role.value == "system"
     assert requests[0].messages[1].content == "build it"
     assert SqliteCheckpointStore(settings.database_path).get_run(result.run_id) is not None
+
+
+def test_milky_frog_cancel_stops_foreground_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    async def slow_stream(self: OpenAIModel, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        del self, request
+        yield TextDelta("partial")
+        await asyncio.sleep(0.05)
+        yield StreamDone(ModelResponse(content="done"))
+
+    monkeypatch.setattr(OpenAIModel, "stream", slow_stream)
+    settings = Settings(tmp_path, "test-key", "https://example.test", "test-model", _NO_LANGFUSE)
+    registry = HandlerRegistry()
+    cancelled: list[RunCancelled] = []
+
+    @registry.on(RunCancelled)
+    async def record(event: RunCancelled) -> None:
+        cancelled.append(event)
+
+    frog = MilkyFrog.from_settings(settings, handlers=registry)
+
+    def request_cancel() -> None:
+        time.sleep(0.01)
+        frog.cancel()
+
+    cancel_thread = threading.Thread(target=request_cancel)
+    cancel_thread.start()
+    result = frog.run("slow task", tmp_path)
+    cancel_thread.join(timeout=5.0)
+
+    assert result.status is RunStatus.CANCELLED
+    assert len(cancelled) == 1
+    store = SqliteCheckpointStore(settings.database_path)
+    assert any(event.event_type == "RunCancelled" for event in store.events(result.run_id))
 
 
 def test_milky_frog_rejects_missing_model_configuration(tmp_path: Path) -> None:

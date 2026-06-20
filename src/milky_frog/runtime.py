@@ -72,6 +72,8 @@ class MilkyFrog:
         previous_sigint = signal.getsignal(signal.SIGINT)
 
         def _request_cancel(signum: int, frame: FrameType | None) -> None:
+            # First Ctrl+C requests cooperative cancel. A second Ctrl+C restores
+            # the previous handler and may force-abort the foreground Run.
             if self._cancellation is not None and not self._cancellation.is_cancelled:
                 self._cancellation.cancel()
                 return

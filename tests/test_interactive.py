@@ -24,6 +24,77 @@ class FakeConsole:
         pass
 
 
+def test_interactive_keyboard_interrupt_requests_cancel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cancelled = False
+    prompts = iter(["build it"])
+
+    def prompt() -> str:
+        try:
+            return next(prompts)
+        except StopIteration:
+            raise EOFError from None
+
+    def execute(_task: str) -> RunResult:
+        raise KeyboardInterrupt
+
+    def cancel() -> None:
+        nonlocal cancelled
+        cancelled = True
+
+    monkeypatch.setattr(interactive, "prompt_in_box", prompt)
+    monkeypatch.setattr(interactive, "console", FakeConsole())
+    monkeypatch.setattr(interactive, "render_interactive_welcome", lambda **kwargs: None)
+    monkeypatch.setattr(interactive, "render_interactive_statusbar", lambda **kwargs: None)
+    monkeypatch.setattr(interactive, "render_error", lambda *args, **kwargs: None)
+
+    interactive.run_interactive(
+        execute,
+        model="test-model",
+        workspace=Path("/workspace"),
+        printer=interactive.StreamingPrinter(),
+        cancel=cancel,
+    )
+
+    assert cancelled is True
+
+
+def test_interactive_cooperative_cancel_shows_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prompts = iter(["build it"])
+    errors: list[str] = []
+
+    def prompt() -> str:
+        try:
+            return next(prompts)
+        except StopIteration:
+            raise EOFError from None
+
+    def execute(_task: str) -> RunResult:
+        return RunResult("run-1", RunStatus.CANCELLED, "cancelled", 0)
+
+    monkeypatch.setattr(interactive, "prompt_in_box", prompt)
+    monkeypatch.setattr(interactive, "console", FakeConsole())
+    monkeypatch.setattr(interactive, "render_interactive_welcome", lambda **kwargs: None)
+    monkeypatch.setattr(interactive, "render_interactive_statusbar", lambda **kwargs: None)
+    monkeypatch.setattr(
+        interactive,
+        "render_error",
+        lambda message, **kwargs: errors.append(message),
+    )
+
+    interactive.run_interactive(
+        execute,
+        model="test-model",
+        workspace=Path("/workspace"),
+        printer=interactive.StreamingPrinter(),
+    )
+
+    assert errors == ["Cancelled the current task."]
+
+
 def test_interactive_terminal_owns_commands_and_run_turn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

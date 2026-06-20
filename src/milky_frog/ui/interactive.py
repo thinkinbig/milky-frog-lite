@@ -23,6 +23,7 @@ def run_interactive(
     model: str,
     workspace: Path,
     printer: StreamingPrinter,
+    cancel: Callable[[], None] | None = None,
 ) -> None:
     """Own one foreground Terminal UI interaction loop."""
     render_interactive_welcome(model=model, workspace=workspace)
@@ -49,6 +50,8 @@ def run_interactive(
         try:
             result = execute(task)
         except KeyboardInterrupt:
+            if cancel is not None:
+                cancel()
             printer.finish()
             render_error(
                 "Cancelled the current task.",

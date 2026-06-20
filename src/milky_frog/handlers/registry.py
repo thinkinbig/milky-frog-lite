@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -9,6 +10,8 @@ from milky_frog.domain import ModelRequest, ToolResult
 from milky_frog.handlers.base import BaseEvent
 from milky_frog.handlers.events import AfterTool, BeforeModel, BeforeTool
 from milky_frog.handlers.results import BlockTool, PatchToolResult, TransformContext
+
+logger = logging.getLogger(__name__)
 
 EventT = TypeVar("EventT", bound=BaseEvent)
 ObserveHandler = Callable[[EventT], Awaitable[None]]
@@ -98,10 +101,19 @@ class HandlerRegistry:
         self._next_order += 1
         return registration
 
+    @staticmethod
+    def _warn_ignored_intercept_outcome(outcome: object, event: BaseEvent, expected: str) -> None:
+        logger.warning(
+            "Intercept handler returned %r for %s; outcome ignored (expected %s)",
+            outcome,
+            type(event).__name__,
+            expected,
+        )
+
     async def _dispatch_observe(self, event: BaseEvent) -> None:
-        for registration in self._sorted(self._observe[type(event)]):
-            await registration.handler(event)
-        for registration in self._sorted(self._wildcard_observe):
+        registrations = list(self._observe[type(event)])
+        registrations.extend(self._wildcard_observe)
+        for registration in self._sorted(registrations):
             await registration.handler(event)
 
     async def _dispatch_intercept(self, event: BaseEvent) -> InterceptOutcome | None:
@@ -113,7 +125,13 @@ class HandlerRegistry:
         if isinstance(event, AfterTool):
             return await self._intercept_after_tool(registrations, event)
         for registration in registrations:
-            await registration.handler(event)
+            outcome = await registration.handler(event)
+            if outcome is not None:
+                logger.warning(
+                    "Intercept handler returned %r for %s; outcome ignored",
+                    outcome,
+                    type(event).__name__,
+                )
         return None
 
     async def _intercept_before_tool(
@@ -123,41 +141,40 @@ class HandlerRegistry:
             outcome = await registration.handler(event)
             if isinstance(outcome, BlockTool):
                 return outcome
+            if outcome is not None:
+                self._warn_ignored_intercept_outcome(outcome, event, "BlockTool")
         return None
 
     async def _intercept_before_model(
         self, registrations: list[_Registration], event: BeforeModel
     ) -> TransformContext | None:
-        messages = event.request.messages
-        changed = False
+        last_outcome: TransformContext | None = None
         for registration in registrations:
             outcome = await registration.handler(event)
             if isinstance(outcome, TransformContext):
-                messages = outcome.messages
-                changed = True
-        if not changed:
-            return None
-        return TransformContext(messages)
+                event.request = ModelRequest(outcome.messages, event.request.tools)
+                last_outcome = TransformContext(event.request.messages)
+            elif outcome is not None:
+                self._warn_ignored_intercept_outcome(outcome, event, "TransformContext")
+        return last_outcome
 
     async def _intercept_after_tool(
         self, registrations: list[_Registration], event: AfterTool
     ) -> PatchToolResult | None:
-        content = event.result.content
-        is_error = event.result.is_error
-        changed = False
+        last_outcome: PatchToolResult | None = None
         for registration in registrations:
             outcome = await registration.handler(event)
-            if not isinstance(outcome, PatchToolResult):
-                continue
-            if outcome.content is not None:
-                content = outcome.content
-                changed = True
-            if outcome.is_error is not None:
-                is_error = outcome.is_error
-                changed = True
-        if not changed:
-            return None
-        return PatchToolResult(content=content, is_error=is_error)
+            if isinstance(outcome, PatchToolResult):
+                content = outcome.content if outcome.content is not None else event.result.content
+                is_error = (
+                    outcome.is_error if outcome.is_error is not None else event.result.is_error
+                )
+                if outcome.content is not None or outcome.is_error is not None:
+                    event.result = ToolResult(content, is_error)
+                    last_outcome = PatchToolResult(content=content, is_error=is_error)
+            elif outcome is not None:
+                self._warn_ignored_intercept_outcome(outcome, event, "PatchToolResult")
+        return last_outcome
 
     @staticmethod
     def _sorted(registrations: list[_Registration]) -> list[_Registration]:

@@ -26,6 +26,7 @@ from milky_frog.handlers import (
     HandlerRegistry,
     PatchToolResult,
     RunCancelled,
+    RunFailed,
     RunPaused,
     TransformContext,
 )
@@ -358,5 +359,89 @@ async def test_harness_cancellation_stops_run(tmp_path: Path) -> None:
     assert result.status is RunStatus.CANCELLED
     assert len(cancelled) == 1
     assert cancelled[0].reason == "cancelled"
+    assert cancelled[0].model_calls == 0
+    assert result.model_calls == 0
     store = SqliteCheckpointStore(tmp_path / "state.db")
     assert any(event.event_type == "RunCancelled" for event in store.events(result.run_id))
+
+
+@pytest.mark.asyncio
+async def test_run_cancelled_handler_runs_after_checkpoint(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    registry = HandlerRegistry()
+    checkpoint_seen = False
+
+    @registry.on(RunCancelled)
+    async def record(event: RunCancelled) -> None:
+        nonlocal checkpoint_seen
+        checkpoint_seen = any(
+            item.event_type == "RunCancelled" for item in store.events(event.run_id)
+        )
+
+    cancellation = RunCancellation()
+    harness = Harness(
+        model=SlowStreamModel(),
+        tools=ToolRegistry(),
+        checkpoints=store,
+        handlers=registry,
+    )
+
+    async def run_and_cancel() -> RunResult:
+        task = asyncio.create_task(
+            harness.run(RunRequest("slow", tmp_path, cancellation=cancellation))
+        )
+        await asyncio.sleep(0.01)
+        cancellation.cancel()
+        return await task
+
+    await run_and_cancel()
+
+    assert checkpoint_seen is True
+
+
+@pytest.mark.asyncio
+async def test_harness_external_cancellation_reraises(tmp_path: Path) -> None:
+    harness = Harness(
+        model=SlowStreamModel(),
+        tools=ToolRegistry(),
+        checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
+        handlers=HandlerRegistry(),
+    )
+
+    task = asyncio.create_task(harness.run(RunRequest("slow", tmp_path)))
+    await asyncio.sleep(0.01)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_harness_dispatches_run_failed_event(tmp_path: Path) -> None:
+    registry = HandlerRegistry()
+    failed: list[RunFailed] = []
+
+    @registry.on(RunFailed)
+    async def record(event: RunFailed) -> None:
+        failed.append(event)
+
+    class BrokenModel:
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            del request
+            raise RuntimeError("boom")
+            yield StreamDone(ModelResponse())  # pragma: no cover
+
+    harness = Harness(
+        model=BrokenModel(),
+        tools=ToolRegistry(),
+        checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
+        handlers=registry,
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await harness.run(RunRequest("fail", tmp_path))
+
+    assert len(failed) == 1
+    assert isinstance(failed[0].error, RuntimeError)
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    assert any(event.event_type == "RunFailed" for event in store.events(failed[0].run_id))
