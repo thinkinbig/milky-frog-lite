@@ -34,6 +34,10 @@ class MilkyFrog:
         return cls(settings)
 
     def run(self, prompt: str, workspace: Path) -> RunResult:
+        """Run one goal synchronously.
+
+        This uses `asyncio.run()`, so it must not be called when an event loop is already running.
+        """
         harness = Harness(
             model=OpenAIModel(
                 api_key=self._api_key,
