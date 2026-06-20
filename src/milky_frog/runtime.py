@@ -24,27 +24,24 @@ class MilkyFrog:
         model = settings.model
         if not api_key or not model:
             raise MissingModelConfiguration("model configuration is missing")
-        self._api_key = api_key
-        self._model = model
-        self._base_url = settings.base_url
-        self._database_path = settings.database_path
+        self._harness = Harness(
+            model=OpenAIModel(api_key=api_key, model=model, base_url=settings.base_url),
+            tools=ToolRegistry(),
+            checkpoints=SqliteCheckpointStore(settings.database_path),
+            handlers=HandlerRegistry(),
+        )
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     @classmethod
     def from_settings(cls, settings: Settings) -> MilkyFrog:
         return cls(settings)
+
     def run(self, prompt: str, workspace: Path) -> RunResult:
         """Run one goal synchronously.
 
-        This uses `asyncio.run()`, so it must not be called when an event loop is already running.
+        Successive calls reuse a single event loop (and the model's connection
+        pool), so this must not be called while another event loop is running.
         """
-        harness = Harness(
-            model=OpenAIModel(
-                api_key=self._api_key,
-                model=self._model,
-                base_url=self._base_url,
-            ),
-            tools=ToolRegistry(),
-            checkpoints=SqliteCheckpointStore(self._database_path),
-            handlers=HandlerRegistry(),
-        )
-        return asyncio.run(harness.run(RunRequest(prompt, workspace)))
+        if self._loop is None:
+            self._loop = asyncio.new_event_loop()
+        return self._loop.run_until_complete(self._harness.run(RunRequest(prompt, workspace)))
