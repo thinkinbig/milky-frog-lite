@@ -15,10 +15,9 @@ runner = CliRunner()
 
 
 @pytest.fixture(autouse=True)
-def _isolated_cwd(tmp_path_factory: pytest.TempPathFactory,
- monkeypatch: pytest.MonkeyPatch) -> None:
-
-
+def _isolated_cwd(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Run each CLI test in an empty cwd so a developer's .env never leaks in.
 
     Settings.from_environment() reads ``<cwd>/.env``; without isolation the
