@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+
+from dotenv import dotenv_values
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,7 +21,7 @@ class Settings:
 
     @classmethod
     def from_environment(cls) -> Settings:
-        values = _load_dotenv(Path.cwd() / ".env")
+        values = dotenv_values(Path.cwd() / ".env")
         home = Path(_get("MILKY_FROG_HOME", values) or (Path.home() / ".milky-frog"))
         return cls(
             home=home.expanduser(),
@@ -28,44 +31,12 @@ class Settings:
         )
 
 
-def _get(key: str, dotenv: dict[str, str]) -> str | None:
+def _get(key: str, dotenv: Mapping[str, str | None]) -> str | None:
     """Resolve a setting, preferring the real environment over the .env file.
 
     A variable present in the real environment wins even when set to an empty
     string, so an explicit empty override falls back to defaults instead of
     being silently replaced by a stale ``.env`` value.
     """
-    value = os.environ[key] if key in os.environ else dotenv.get(key, "")
+    value = os.environ[key] if key in os.environ else dotenv.get(key)
     return value or None
-
-
-def _load_dotenv(path: Path) -> dict[str, str]:
-    """Parse a ``.env`` file into a mapping; missing files yield an empty dict.
-
-    Supports ``KEY=value`` lines, ``export KEY=value``, ``#`` comments, blank
-    lines, and surrounding single/double quotes. Lines that do not parse are
-    skipped rather than raising, so a malformed entry never blocks startup.
-    """
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return {}
-
-    values: dict[str, str] = {}
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if stripped.startswith("export "):
-            stripped = stripped[len("export ") :].lstrip()
-        key, sep, value = stripped.partition("=")
-        if not sep:
-            continue
-        key = key.strip()
-        if not key:
-            continue
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
-            value = value[1:-1]
-        values[key] = value
-    return values
