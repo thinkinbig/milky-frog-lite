@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import JsonValue
 
-from milky_frog.tools.base import Tool
+from milky_frog.harness.tools.base import Tool
 
 
 class UnknownToolError(LookupError):

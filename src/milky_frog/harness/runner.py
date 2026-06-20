@@ -11,9 +11,11 @@ from milky_frog.domain import (
     Message,
     MessageRole,
     ModelRequest,
+    ModelResponse,
     RunRequest,
     RunResult,
     RunStatus,
+    StreamDone,
     ToolCall,
 )
 from milky_frog.handlers import (
@@ -25,8 +27,8 @@ from milky_frog.handlers import (
     RunFailed,
 )
 from milky_frog.harness.prompt import system_prompt
+from milky_frog.harness.tools import ToolContext, ToolRegistry, ToolResult
 from milky_frog.models import Model
-from milky_frog.tools import ToolContext, ToolRegistry, ToolResult
 
 
 class Harness:
@@ -64,7 +66,7 @@ class Harness:
             for model_call in range(1, run_request.max_model_calls + 1):
                 request = ModelRequest(tuple(messages), self._tools.schemas())
                 await self._handlers.dispatch(BeforeModel(run_id, request))
-                response = await self._model.complete(request)
+                response = await self._consume_model_stream(request)
                 await self._handlers.dispatch(AfterModel(run_id, request, response))
                 self._checkpoints.append(
                     run_id,
@@ -126,6 +128,16 @@ class Harness:
                 RunStatus.FAILED,
             )
             raise
+
+    async def _consume_model_stream(self, request: ModelRequest) -> ModelResponse:
+        response: ModelResponse | None = None
+        async for chunk in self._model.stream(request):
+            if isinstance(chunk, StreamDone):
+                response = chunk.response
+                break
+        if response is None:
+            raise RuntimeError("model stream ended without StreamDone")
+        return response
 
     async def _execute_tool(self, run_id: str, workspace: Path, call: ToolCall) -> ToolResult:
         await self._handlers.dispatch(BeforeTool(run_id, call))
