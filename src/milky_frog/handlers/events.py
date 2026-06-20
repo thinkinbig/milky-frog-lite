@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from milky_frog.domain import ModelRequest, ModelResponse, ToolCall
-from milky_frog.tools import ToolResult
+
+if TYPE_CHECKING:
+    from milky_frog.harness.tools import ToolResult
 
 
 @dataclass(slots=True)

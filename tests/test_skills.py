@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from milky_frog.skills import SkillCatalog
+from milky_frog.harness.skills import SkillCatalog
 
 
 def _write_skill(directory: Path, name: str, description: str, instructions: str) -> None:
