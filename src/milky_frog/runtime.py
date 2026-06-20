@@ -61,6 +61,11 @@ class MilkyFrog:
             if self._langfuse:
                 self._langfuse.flush()
             raise
+        finally:
+            # Drain async-generator cleanup tasks (athrow GeneratorExit) that
+            # the OpenAI stream schedules after the run completes. Without this
+            # the reused loop leaves them pending and Python prints a warning.
+            self._loop.run_until_complete(asyncio.sleep(0))
         if self._langfuse:
             self._langfuse.finalize(result.run_id)
         return result

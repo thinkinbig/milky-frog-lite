@@ -9,6 +9,7 @@ from rich.text import Text
 
 from milky_frog.checkpoint import RunEvent, StoredRun
 from milky_frog.domain import RunStatus
+from milky_frog.ui.console import get_box_width
 from milky_frog.ui.presenter._base import _Surface
 
 _RUN_STYLES = {
@@ -60,10 +61,13 @@ class _RunsSurface(_Surface):
             for event in events:
                 sequence = "—" if event.sequence is None else str(event.sequence)
                 event_table.add_row(sequence, event.event_type)
-            body = Group(Panel(summary, title="Run summary", expand=False), event_table)
+            body = Group(
+                Panel(summary, title="Run summary", expand=False, width=get_box_width()),
+                event_table,
+            )
         else:
             body = Group(
-                Panel(summary, title="Run summary", expand=False),
+                Panel(summary, title="Run summary", expand=False, width=get_box_width()),
                 Text("No checkpoint events.", style="dim"),
             )
         self.out.print(body)
