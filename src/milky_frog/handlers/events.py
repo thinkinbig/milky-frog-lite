@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from milky_frog.domain import ModelRequest, ModelResponse, ToolCall
+from milky_frog.domain import ModelRequest, ModelResponse, ReasoningDelta, TextDelta, ToolCall
 
 if TYPE_CHECKING:
     from milky_frog.harness.tools import ToolResult
@@ -39,3 +39,15 @@ class AfterTool:
 class RunFailed:
     run_id: str
     error: Exception
+
+
+@dataclass(slots=True)
+class OnModelChunk:
+    run_id: str
+    chunk: TextDelta
+
+
+@dataclass(slots=True)
+class OnModelReasoning:
+    run_id: str
+    chunk: ReasoningDelta
