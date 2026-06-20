@@ -1,11 +1,15 @@
 # Milky Frog
 
+<p align="center">
+  <img src="assets/milky-frog.png" width="320" alt="Pixel-art Milky Frog mascot">
+</p>
+
 Milky Frog (Chinese: 奶蛙) is a lightweight local coding-agent CLI. It runs one foreground task at a time,
 coordinates model and Tool calls through a linear Harness, and persists an append-only Checkpoint
 so interrupted Runs can eventually be resumed safely.
 
-> The repository currently contains the executable framework skeleton. `doctor`, `init`, `runs`,
-> and `show` work; model-provider wiring, built-in Tools, and Checkpoint replay are the next slices.
+> The repository currently provides OpenAI-compatible foreground Runs and an interactive task loop.
+> Built-in Tools, multi-turn conversation state, and Checkpoint replay are the next slices.
 
 ## Design goals
 
@@ -30,6 +34,7 @@ language and trade-offs.
 uv sync
 uv run milky-frog --help
 uv run milky-frog doctor
+uv run milky-frog
 ```
 
 Model configuration is read from environment variables:
@@ -52,11 +57,12 @@ commit; credentials must remain in environment variables.
 ## Available commands
 
 ```text
+milky-frog                # interactive task loop
 milky-frog doctor
 milky-frog init [WORKSPACE]
 milky-frog runs
 milky-frog show RUN_ID [--json]
-milky-frog run TASK       # interface present; provider wiring pending
+milky-frog run TASK
 milky-frog resume RUN_ID  # interface present; replay pending
 ```
 
@@ -70,6 +76,7 @@ src/milky_frog/
 ├── harness/     # linear Run coordinator
 ├── memory/      # cross-Run project knowledge seam
 ├── models/      # model-provider seam
+├── runtime.py   # configured Run startup and execution
 ├── sandbox/     # Local Sandbox policy
 ├── skills/      # progressive Skill discovery and loading
 ├── tools/       # Tool interface and registry
@@ -102,8 +109,8 @@ MIT
 奶蛙是一个轻量级本地代码 Agent CLI。它每次以前台方式执行一个任务，通过线性
 Harness 协调模型与 Tool 调用，并将 Checkpoint 保存为仅追加事件，使中断的 Run 最终可以安全恢复。
 
-> 当前仓库提供可执行、可测试的框架骨架。`doctor`、`init`、`runs` 和 `show` 已可使用；模型适配、
-> 内置 Tool 与 Checkpoint 恢复将在后续纵切中实现。
+> 当前仓库已支持兼容 OpenAI 的前台 Run 与交互式任务循环。内置 Tool、多轮上下文和
+> Checkpoint 恢复将在后续纵切中实现。
 
 ## 设计目标
 
@@ -127,6 +134,7 @@ Harness 协调模型与 Tool 调用，并将 Checkpoint 保存为仅追加事件
 uv sync
 uv run milky-frog --help
 uv run milky-frog doctor
+uv run milky-frog
 ```
 
 模型配置通过环境变量提供：

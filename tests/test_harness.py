@@ -38,6 +38,16 @@ class FakeModel:
         return ModelResponse(content="done")
 
 
+class IdentityCapturingModel:
+    async def complete(self, request: ModelRequest) -> ModelResponse:
+        assert request.messages[0].role.value == "system"
+        assert "Milky Frog" in request.messages[0].content
+        assert "奶蛙" in request.messages[0].content
+        assert request.messages[1].role.value == "user"
+        assert request.messages[1].content == "Who are you?"
+        return ModelResponse(content="I am Milky Frog.")
+
+
 @pytest.mark.asyncio
 async def test_harness_runs_tool_loop_and_persists_events(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
@@ -61,3 +71,17 @@ async def test_harness_runs_tool_loop_and_persists_events(tmp_path: Path) -> Non
         "ModelMessageCompleted",
         "RunCompleted",
     ]
+
+
+@pytest.mark.asyncio
+async def test_harness_injects_milky_frog_identity_before_user_prompt(tmp_path: Path) -> None:
+    harness = Harness(
+        model=IdentityCapturingModel(),
+        tools=ToolRegistry(),
+        checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
+        handlers=HandlerRegistry(),
+    )
+
+    result = await harness.run(RunRequest("Who are you?", tmp_path))
+
+    assert result.final_message == "I am Milky Frog."

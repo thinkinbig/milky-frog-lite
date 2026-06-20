@@ -44,6 +44,10 @@ _Avoid_: Plugin, Tool
 A policy boundary that constrains structured file operations and requires approval for shell commands, but does not isolate untrusted code from the host.
 _Avoid_: Container, secure sandbox
 
+**Terminal UI**:
+The consistent command-line presentation of Run state, results, errors, and empty states using styled terminal output. It is not a full-screen interactive application.
+_Avoid_: TUI, web UI, frontend
+
 ---
 
 # 奶蛙（Milky Frog）
@@ -91,3 +95,7 @@ _避免使用_：插件、Tool
 **Local Sandbox（本地沙箱）**：
 一种策略边界，用于限制结构化文件操作并要求用户批准 shell 命令，但不将不可信代码与宿主机隔离。
 _避免使用_：容器、安全沙箱
+
+**Terminal UI（终端界面）**：
+使用带样式的终端输出，一致地呈现 Run 状态、结果、错误和空状态；它不是全屏交互式应用。
+_避免使用_：TUI、Web UI、前端

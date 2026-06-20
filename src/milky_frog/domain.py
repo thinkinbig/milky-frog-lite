@@ -52,11 +52,14 @@ class ModelResponse:
     usage: dict[str, int] = field(default_factory=dict)
 
 
+DEFAULT_MAX_MODEL_CALLS = 30
+
+
 @dataclass(frozen=True, slots=True)
 class RunRequest:
     prompt: str
     workspace: Path
-    max_model_calls: int = 30
+    max_model_calls: int = DEFAULT_MAX_MODEL_CALLS
 
 
 @dataclass(frozen=True, slots=True)

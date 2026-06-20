@@ -5,14 +5,29 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from rich.table import Table
 
 from milky_frog import __version__
 from milky_frog.checkpoint import SqliteCheckpointStore
+from milky_frog.project import CONFIG_FILENAME, CONFIG_TEMPLATE, PROJECT_DIRNAME
+from milky_frog.runtime import MilkyFrog, MissingModelConfiguration
 from milky_frog.settings import Settings
-from milky_frog.ui import console
+from milky_frog.ui import (
+    CheckStatus,
+    Diagnostic,
+    render_assistant,
+    render_diagnostics,
+    render_error,
+    render_initialized,
+    render_run,
+    render_runs,
+    run_interactive,
+)
 
-app = typer.Typer(no_args_is_help=True, help="A lightweight local coding agent.")
+app = typer.Typer(
+    no_args_is_help=False,
+    rich_markup_mode="rich",
+    help="[bold yellow]MILKY FROG[/] · 奶蛙\n\nA lightweight local coding agent.",
+)
 
 
 def _version_callback(value: bool) -> None:
@@ -21,33 +36,68 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def main(
+    context: typer.Context,
     version: Annotated[
         bool | None,
         typer.Option("--version", callback=_version_callback, is_eager=True),
     ] = None,
 ) -> None:
     """Milky Frog local coding agent."""
+    if context.invoked_subcommand is None:
+        interactive()
+
+
+def interactive() -> None:
+    """Run the foreground interactive task loop."""
+    settings = Settings.from_environment()
+    try:
+        frog = MilkyFrog.from_settings(settings)
+    except MissingModelConfiguration:
+        _render_configuration_error()
+        raise typer.Exit(code=2) from None
+    workspace = Path.cwd()
+    run_interactive(
+        lambda task: frog.run(task, workspace),
+        model=settings.model or "unknown",
+        workspace=workspace,
+    )
+
+
+def _render_configuration_error(*, run_doctor_again: bool = False) -> None:
+    suffix = " again" if run_doctor_again else ""
+    render_error(
+        "Required model configuration is missing.",
+        hint=f"Set MILKY_FROG_API_KEY and MILKY_FROG_MODEL, then run doctor{suffix}.",
+    )
 
 
 @app.command()
 def doctor() -> None:
     """Check local configuration without making a model request."""
     settings = Settings.from_environment()
-    checks = {
-        "state directory": str(settings.home),
-        "API key": "configured" if settings.api_key else "missing",
-        "base URL": settings.base_url or "provider default",
-        "model": settings.model or "missing",
-    }
-    table = Table(title="Milky Frog doctor")
-    table.add_column("Check")
-    table.add_column("Value")
-    for name, value in checks.items():
-        table.add_row(name, value)
-    console.print(table)
+    diagnostics = (
+        Diagnostic("State directory", CheckStatus.PASS, str(settings.home)),
+        Diagnostic(
+            "API key",
+            CheckStatus.PASS if settings.api_key else CheckStatus.FAIL,
+            "configured" if settings.api_key else "missing (MILKY_FROG_API_KEY)",
+        ),
+        Diagnostic(
+            "Base URL",
+            CheckStatus.PASS if settings.base_url else CheckStatus.WARN,
+            settings.base_url or "provider default",
+        ),
+        Diagnostic(
+            "Model",
+            CheckStatus.PASS if settings.model else CheckStatus.FAIL,
+            settings.model or "missing (MILKY_FROG_MODEL)",
+        ),
+    )
+    render_diagnostics(diagnostics)
     if not settings.api_key or not settings.model:
+        _render_configuration_error(run_doctor_again=True)
         raise typer.Exit(code=2)
 
 
@@ -56,28 +106,29 @@ def initialize(
     workspace: Annotated[Path | None, typer.Argument()] = None,
 ) -> None:
     """Create declarative project configuration and Skill directories."""
-    root = (workspace or Path.cwd()).resolve(strict=True) / ".milky-frog"
-    root.mkdir(exist_ok=True)
-    (root / "skills").mkdir(exist_ok=True)
-    config = root / "config.toml"
+    root = (workspace or Path.cwd()).expanduser().resolve() / PROJECT_DIRNAME
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "skills").mkdir(exist_ok=True)
+    except OSError as error:
+        render_error(
+            f"Could not initialize workspace: {error}",
+            hint="Choose a writable directory path.",
+        )
+        raise typer.Exit(code=1) from error
+    config = root / CONFIG_FILENAME
     if config.exists():
-        console.print(f"[yellow]Already initialized:[/] {root}")
+        render_initialized(root, already_exists=True)
         return
-    config.write_text(
-        "# Project-level Milky Frog configuration.\nmax_model_calls = 30\n",
-        encoding="utf-8",
-    )
-    console.print(f"[green]Initialized:[/] {root}")
+    config.write_text(CONFIG_TEMPLATE, encoding="utf-8")
+    render_initialized(root)
 
 
 @app.command("runs")
 def list_runs() -> None:
     """List recent durable Runs."""
     store = SqliteCheckpointStore(Settings.from_environment().database_path)
-    table = Table("Run", "Status", "Workspace", "Updated")
-    for run in store.list_runs():
-        table.add_row(run.run_id, run.status, str(run.workspace), run.updated_at.isoformat())
-    console.print(table)
+    render_runs(store.list_runs())
 
 
 @app.command()
@@ -89,7 +140,7 @@ def show(
     store = SqliteCheckpointStore(Settings.from_environment().database_path)
     run = store.get_run(run_id)
     if run is None:
-        console.print(f"[red]Unknown Run:[/] {run_id}")
+        render_error(f"Unknown Run: {run_id}", hint="List available Runs with: milky-frog runs")
         raise typer.Exit(code=1)
     events = store.events(run_id)
     if as_json:
@@ -113,22 +164,30 @@ def show(
             )
         )
         return
-    console.print(f"[bold]{run.run_id}[/]  {run.status}  {run.workspace}")
-    for event in events:
-        console.print(f"{event.sequence:>4}  {event.event_type}")
+    render_run(run, events)
 
 
 @app.command()
 def run(task: Annotated[str, typer.Argument()]) -> None:
-    """Start a Run (provider wiring is the next implementation slice)."""
-    del task
-    console.print("[red]Model adapter and built-in Tools are not wired yet.[/]")
-    raise typer.Exit(code=2)
+    """Start one foreground Run."""
+    settings = Settings.from_environment()
+    try:
+        result = MilkyFrog.from_settings(settings).run(task, Path.cwd())
+    except MissingModelConfiguration:
+        _render_configuration_error()
+        raise typer.Exit(code=2) from None
+    except Exception as error:
+        render_error(f"{type(error).__name__}: {error}")
+        raise typer.Exit(code=1) from error
+    render_assistant(result.final_message, run_id=result.run_id)
 
 
 @app.command()
 def resume(run_id: Annotated[str, typer.Argument()]) -> None:
     """Resume a Run (replay is the next implementation slice)."""
     del run_id
-    console.print("[red]Checkpoint replay is not wired yet.[/]")
+    render_error(
+        "Checkpoint replay is not wired yet.",
+        hint="Inspect the Run with: milky-frog show RUN_ID",
+    )
     raise typer.Exit(code=2)
