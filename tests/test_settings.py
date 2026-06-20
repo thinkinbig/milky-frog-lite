@@ -41,6 +41,20 @@ def test_real_environment_overrides_dotenv(
     assert settings.api_key == "from-environment"
 
 
+def test_empty_real_environment_overrides_dotenv(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".env").write_text(
+        "MILKY_FROG_BASE_URL=https://stale.example\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("MILKY_FROG_BASE_URL", "")
+    monkeypatch.chdir(tmp_path)
+
+    settings = Settings.from_environment()
+
+    assert settings.base_url is None
+
+
 def test_missing_dotenv_is_not_an_error(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

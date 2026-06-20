@@ -29,8 +29,13 @@ class Settings:
 
 
 def _get(key: str, dotenv: dict[str, str]) -> str | None:
-    """Resolve a setting, preferring the real environment over the .env file."""
-    value = os.environ.get(key) or dotenv.get(key)
+    """Resolve a setting, preferring the real environment over the .env file.
+
+    A variable present in the real environment wins even when set to an empty
+    string, so an explicit empty override falls back to defaults instead of
+    being silently replaced by a stale ``.env`` value.
+    """
+    value = os.environ[key] if key in os.environ else dotenv.get(key, "")
     return value or None
 
 
