@@ -88,18 +88,6 @@ def _short_workspace(workspace: Path) -> str:
     return f"~/{relative.as_posix()}" if relative.parts else "~"
 
 
-_PROMPT_BOX_WIDTH = 92
-
-
-def render_prompt_box(*, top: bool) -> None:
-    """Draw the rounded top or bottom edge that frames the interactive input."""
-    width = min(console.size.width, _PROMPT_BOX_WIDTH)
-    if width < 4:
-        return
-    left, right = ("╭", "╮") if top else ("╰", "╯")
-    console.print(Text(left + "─" * (width - 2) + right, style="bright_black"))
-
-
 def render_interactive_statusbar(*, model: str, workspace: Path, state: str = "ready") -> None:
     status = Text("  ")
     status.append(model, style="dim")

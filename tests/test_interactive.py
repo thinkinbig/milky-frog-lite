@@ -30,7 +30,7 @@ def test_interactive_terminal_owns_commands_and_run_turn(
     inputs = iter(("/help", "build it", "/exit"))
     events: list[str] = []
 
-    monkeypatch.setattr(interactive.typer, "prompt", lambda *args, **kwargs: next(inputs))
+    monkeypatch.setattr(interactive, "prompt_in_box", lambda: next(inputs))
     monkeypatch.setattr(interactive, "console", FakeConsole())
     monkeypatch.setattr(
         interactive,

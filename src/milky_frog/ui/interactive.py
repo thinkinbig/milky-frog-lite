@@ -3,8 +3,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-import typer
-
 from milky_frog.domain import RunResult
 from milky_frog.ui.console import console
 from milky_frog.ui.presenter import (
@@ -13,14 +11,8 @@ from milky_frog.ui.presenter import (
     render_interactive_help,
     render_interactive_statusbar,
     render_interactive_welcome,
-    render_prompt_box,
 )
-
-_PROMPT = (
-    typer.style("│", fg=typer.colors.BRIGHT_BLACK)
-    + " "
-    + typer.style(">", fg=typer.colors.CYAN, bold=True)
-)
+from milky_frog.ui.prompt import prompt_in_box
 
 
 def run_interactive(
@@ -32,14 +24,10 @@ def run_interactive(
     """Own one foreground Terminal UI interaction loop."""
     render_interactive_welcome(model=model, workspace=workspace)
     while True:
-        render_prompt_box(top=True)
         try:
-            task = typer.prompt(_PROMPT, prompt_suffix=" ").strip()
-        except (typer.Abort, EOFError, KeyboardInterrupt):
-            render_prompt_box(top=False)
-            typer.echo()
+            task = prompt_in_box().strip()
+        except (EOFError, KeyboardInterrupt):
             return
-        render_prompt_box(top=False)
         if not task:
             continue
 
@@ -63,8 +51,11 @@ def run_interactive(
             ):
                 result = execute(task)
         except KeyboardInterrupt:
-            typer.echo()
-            render_error("Cancelled the current task.", hint="Press Ctrl+C again at the prompt to exit.")
+            console.print()
+            render_error(
+                "Cancelled the current task.",
+                hint="Press Ctrl+C again at the prompt to exit.",
+            )
             continue
         except Exception as error:
             render_error(f"{type(error).__name__}: {error}")
