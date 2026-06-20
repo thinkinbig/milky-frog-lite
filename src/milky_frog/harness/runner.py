@@ -24,6 +24,7 @@ from milky_frog.handlers import (
     HandlerRegistry,
     RunFailed,
 )
+from milky_frog.harness.prompt import system_prompt
 from milky_frog.models import Model
 from milky_frog.tools import ToolContext, ToolRegistry, ToolResult
 
@@ -54,7 +55,10 @@ class Harness:
                 {"prompt": run_request.prompt, "workspace": str(workspace)},
             ),
         )
-        messages = [Message(MessageRole.USER, run_request.prompt)]
+        messages = [
+            Message(MessageRole.SYSTEM, system_prompt(workspace)),
+            Message(MessageRole.USER, run_request.prompt),
+        ]
 
         try:
             for model_call in range(1, run_request.max_model_calls + 1):
