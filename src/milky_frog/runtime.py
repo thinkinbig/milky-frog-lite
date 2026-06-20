@@ -32,7 +32,6 @@ class MilkyFrog:
     @classmethod
     def from_settings(cls, settings: Settings) -> MilkyFrog:
         return cls(settings)
-
     def run(self, prompt: str, workspace: Path) -> RunResult:
         """Run one goal synchronously.
 
