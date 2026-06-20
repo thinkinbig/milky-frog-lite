@@ -12,7 +12,7 @@ from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import Frame, TextArea
 
-from milky_frog.ui.console import BOX_WIDTH as _BOX_WIDTH
+from milky_frog.ui.console import get_box_width as _get_box_width
 
 _STYLE = Style.from_dict(
     {
@@ -73,12 +73,14 @@ def prompt_in_box() -> str:
     def _eof(event: object) -> None:
         get_app().exit(exception=EOFError)
 
-    # Match the old rich prompt box: fill the terminal width, capped at _BOX_WIDTH, and
+    # Match the old rich prompt box: fill the terminal width, capped at box width, and
     # left-aligned. preferred forces the frame to expand instead of shrinking to content;
-    # the filler soaks up any extra width past the cap.
+    # the filler soaks up any extra width past the cap. Read at call time so terminal
+    # resize is respected between prompts.
+    _w = _get_box_width()
     root = VSplit(
         [
-            Frame(text_area, width=Dimension(preferred=_BOX_WIDTH, max=_BOX_WIDTH)),
+            Frame(text_area, width=Dimension(preferred=_w, max=_w)),
             Window(),
         ]
     )

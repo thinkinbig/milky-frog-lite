@@ -56,19 +56,31 @@ class ModelResponse:
 
 @dataclass(frozen=True, slots=True)
 class TextDelta:
+    """A streamed fragment of assistant text."""
+
     content: str
 
 
 @dataclass(frozen=True, slots=True)
 class ReasoningDelta:
+    """A streamed fragment of a reasoning model's thinking (e.g. deepseek-reasoner).
+
+    Surfaced for display and Checkpoint fidelity only; it is never fed back into
+    the conversation, since reasoning providers reject their own reasoning on input.
+    """
+
     content: str
 
 
 @dataclass(frozen=True, slots=True)
 class StreamDone:
+    """The terminal chunk of a stream, carrying the assembled response."""
+
     response: ModelResponse
 
 
+# What a Model yields while streaming: reasoning and text fragments interleaved,
+# then exactly one StreamDone.
 ModelChunk = TextDelta | ReasoningDelta | StreamDone
 
 

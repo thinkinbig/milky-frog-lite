@@ -8,7 +8,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from milky_frog.ui.console import BOX_WIDTH
+from milky_frog.ui.console import get_box_width
 from milky_frog.ui.logo import pixel_frog_logo
 from milky_frog.ui.presenter._base import _Surface
 
@@ -51,7 +51,7 @@ class _SessionSurface(_Surface):
                 border_style="yellow",
                 box=box.ROUNDED,
                 padding=(1, 2),
-                width=BOX_WIDTH,
+                width=get_box_width(),
             )
         )
 
@@ -89,6 +89,7 @@ class _SessionSurface(_Surface):
                 border_style="bright_black",
                 box=box.ROUNDED,
                 expand=False,
+                width=get_box_width(),
             )
         )
 
