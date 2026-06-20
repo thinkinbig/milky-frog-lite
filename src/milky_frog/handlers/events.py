@@ -1,55 +1,65 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from milky_frog.domain import (
+    ModelRequest,
+    ModelResponse,
+    ReasoningDelta,
+    RunRequest,
+    RunResult,
+    RunStatus,
+    TextDelta,
+    ToolCall,
+    ToolResult,
+)
+from milky_frog.handlers.base import BaseEvent
 
-from milky_frog.domain import ModelRequest, ModelResponse, ReasoningDelta, TextDelta, ToolCall
 
-if TYPE_CHECKING:
-    from milky_frog.harness.tools import ToolResult
+class RunStarted(BaseEvent):
+    request: RunRequest
 
 
-@dataclass(slots=True)
-class BeforeModel:
-    run_id: str
+class RunCompleted(BaseEvent):
+    result: RunResult
+
+
+class RunPaused(BaseEvent):
+    status: RunStatus
+    reason: str
+    model_calls: int
+
+
+class RunCancelled(BaseEvent):
+    reason: str
+    model_calls: int
+
+
+class BeforeModel(BaseEvent):
     request: ModelRequest
 
 
-@dataclass(slots=True)
-class OnModelReasoning:
-    run_id: str
+class OnModelReasoning(BaseEvent):
     request: ModelRequest
     chunk: ReasoningDelta
 
 
-@dataclass(slots=True)
-class OnModelChunk:
-    run_id: str
+class OnModelChunk(BaseEvent):
     request: ModelRequest
     chunk: TextDelta
 
 
-@dataclass(slots=True)
-class AfterModel:
-    run_id: str
+class AfterModel(BaseEvent):
     request: ModelRequest
     response: ModelResponse
 
 
-@dataclass(slots=True)
-class BeforeTool:
-    run_id: str
+class BeforeTool(BaseEvent):
     call: ToolCall
 
 
-@dataclass(slots=True)
-class AfterTool:
-    run_id: str
+class AfterTool(BaseEvent):
     call: ToolCall
     result: ToolResult
 
 
-@dataclass(slots=True)
-class RunFailed:
-    run_id: str
+class RunFailed(BaseEvent):
     error: Exception

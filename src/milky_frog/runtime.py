@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import signal
 from pathlib import Path
+from types import FrameType
 
 from milky_frog.checkpoint import SqliteCheckpointStore
-from milky_frog.domain import RunRequest, RunResult
+from milky_frog.domain import RunCancellation, RunRequest, RunResult
 from milky_frog.handlers import HandlerRegistry, LangfuseHandler
 from milky_frog.harness import Harness
 from milky_frog.harness.tools import ToolRegistry
@@ -38,12 +40,18 @@ class MilkyFrog:
             handlers=handlers,
         )
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._cancellation: RunCancellation | None = None
 
     @classmethod
     def from_settings(
         cls, settings: Settings, handlers: HandlerRegistry | None = None
     ) -> MilkyFrog:
         return cls(settings, handlers)
+
+    def cancel(self) -> None:
+        """Request cooperative cancellation of the foreground Run."""
+        if self._cancellation is not None:
+            self._cancellation.cancel()
 
     def run(self, prompt: str, workspace: Path) -> RunResult:
         """Run one goal synchronously.
@@ -54,7 +62,25 @@ class MilkyFrog:
         if self._loop is None:
             self._loop = asyncio.new_event_loop()
         config = load_project_config(workspace)
-        request = RunRequest(prompt, workspace, max_model_calls=config.max_model_calls)
+        self._cancellation = RunCancellation()
+        request = RunRequest(
+            prompt,
+            workspace,
+            max_model_calls=config.max_model_calls,
+            cancellation=self._cancellation,
+        )
+        previous_sigint = signal.getsignal(signal.SIGINT)
+
+        def _request_cancel(signum: int, frame: FrameType | None) -> None:
+            if self._cancellation is not None and not self._cancellation.is_cancelled:
+                self._cancellation.cancel()
+                return
+            if callable(previous_sigint):
+                previous_sigint(signum, frame)
+            elif previous_sigint is signal.SIG_DFL:
+                signal.default_int_handler(signum, frame)
+
+        signal.signal(signal.SIGINT, _request_cancel)
         try:
             result = self._loop.run_until_complete(self._harness.run(request))
         except Exception:
@@ -62,6 +88,8 @@ class MilkyFrog:
                 self._langfuse.flush()
             raise
         finally:
+            signal.signal(signal.SIGINT, previous_sigint)
+            self._cancellation = None
             # Drain async-generator cleanup tasks (athrow GeneratorExit) that
             # the OpenAI stream schedules after the run completes. Without this
             # the reused loop leaves them pending and Python prints a warning.

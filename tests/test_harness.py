@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -6,17 +7,29 @@ from pydantic import BaseModel
 
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import (
+    Message,
+    MessageRole,
     ModelChunk,
     ModelRequest,
     ModelResponse,
     ReasoningDelta,
+    RunCancellation,
     RunRequest,
+    RunResult,
     RunStatus,
     StreamDone,
     TextDelta,
     ToolCall,
 )
-from milky_frog.handlers import HandlerRegistry
+from milky_frog.handlers import (
+    BlockTool,
+    HandlerRegistry,
+    PatchToolResult,
+    RunCancelled,
+    RunPaused,
+    TransformContext,
+)
+from milky_frog.handlers.events import AfterTool, BeforeModel, BeforeTool
 from milky_frog.harness import Harness
 from milky_frog.harness.tools import ToolContext, ToolRegistry, ToolResult
 
@@ -48,7 +61,6 @@ class FakeModel:
                 ModelResponse(tool_calls=(ToolCall("call-1", "echo", {"text": "hello"}),))
             )
             return
-        assert request.messages[-1].content == "hello"
         yield TextDelta("done")
         yield StreamDone(ModelResponse(content="done"))
 
@@ -160,3 +172,191 @@ async def test_harness_injects_milky_frog_identity_before_user_prompt(tmp_path: 
     result = await harness.run(RunRequest("Who are you?", tmp_path))
 
     assert result.final_message == "I am Milky Frog."
+
+
+class CountingEchoTool(EchoTool):
+    executions = 0
+
+    async def execute(self, context: ToolContext, input: BaseModel) -> ToolResult:
+        CountingEchoTool.executions += 1
+        return await super().execute(context, input)
+
+
+@pytest.mark.asyncio
+async def test_harness_intercept_can_block_tool_execution(tmp_path: Path) -> None:
+    CountingEchoTool.executions = 0
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    registry = HandlerRegistry()
+
+    @registry.intercept(BeforeTool)
+    async def deny(_event: BeforeTool) -> BlockTool:
+        return BlockTool("not allowed")
+
+    harness = Harness(
+        model=FakeModel(),
+        tools=ToolRegistry((CountingEchoTool(),)),
+        checkpoints=store,
+        handlers=registry,
+    )
+
+    result = await harness.run(RunRequest("echo hello", tmp_path))
+
+    assert CountingEchoTool.executions == 0
+    assert result.status is RunStatus.COMPLETED
+    tool_completed = next(
+        event for event in store.events(result.run_id) if event.event_type == "ToolCallCompleted"
+    )
+    assert tool_completed.payload["content"] == "not allowed"
+    assert tool_completed.payload["is_error"] is True
+
+
+@pytest.mark.asyncio
+async def test_harness_intercept_can_transform_model_context(tmp_path: Path) -> None:
+    registry = HandlerRegistry()
+
+    @registry.intercept(BeforeModel)
+    async def inject_context(event: BeforeModel) -> TransformContext:
+        return TransformContext(
+            (*event.request.messages, Message(MessageRole.USER, "extra context"))
+        )
+
+    class ContextCapturingModel:
+        last_user_messages: tuple[str, ...] = ()
+
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            ContextCapturingModel.last_user_messages = tuple(
+                message.content for message in request.messages if message.role is MessageRole.USER
+            )
+            yield StreamDone(ModelResponse(content="ok"))
+
+    harness = Harness(
+        model=ContextCapturingModel(),
+        tools=ToolRegistry(),
+        checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
+        handlers=registry,
+    )
+
+    await harness.run(RunRequest("hello", tmp_path))
+
+    assert ContextCapturingModel.last_user_messages == ("hello", "extra context")
+
+
+@pytest.mark.asyncio
+async def test_harness_intercept_can_patch_tool_result(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    registry = HandlerRegistry()
+
+    @registry.intercept(AfterTool)
+    async def patch(_event: AfterTool) -> PatchToolResult:
+        return PatchToolResult(content="patched")
+
+    harness = Harness(
+        model=FakeModel(),
+        tools=ToolRegistry((EchoTool(),)),
+        checkpoints=store,
+        handlers=registry,
+    )
+
+    result = await harness.run(RunRequest("echo hello", tmp_path))
+
+    tool_completed = next(
+        event for event in store.events(result.run_id) if event.event_type == "ToolCallCompleted"
+    )
+    assert tool_completed.payload["content"] == "patched"
+
+
+class SlowStreamModel:
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        del request
+        yield TextDelta("partial")
+        await asyncio.sleep(0.05)
+        yield StreamDone(ModelResponse(content="done"))
+
+
+@pytest.mark.asyncio
+async def test_harness_dispatches_run_lifecycle_events(tmp_path: Path) -> None:
+    registry = HandlerRegistry()
+    seen: list[str] = []
+
+    @registry.subscribe
+    async def record(event: object) -> None:
+        seen.append(type(event).__name__)
+
+    harness = Harness(
+        model=FakeModel(),
+        tools=ToolRegistry((EchoTool(),)),
+        checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
+        handlers=registry,
+    )
+
+    result = await harness.run(RunRequest("echo hello", tmp_path))
+
+    assert result.status is RunStatus.COMPLETED
+    assert seen[0] == "RunStarted"
+    assert seen[-1] == "RunCompleted"
+    assert "RunPaused" not in seen
+    assert "RunCancelled" not in seen
+
+
+@pytest.mark.asyncio
+async def test_harness_dispatches_run_paused_event(tmp_path: Path) -> None:
+    registry = HandlerRegistry()
+    paused: list[RunPaused] = []
+
+    @registry.on(RunPaused)
+    async def record(event: RunPaused) -> None:
+        paused.append(event)
+
+    class NoToolModel:
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            del request
+            yield StreamDone(
+                ModelResponse(tool_calls=(ToolCall("call-1", "echo", {"text": "hello"}),))
+            )
+
+    harness = Harness(
+        model=NoToolModel(),
+        tools=ToolRegistry((EchoTool(),)),
+        checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
+        handlers=registry,
+    )
+
+    result = await harness.run(RunRequest("loop forever", tmp_path, max_model_calls=1))
+
+    assert result.status is RunStatus.PAUSED_LIMIT
+    assert len(paused) == 1
+    assert paused[0].status is RunStatus.PAUSED_LIMIT
+
+
+@pytest.mark.asyncio
+async def test_harness_cancellation_stops_run(tmp_path: Path) -> None:
+    registry = HandlerRegistry()
+    cancelled: list[RunCancelled] = []
+
+    @registry.on(RunCancelled)
+    async def record(event: RunCancelled) -> None:
+        cancelled.append(event)
+
+    cancellation = RunCancellation()
+    harness = Harness(
+        model=SlowStreamModel(),
+        tools=ToolRegistry(),
+        checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
+        handlers=registry,
+    )
+
+    async def run_and_cancel() -> RunResult:
+        task = asyncio.create_task(
+            harness.run(RunRequest("slow", tmp_path, cancellation=cancellation))
+        )
+        await asyncio.sleep(0.01)
+        cancellation.cancel()
+        return await task
+
+    result = await run_and_cancel()
+
+    assert result.status is RunStatus.CANCELLED
+    assert len(cancelled) == 1
+    assert cancelled[0].reason == "cancelled"
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    assert any(event.event_type == "RunCancelled" for event in store.events(result.run_id))
