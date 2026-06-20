@@ -8,6 +8,7 @@ import typer
 
 from milky_frog import __version__
 from milky_frog.checkpoint import SqliteCheckpointStore
+from milky_frog.project import CONFIG_FILENAME, CONFIG_TEMPLATE, PROJECT_DIRNAME
 from milky_frog.runtime import MilkyFrog, MissingModelConfiguration
 from milky_frog.settings import Settings
 from milky_frog.ui import (
@@ -107,17 +108,14 @@ def initialize(
     workspace: Annotated[Path | None, typer.Argument()] = None,
 ) -> None:
     """Create declarative project configuration and Skill directories."""
-    root = (workspace or Path.cwd()).resolve(strict=True) / ".milky-frog"
+    root = (workspace or Path.cwd()).resolve(strict=True) / PROJECT_DIRNAME
     root.mkdir(exist_ok=True)
     (root / "skills").mkdir(exist_ok=True)
-    config = root / "config.toml"
+    config = root / CONFIG_FILENAME
     if config.exists():
         render_initialized(root, already_exists=True)
         return
-    config.write_text(
-        "# Project-level Milky Frog configuration.\nmax_model_calls = 30\n",
-        encoding="utf-8",
-    )
+    config.write_text(CONFIG_TEMPLATE, encoding="utf-8")
     render_initialized(root)
 
 

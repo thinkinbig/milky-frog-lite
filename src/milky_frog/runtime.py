@@ -8,6 +8,7 @@ from milky_frog.domain import RunRequest, RunResult
 from milky_frog.handlers import HandlerRegistry
 from milky_frog.harness import Harness
 from milky_frog.models import OpenAIModel
+from milky_frog.project import load_project_config
 from milky_frog.settings import Settings
 from milky_frog.tools import ToolRegistry
 
@@ -44,4 +45,6 @@ class MilkyFrog:
         """
         if self._loop is None:
             self._loop = asyncio.new_event_loop()
-        return self._loop.run_until_complete(self._harness.run(RunRequest(prompt, workspace)))
+        config = load_project_config(workspace)
+        request = RunRequest(prompt, workspace, max_model_calls=config.max_model_calls)
+        return self._loop.run_until_complete(self._harness.run(request))
