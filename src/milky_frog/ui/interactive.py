@@ -57,7 +57,8 @@ def run_interactive(
                 result = execute(task)
         except KeyboardInterrupt:
             typer.echo()
-            return
+            render_error("Cancelled the current task.", hint="Press Ctrl+C again at the prompt to exit.")
+            continue
         except Exception as error:
             render_error(f"{type(error).__name__}: {error}")
             continue
