@@ -134,7 +134,7 @@ def render_interactive_welcome(*, model: str, workspace: Path) -> None:
     tips.add_column()
     tips.add_row(Text("Tips for getting started", style="bold"))
     tips.add_row(Text("• Describe what to build, fix, or explain — be specific", style="dim"))
-    tips.add_row(Text("• /help lists commands · /clear resets the screen · /exit leaves", style="dim"))
+    tips.add_row(Text("• /help lists commands · /clear resets the screen · /exit leaves", style="dim"))  # noqa: E501
     console.print(tips)
     console.print()
 
@@ -159,7 +159,8 @@ def render_interactive_help() -> None:
     commands.add_row("/exit", "Leave Milky Frog")
     commands.add_row("exit · quit", "Leave Milky Frog")
     console.print(
-        Panel(commands, title="Commands", border_style="bright_black", box=box.ROUNDED, expand=False)
+        Panel(commands, title="Commands", border_style="bright_black",
+         box=box.ROUNDED, expand=False)
     )
 
 

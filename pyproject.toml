@@ -27,6 +27,7 @@ dev = [
   "mypy>=1.15.0",
   "pytest>=8.3.0",
   "pytest-asyncio>=0.25.0",
+  "pytest-cov>=7.1.0",
   "ruff>=0.11.0",
   "types-pyyaml>=6.0.12.20250516",
 ]
@@ -35,9 +36,16 @@ dev = [
 packages = ["src/milky_frog"]
 
 [tool.pytest.ini_options]
-addopts = "-q"
+addopts = "-q --cov=milky_frog --cov-report=term-missing --cov-fail-under=80"
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.coverage.run]
+omit = [
+  "src/milky_frog/__main__.py",
+  "src/milky_frog/cli/*",
+  "src/milky_frog/ui/*",
+]
 
 [tool.ruff]
 line-length = 100

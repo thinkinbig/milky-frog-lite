@@ -39,8 +39,6 @@ def load_project_config(workspace: Path) -> ProjectConfig:
         return ProjectConfig()
 
     max_model_calls = data.get("max_model_calls", DEFAULT_MAX_MODEL_CALLS)
-    if isinstance(max_model_calls, bool) or not isinstance(max_model_calls, int):
-        max_model_calls = DEFAULT_MAX_MODEL_CALLS
-    elif max_model_calls < 1:
+    if isinstance(max_model_calls, bool) or not isinstance(max_model_calls, int) or max_model_calls < 1:  # noqa: E501
         max_model_calls = DEFAULT_MAX_MODEL_CALLS
     return ProjectConfig(max_model_calls=max_model_calls)
