@@ -4,6 +4,7 @@ import json
 from importlib import import_module
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from milky_frog.checkpoint import RunEvent, SqliteCheckpointStore
@@ -11,6 +12,16 @@ from milky_frog.cli import app
 from milky_frog.domain import RunResult, RunStatus
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_cwd(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run each CLI test in an empty cwd so a developer's .env never leaks in.
+
+    Settings.from_environment() reads ``<cwd>/.env``; without isolation the
+    repository's own .env would supply configuration these tests assume absent.
+    """
+    monkeypatch.chdir(tmp_path_factory.mktemp("cwd"))
 
 
 def test_help_includes_compact_brand() -> None:
