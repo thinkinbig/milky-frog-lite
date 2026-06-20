@@ -13,6 +13,7 @@ from milky_frog.domain import (
     ReasoningDelta,
     StreamDone,
     TextDelta,
+    TokenUsage,
 )
 from milky_frog.models import OpenAIModel
 
@@ -90,7 +91,7 @@ async def test_stream_forwards_text_and_assembles_response() -> None:
     assert done.response.tool_calls[0].id == "call-1"
     assert done.response.tool_calls[0].name == "echo"
     assert done.response.tool_calls[0].arguments == {"text": "hi"}
-    assert done.response.usage == {"input_tokens": 3, "output_tokens": 5, "total_tokens": 8}
+    assert done.response.usage == TokenUsage(input_tokens=3, output_tokens=5)
     assert client.captured["stream"] is True
     assert client.captured["stream_options"] == {"include_usage": True}
 
@@ -136,6 +137,29 @@ async def test_stream_omits_stream_options_for_compatible_base_url() -> None:
         pass
 
     assert "stream_options" not in client.captured
+
+
+@pytest.mark.asyncio
+async def test_stream_captures_cached_and_reasoning_subtotals() -> None:
+    usage = SimpleNamespace(
+        prompt_tokens=100,
+        completion_tokens=40,
+        total_tokens=140,
+        prompt_tokens_details=SimpleNamespace(cached_tokens=64),
+        completion_tokens_details=SimpleNamespace(reasoning_tokens=30),
+    )
+    client = _FakeClient([_chunk(content="ok"), _chunk(usage=usage)])
+    model = OpenAIModel(api_key="k", model="m", client=client)  # type: ignore[arg-type]
+
+    done: StreamDone | None = None
+    async for chunk in model.stream(ModelRequest((Message(MessageRole.USER, "hi"),), ())):
+        if isinstance(chunk, StreamDone):
+            done = chunk
+
+    assert done is not None
+    assert done.response.usage == TokenUsage(
+        input_tokens=100, output_tokens=40, cached_tokens=64, reasoning_tokens=30
+    )
 
 
 @pytest.mark.asyncio

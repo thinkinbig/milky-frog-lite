@@ -9,7 +9,14 @@ import typer
 from milky_frog import __version__
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.diagnostics import CheckStatus, Diagnostic
-from milky_frog.handlers import HandlerRegistry, OnModelChunk, OnModelReasoning
+from milky_frog.domain import RunUsage
+from milky_frog.handlers import (
+    AfterModel,
+    HandlerRegistry,
+    OnModelChunk,
+    OnModelReasoning,
+    RunStarted,
+)
 from milky_frog.project import CONFIG_FILENAME, CONFIG_TEMPLATE, PROJECT_DIRNAME
 from milky_frog.runtime import MilkyFrog, MissingModelConfiguration
 from milky_frog.settings import Settings
@@ -25,12 +32,22 @@ from milky_frog.ui import (
     run_interactive,
 )
 from milky_frog.ui.prompt import configure_history
+from milky_frog.ui.usage import format_run_usage
 
 
 def _build_streaming_frog(settings: Settings) -> tuple[MilkyFrog, StreamingPrinter]:
     """Assemble a MilkyFrog whose model text streams live to the console."""
     printer = StreamingPrinter()
     handlers = HandlerRegistry()
+    # Running token total for the live counter, reset at each Run start. Runs are
+    # strictly sequential in the foreground, so one accumulator suffices; the
+    # footer's final total comes from the harness-authoritative RunResult.
+    running = RunUsage()
+
+    @handlers.on(RunStarted)
+    async def _reset_usage(event: RunStarted) -> None:
+        nonlocal running
+        running = RunUsage()
 
     @handlers.on(OnModelReasoning)
     async def _print_reasoning(event: OnModelReasoning) -> None:
@@ -39,6 +56,17 @@ def _build_streaming_frog(settings: Settings) -> tuple[MilkyFrog, StreamingPrint
     @handlers.on(OnModelChunk)
     async def _print_chunk(event: OnModelChunk) -> None:
         printer.on_delta(event.chunk.content)
+
+    @handlers.on(AfterModel)
+    async def _print_usage(event: AfterModel) -> None:
+        nonlocal running
+        running = running.record(event.response.usage)
+        # Only emit a live line for a turn that continues (has tool calls); the
+        # final turn's total is rendered once in the footer, and leaving its
+        # stream open lets the loop detect whether anything was streamed.
+        summary = format_run_usage(running)
+        if event.response.tool_calls and summary is not None:
+            printer.usage(summary)
 
     return MilkyFrog.from_settings(settings, handlers), printer
 
@@ -206,9 +234,9 @@ def run(task: Annotated[str, typer.Argument()]) -> None:
         render_error(f"{type(error).__name__}: {error}")
         raise typer.Exit(code=1) from error
     if printer.finish():
-        render_assistant_footer(result.run_id)
+        render_assistant_footer(result.run_id, usage=result.usage)
     else:
-        render_assistant(result.final_message, run_id=result.run_id)
+        render_assistant(result.final_message, run_id=result.run_id, usage=result.usage)
 
 
 @app.command()

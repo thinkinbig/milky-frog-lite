@@ -144,8 +144,8 @@ class LangfuseHandler:
                     output=event.response.content,
                     model=event.response.model or None,
                     usage_details={
-                        "input": event.response.usage.get("input_tokens", 0),
-                        "output": event.response.usage.get("output_tokens", 0),
+                        "input": event.response.usage.input_tokens,
+                        "output": event.response.usage.output_tokens,
                     },
                 )
                 gen.end()

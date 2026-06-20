@@ -19,6 +19,7 @@ from milky_frog.domain import (
     RunStatus,
     StreamDone,
     TextDelta,
+    TokenUsage,
     ToolCall,
 )
 from milky_frog.handlers import (
@@ -108,6 +109,61 @@ async def test_harness_runs_tool_loop_and_persists_events(tmp_path: Path) -> Non
         "ModelMessageCompleted",
         "RunCompleted",
     ]
+
+
+class UsageReportingModel:
+    """Reports token usage per call: one tool turn, then a final answer turn."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        del request
+        self.calls += 1
+        if self.calls == 1:
+            yield StreamDone(
+                ModelResponse(
+                    tool_calls=(ToolCall("call-1", "echo", {"text": "hello"}),),
+                    usage=TokenUsage(input_tokens=100, output_tokens=20),
+                )
+            )
+            return
+        yield StreamDone(
+            ModelResponse(
+                content="done",
+                usage=TokenUsage(input_tokens=160, output_tokens=30, cached_tokens=64),
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_harness_aggregates_token_usage_across_calls(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    harness = Harness(
+        model=UsageReportingModel(),
+        tools=ToolRegistry((EchoTool(),)),
+        checkpoints=store,
+        handlers=HandlerRegistry(),
+    )
+
+    result = await harness.run(RunRequest("echo hello", tmp_path))
+
+    # Cumulative is billed across both calls; context is the final call's input.
+    assert result.usage.cumulative == TokenUsage(
+        input_tokens=260, output_tokens=50, cached_tokens=64
+    )
+    assert result.usage.context_tokens == 160
+
+    model_events = [
+        e for e in store.events(result.run_id) if e.event_type == "ModelMessageCompleted"
+    ]
+    assert model_events[0].payload["usage"] == {
+        "input_tokens": 100,
+        "output_tokens": 20,
+        "cached_tokens": 0,
+        "reasoning_tokens": 0,
+        "total_tokens": 120,
+    }
 
 
 class EarlyStreamDoneModel:

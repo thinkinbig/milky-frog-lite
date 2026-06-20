@@ -8,8 +8,9 @@ from rich.console import Console
 
 from milky_frog.checkpoint import RunEvent, StoredRun
 from milky_frog.diagnostics import CheckStatus, Diagnostic
-from milky_frog.domain import RunStatus
+from milky_frog.domain import RunStatus, RunUsage, TokenUsage
 from milky_frog.ui.presenter import Presenter
+from milky_frog.ui.streaming import StreamingPrinter
 
 
 def _presenter() -> tuple[Presenter, StringIO, StringIO]:
@@ -28,6 +29,40 @@ def test_render_runs_shows_actionable_empty_state() -> None:
     presenter.runs(())
 
     assert stdout.getvalue() == "No runs yet.\nStart one with: milky-frog run TASK\n"
+
+
+def test_streaming_printer_usage_closes_answer_and_resets_phase() -> None:
+    out = StringIO()
+    printer = StreamingPrinter(Console(file=out, color_system=None, width=120))
+
+    printer.on_delta("partial answer")
+    printer.usage("↑ 1.5k in · ↓ 340 out · Σ 1.9k tokens")
+
+    output = out.getvalue()
+    # The open answer line is closed before the dim usage line is printed.
+    assert "partial answer\n" in output
+    assert "⎿ ↑ 1.5k in · ↓ 340 out · Σ 1.9k tokens" in output
+    # Phase reset: a following turn opens a fresh answer marker.
+    assert printer.finish() is False
+
+
+def test_assistant_footer_shows_token_summary_when_recorded() -> None:
+    presenter, stdout, _ = _presenter()
+    usage = RunUsage(cumulative=TokenUsage(input_tokens=1536, output_tokens=340))
+
+    presenter.assistant_footer("run-1234abcd", usage=usage)
+
+    output = stdout.getvalue()
+    assert "run run-1234" in output
+    assert "↑ 1.5k in · ↓ 340 out · Σ 1.9k tokens" in output
+
+
+def test_assistant_footer_omits_summary_without_usage() -> None:
+    presenter, stdout, _ = _presenter()
+
+    presenter.assistant_footer("run-1234abcd", usage=RunUsage())
+
+    assert stdout.getvalue().strip() == "⎿ run run-1234"
 
 
 def test_render_diagnostics_summarizes_failures() -> None:

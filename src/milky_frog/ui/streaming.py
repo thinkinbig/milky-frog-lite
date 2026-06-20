@@ -42,6 +42,21 @@ class StreamingPrinter:
             self._phase = "answer"
         self._out.print(text, end="", markup=False, highlight=False)
 
+    def usage(self, summary: str) -> None:
+        """Print a dim running-token line, closing any open stream block first.
+
+        Resetting the phase makes the next turn open a fresh answer marker, so a
+        multi-turn Run reads as distinct blocks separated by their token tallies.
+        """
+        if self._phase == "reasoning":
+            assert self._block_console is not None
+            self._block_console.print()
+            self._block_console = None
+        elif self._phase == "answer":
+            self._out.print()
+        self._out.print(Text(f"  ⎿ {summary}", style="bright_black"))
+        self._phase = None
+
     def finish(self) -> bool:
         streamed = self._phase is not None
         if streamed:

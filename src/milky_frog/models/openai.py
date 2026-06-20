@@ -16,6 +16,7 @@ from milky_frog.domain import (
     ReasoningDelta,
     StreamDone,
     TextDelta,
+    TokenUsage,
     ToolCall,
 )
 
@@ -58,15 +59,11 @@ class OpenAIModel:
         content_parts: list[str] = []
         reasoning_parts: list[str] = []
         tool_fragments: dict[int, _ToolFragment] = {}
-        usage: dict[str, int] = {}
+        usage = TokenUsage()
 
         async for chunk in stream:
             if chunk.usage is not None:
-                usage = {
-                    "input_tokens": chunk.usage.prompt_tokens,
-                    "output_tokens": chunk.usage.completion_tokens,
-                    "total_tokens": chunk.usage.total_tokens,
-                }
+                usage = _token_usage(chunk.usage)
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
@@ -104,6 +101,23 @@ class OpenAIModel:
                 reasoning="".join(reasoning_parts),
             )
         )
+
+
+def _token_usage(usage: Any) -> TokenUsage:
+    """Map an OpenAI ``CompletionUsage`` to the domain ``TokenUsage``.
+
+    Cached-prompt and reasoning sub-totals live on optional ``*_details``
+    sub-objects that compatible gateways often omit, so both are read
+    defensively and default to zero.
+    """
+    prompt_details = getattr(usage, "prompt_tokens_details", None)
+    completion_details = getattr(usage, "completion_tokens_details", None)
+    return TokenUsage(
+        input_tokens=usage.prompt_tokens or 0,
+        output_tokens=usage.completion_tokens or 0,
+        cached_tokens=getattr(prompt_details, "cached_tokens", 0) or 0,
+        reasoning_tokens=getattr(completion_details, "reasoning_tokens", 0) or 0,
+    )
 
 
 @dataclass(slots=True)
