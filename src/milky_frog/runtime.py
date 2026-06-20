@@ -5,7 +5,7 @@ from pathlib import Path
 
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import RunRequest, RunResult
-from milky_frog.handlers import HandlerRegistry
+from milky_frog.handlers import HandlerRegistry, LangfuseHandler
 from milky_frog.harness import Harness
 from milky_frog.models import OpenAIModel
 from milky_frog.project import load_project_config
@@ -25,11 +25,14 @@ class MilkyFrog:
         model = settings.model
         if not api_key or not model:
             raise MissingModelConfiguration("model configuration is missing")
+        handlers = HandlerRegistry()
+        if settings.langfuse.active:
+            LangfuseHandler(settings.langfuse).register(handlers)
         self._harness = Harness(
             model=OpenAIModel(api_key=api_key, model=model, base_url=settings.base_url),
             tools=ToolRegistry(),
             checkpoints=SqliteCheckpointStore(settings.database_path),
-            handlers=HandlerRegistry(),
+            handlers=handlers,
         )
         self._loop: asyncio.AbstractEventLoop | None = None
 

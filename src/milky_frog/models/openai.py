@@ -50,6 +50,7 @@ class OpenAIModel:
         return ModelResponse(
             content=message.content or "",
             tool_calls=tool_calls,
+            model=response.model,
             usage=(
                 {
                     "input_tokens": usage.prompt_tokens,
