@@ -75,11 +75,21 @@ def run_interactive(
         if resume_command is not None:
             attach_id, resume_prompt = resume_command
             if not attach_id:
-                render_error(
-                    "Usage: /resume RUN_ID [prompt]",
-                    hint="List available Runs with: milky-frog runs",
-                )
-                continue
+                if recover_run is not None:
+                    recovered = recover_run()
+                    if recovered is None:
+                        render_error(
+                            "No recent Runs found in this workspace.",
+                            hint="Start a new Run by typing a task.",
+                        )
+                        continue
+                    attach_id = recovered
+                else:
+                    render_error(
+                        "Usage: /resume RUN_ID [prompt]",
+                        hint="List available Runs with: milky-frog runs",
+                    )
+                    continue
             if resolve_run is not None:
                 try:
                     attach_id = resolve_run(attach_id)

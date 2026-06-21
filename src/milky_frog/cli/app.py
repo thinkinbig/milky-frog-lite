@@ -49,6 +49,13 @@ def _render_run_output(printer: StreamingPrinter, result: RunResult) -> None:
         render_assistant(result.final_message, run_id=result.run_id, usage=result.usage)
 
 
+def _find_last_run(store: SqliteCheckpointStore, workspace: Path) -> str | None:
+    for run in store.list_runs(limit=20):
+        if run.workspace.resolve() == workspace.resolve():
+            return run.run_id
+    return None
+
+
 def _resume_run(
     frog: MilkyFrog,
     printer: StreamingPrinter,
@@ -258,11 +265,12 @@ def run(task: Annotated[str, typer.Argument()]) -> None:
 
 @app.command()
 def resume(
-    run_id: Annotated[str, typer.Argument()],
+    run_id: Annotated[str | None, typer.Argument()] = None,
     task: Annotated[str | None, typer.Argument()] = None,
 ) -> None:
     """Resume a Run from its Checkpoint.
 
+    Without RUN_ID, resumes the most recent Run in the current workspace.
     Without TASK, advances pending work (paused, cancelled, or orphaned). With
     TASK, appends a new user turn and advances — including terminal Runs.
     """
@@ -272,6 +280,16 @@ def resume(
     except MissingModelConfiguration:
         _render_configuration_error()
         raise typer.Exit(code=2) from None
+    if run_id is None:
+        store = SqliteCheckpointStore(settings.database_path)
+        run_id = _find_last_run(store, Path.cwd())
+        if run_id is None:
+            printer.finish()
+            render_error(
+                "No recent Runs found in this workspace.",
+                hint='Start a new Run with: milky-frog run "your task"',
+            )
+            raise typer.Exit(code=1)
     with frog:
         result = _resume_run(frog, printer, run_id, prompt=task)
     _render_run_output(printer, result)
