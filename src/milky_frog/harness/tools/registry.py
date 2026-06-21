@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pydantic import JsonValue
 
+from milky_frog.domain import ToolCall
 from milky_frog.harness.tools.base import Tool
 
 
@@ -11,6 +12,23 @@ class UnknownToolError(LookupError):
 
 class DuplicateToolError(ValueError):
     pass
+
+
+def approval_free_tool_names(tools: tuple[Tool, ...]) -> frozenset[str]:
+    """Return tool names that never need approval (``requires_approval`` is false)."""
+    return frozenset(
+        tool.name for tool in tools if not getattr(tool, "requires_approval", True)
+    )
+
+
+def call_needs_approval(tool: Tool, call: ToolCall) -> bool:
+    """Return whether a concrete tool call should pause for user approval."""
+    if getattr(tool, "requires_approval", True) is False:
+        return False
+    per_call = getattr(tool, "needs_approval_for_call", None)
+    if per_call is not None:
+        return bool(per_call(call.arguments))
+    return True
 
 
 class ToolRegistry:

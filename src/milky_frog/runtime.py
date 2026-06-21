@@ -9,7 +9,7 @@ from types import FrameType, TracebackType
 
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import ResumeError, RunCancellation, RunRequest, RunResult
-from milky_frog.gates import ToolGate
+from milky_frog.gates import ToolGate, ToolPolicy
 from milky_frog.handlers import BaseHandler, LifecycleBus
 from milky_frog.harness.runner import Harness
 from milky_frog.harness.tools import ToolRegistry, default_tools
@@ -40,11 +40,12 @@ class MilkyFrog:
         settings: Settings,
         handlers: LifecycleBus | None = None,
         bundles: list[BaseHandler] | None = None,
+        tool_policy: ToolPolicy | None = None,
     ) -> None:
         api_key, model = self.require_model_configuration(settings)
         self._handlers: list[BaseHandler] = list(bundles) if bundles else []
         self._checkpoints = SqliteCheckpointStore(settings.database_path)
-        self._tool_gate = ToolGate()
+        self._tool_gate = ToolGate(tool_policy)
         self._harness = Harness(
             model=OpenAIModel(api_key=api_key, model=model, base_url=settings.base_url),
             tools=ToolRegistry(default_tools()),
@@ -69,8 +70,9 @@ class MilkyFrog:
         settings: Settings,
         handlers: LifecycleBus | None = None,
         bundles: list[BaseHandler] | None = None,
+        tool_policy: ToolPolicy | None = None,
     ) -> MilkyFrog:
-        return cls(settings, handlers, bundles)
+        return cls(settings, handlers, bundles, tool_policy)
 
     def __enter__(self) -> MilkyFrog:
         return self

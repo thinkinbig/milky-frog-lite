@@ -28,6 +28,7 @@ class GrepTool:
     """Search file contents with ripgrep."""
 
     name = "grep"
+    requires_approval = False
     description = (
         "Search file contents in the workspace with a regex pattern using ripgrep (rg). "
         "Returns matching lines with file paths and line numbers. "

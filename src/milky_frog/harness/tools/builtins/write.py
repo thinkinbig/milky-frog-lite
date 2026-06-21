@@ -16,6 +16,7 @@ class WriteFileTool:
     """Create or overwrite a UTF-8 text file in the Workspace."""
 
     name = "write_file"
+    requires_approval = True
     description = (
         "Create or overwrite a UTF-8 text file in the workspace with the given content, "
         "creating parent directories as needed. The path must stay inside the workspace; "

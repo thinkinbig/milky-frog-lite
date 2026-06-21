@@ -17,6 +17,7 @@ class ReadFileTool:
     """Read a UTF-8 text file from the Workspace."""
 
     name = "read_file"
+    requires_approval = False
     description = (
         "Read a UTF-8 text file from the workspace and return its full contents. "
         "The path must stay inside the workspace; sensitive paths are denied."

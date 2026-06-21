@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Protocol
 
 from milky_frog.domain import ToolCall, ToolDecision
+from milky_frog.harness.tools import Tool, default_tools
+from milky_frog.harness.tools.registry import call_needs_approval
 
 
 class ToolPolicy(Protocol):
@@ -12,14 +14,16 @@ class ToolPolicy(Protocol):
 
 
 class DefaultToolPolicy:
-    """Built-in policy: read/list_dir always allowed; everything else needs approval."""
+    """Built-in policy: read-only Tools allowed; mutating calls need approval."""
 
-    _ALWAYS_ALLOW: frozenset[str] = frozenset({"read", "list_dir"})
+    def __init__(self, tools: tuple[Tool, ...] | None = None) -> None:
+        self._tools = {tool.name: tool for tool in (tools or default_tools())}
 
     def decide(self, call: ToolCall) -> ToolDecision:
-        if call.name in self._ALWAYS_ALLOW:
-            return ToolDecision.ALLOW
-        return ToolDecision.NEEDS_APPROVAL
+        tool = self._tools.get(call.name)
+        if tool is None or call_needs_approval(tool, call):
+            return ToolDecision.NEEDS_APPROVAL
+        return ToolDecision.ALLOW
 
 
 class PermissivePolicy:

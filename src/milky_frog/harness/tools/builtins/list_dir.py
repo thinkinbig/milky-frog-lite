@@ -22,6 +22,7 @@ class ListDirTool:
     """List the entries of a Workspace directory."""
 
     name = "list_dir"
+    requires_approval = False
     description = (
         "List the entries of a workspace directory, one per line, with a trailing slash on "
         "subdirectories. Defaults to the workspace root. The path must stay inside the "

@@ -17,6 +17,7 @@ class EditFileTool:
     """Replace the unique occurrence of a string in a Workspace file."""
 
     name = "edit_file"
+    requires_approval = True
     description = (
         "Replace an exact string in a workspace text file. `old` must appear exactly once "
         "(include enough surrounding context to make it unique); it is replaced with `new`. "
