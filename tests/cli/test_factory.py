@@ -6,7 +6,7 @@ import pytest
 
 from milky_frog.cli.factory import HandlerFactory
 from milky_frog.domain import ModelRequest, TextDelta
-from milky_frog.handlers.events import OnModelChunk
+from milky_frog.handlers.events import RunModelChunk
 from milky_frog.infra.observability.langfuse import LangfuseHandler
 from milky_frog.settings import LangfuseSettings, Settings
 from milky_frog.ui.handlers import StreamingHandlers
@@ -54,7 +54,7 @@ async def test_factory_registers_bundles_onto_returned_registry(tmp_path: Path) 
 
     registry, _ = HandlerFactory(_settings(tmp_path, _INACTIVE), SpyPrinter()).build()
     await registry.notify(
-        OnModelChunk(run_id="run-1", request=ModelRequest((), ()), chunk=TextDelta("hi"))
+        RunModelChunk(run_id="run-1", request=ModelRequest((), ()), chunk=TextDelta("hi"))
     )
 
     assert seen == ["hi"]

@@ -22,8 +22,8 @@ from milky_frog.domain import (
     ToolCall,
 )
 from milky_frog.handlers import (
-    BeforeTool,
     HandlerRegistry,
+    RunBeforeTool,
     RunCancelled,
     RunFailed,
     RunPaused,
@@ -263,8 +263,8 @@ async def test_dispatches_run_failed_event(tmp_path: Path) -> None:
 async def test_before_tool_handler_cannot_mutate_executed_call(tmp_path: Path) -> None:
     handlers = HandlerRegistry()
 
-    @handlers.observe(BeforeTool)
-    async def mutate_handler_copy(event: BeforeTool) -> None:
+    @handlers.observe(RunBeforeTool)
+    async def mutate_handler_copy(event: RunBeforeTool) -> None:
         event.call.arguments["text"] = "tampered"
 
     store = SqliteCheckpointStore(tmp_path / "state.db")

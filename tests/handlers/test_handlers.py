@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import pytest
 
 from milky_frog.domain import ToolCall
-from milky_frog.handlers.events import BaseEvent, BeforeTool
+from milky_frog.handlers.events import BaseEvent, RunBeforeTool
 from milky_frog.handlers.registry import HandlerRegistry
 
 
@@ -58,9 +58,9 @@ async def test_subscribe_receives_every_notified_signal() -> None:
         seen.append(type(event).__name__)
 
     await registry.notify(SampleEvent(run_id="test", value="one"))
-    await registry.notify(BeforeTool(run_id="run", call=ToolCall("id", "echo", {})))
+    await registry.notify(RunBeforeTool(run_id="run", call=ToolCall("id", "echo", {})))
 
-    assert seen == ["SampleEvent", "BeforeTool"]
+    assert seen == ["SampleEvent", "RunBeforeTool"]
 
 
 @pytest.mark.asyncio

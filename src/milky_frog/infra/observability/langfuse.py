@@ -8,16 +8,18 @@ from langfuse import Langfuse
 from langfuse.types import TraceContext
 
 from milky_frog.handlers.events import (
-    AfterModel,
-    AfterTool,
     BaseEvent,
-    BeforeModel,
-    BeforeTool,
+    RunAfterModel,
+    RunAfterTool,
+    RunBeforeModel,
+    RunBeforeTool,
     RunCancelled,
     RunCompleted,
     RunFailed,
     RunPaused,
     RunStarted,
+    RunTurnEnd,
+    RunTurnStart,
 )
 from milky_frog.handlers.registry import BaseHandler, HandlerRegistry
 from milky_frog.settings import LangfuseSettings, Settings
@@ -43,6 +45,7 @@ class LangfuseHandler(BaseHandler):
         self._trace_ids: dict[str, str] = {}
         self._generations: dict[str, Any] = {}
         self._tool_spans: dict[str, Any] = {}
+        self._turn_spans: dict[str, Any] = {}
 
     def register(self, registry: HandlerRegistry) -> None:
         registry.on(RunStarted)(self._run_started)
@@ -50,10 +53,12 @@ class LangfuseHandler(BaseHandler):
         registry.on(RunCancelled)(self._on_terminal)
         registry.on(RunPaused)(self._on_terminal)
         registry.on(RunFailed)(self._on_terminal)
-        registry.on(BeforeModel)(self._before_model)
-        registry.on(AfterModel)(self._after_model)
-        registry.on(BeforeTool)(self._before_tool)
-        registry.on(AfterTool)(self._after_tool)
+        registry.on(RunBeforeModel)(self._before_model)
+        registry.on(RunAfterModel)(self._after_model)
+        registry.on(RunBeforeTool)(self._before_tool)
+        registry.on(RunAfterTool)(self._after_tool)
+        registry.on(RunTurnStart)(self._turn_start)
+        registry.on(RunTurnEnd)(self._turn_end)
 
     async def aclose(self) -> None:
         with contextlib.suppress(Exception):
@@ -118,9 +123,31 @@ class LangfuseHandler(BaseHandler):
                 status_message=event.reason,
             ).end()
 
+    # ── Turn lifecycle ─────────────────────────────────────────────
+
+    async def _turn_start(self, event: RunTurnStart) -> None:
+        try:
+            trace_id = self._trace_ids.get(event.run_id)
+            if trace_id:
+                self._turn_spans[event.run_id] = self._client.start_observation(
+                    trace_context=TraceContext(trace_id=trace_id),
+                    name=f"turn_{event.model_call}",
+                    as_type="span",
+                )
+        except Exception:
+            logger.exception("Langfuse turn_start error")
+
+    async def _turn_end(self, event: RunTurnEnd) -> None:
+        try:
+            span = self._turn_spans.pop(event.run_id, None)
+            if span:
+                span.end()
+        except Exception:
+            logger.exception("Langfuse turn_end error")
+
     # ── Model calls ──────────────────────────────────────────────────
 
-    async def _before_model(self, event: BeforeModel) -> None:
+    async def _before_model(self, event: RunBeforeModel) -> None:
         try:
             trace_id = self._trace_ids.setdefault(event.run_id, self._client.create_trace_id())
             self._generations[event.run_id] = self._client.start_observation(
@@ -134,7 +161,7 @@ class LangfuseHandler(BaseHandler):
         except Exception:
             logger.exception("Langfuse before_model error")
 
-    async def _after_model(self, event: AfterModel) -> None:
+    async def _after_model(self, event: RunAfterModel) -> None:
         try:
             gen = self._generations.pop(event.run_id, None)
             if gen:
@@ -154,7 +181,7 @@ class LangfuseHandler(BaseHandler):
 
     # ── Tool calls ───────────────────────────────────────────────────
 
-    async def _before_tool(self, event: BeforeTool) -> None:
+    async def _before_tool(self, event: RunBeforeTool) -> None:
         try:
             trace_id = self._trace_ids.get(event.run_id)
             if trace_id:
@@ -168,7 +195,7 @@ class LangfuseHandler(BaseHandler):
         except Exception:
             logger.exception("Langfuse before_tool error")
 
-    async def _after_tool(self, event: AfterTool) -> None:
+    async def _after_tool(self, event: RunAfterTool) -> None:
         try:
             key = f"{event.run_id}:{event.call.id}"
             span = self._tool_spans.pop(key, None)
@@ -189,6 +216,10 @@ class LangfuseHandler(BaseHandler):
         if gen:
             with contextlib.suppress(Exception):
                 gen.end()
+        turn = self._turn_spans.pop(run_id, None)
+        if turn:
+            with contextlib.suppress(Exception):
+                turn.end()
         orphaned = [k for k in self._tool_spans if k.startswith(f"{run_id}:")]
         for k in orphaned:
             span = self._tool_spans.pop(k)

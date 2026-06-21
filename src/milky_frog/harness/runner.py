@@ -125,6 +125,7 @@ class Harness:
                 if is_cancelled(cancellation):
                     return await self._emitter.finish_cancelled(state)
                 request = ModelRequest(state.messages, self._tools.schemas())
+                await self._emitter.turn_started(run_id, model_call=calls + 1)
                 await self._emitter.before_model(run_id, request)
                 response = await self._model_turn(run_id, cancellation, request)
                 await self._emitter.after_model(run_id, request, response)
@@ -133,6 +134,7 @@ class Harness:
                 calls += 1
 
                 if not response.tool_calls:
+                    await self._emitter.turn_ended(run_id, model_call=calls)
                     return await self._emitter.finish_completed(state, response.content)
 
                 for call in response.tool_calls:
@@ -146,6 +148,8 @@ class Harness:
                         return await self._emitter.finish_cancelled(state)
                     state = append_tool_result(state, call, result)
                     self._emitter.persist(state)
+
+                await self._emitter.turn_ended(run_id, model_call=calls)
 
             return await self._emitter.finish_paused(state, max_model_calls)
         except asyncio.CancelledError:

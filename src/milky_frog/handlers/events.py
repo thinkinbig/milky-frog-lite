@@ -32,6 +32,55 @@ class RunStarted(BaseEvent):
 
 
 @dataclass(frozen=True)
+class RunBeforeModel(BaseEvent):
+    request: ModelRequest
+
+
+@dataclass(frozen=True)
+class RunModelReasoning(BaseEvent):
+    request: ModelRequest
+    chunk: ReasoningDelta
+
+
+@dataclass(frozen=True)
+class RunModelChunk(BaseEvent):
+    request: ModelRequest
+    chunk: TextDelta
+
+
+@dataclass(frozen=True)
+class RunAfterModel(BaseEvent):
+    request: ModelRequest
+    response: ModelResponse
+
+
+@dataclass(frozen=True)
+class RunBeforeTool(BaseEvent):
+    call: ToolCall
+
+
+@dataclass(frozen=True)
+class RunAfterTool(BaseEvent):
+    call: ToolCall
+    result: ToolResult
+
+
+@dataclass(frozen=True)
+class RunTurnStart(BaseEvent):
+    """Emitted just before each model call in a turn."""
+
+    model_call: int
+
+
+@dataclass(frozen=True)
+class RunTurnEnd(BaseEvent):
+    """Emitted after every Tool in a model turn completes, before the next
+    model call or terminal outcome."""
+
+    model_call: int
+
+
+@dataclass(frozen=True)
 class RunCompleted(BaseEvent):
     result: RunResult
 
@@ -47,40 +96,6 @@ class RunPaused(BaseEvent):
 class RunCancelled(BaseEvent):
     reason: str
     model_calls: int
-
-
-@dataclass(frozen=True)
-class BeforeModel(BaseEvent):
-    request: ModelRequest
-
-
-@dataclass(frozen=True)
-class OnModelReasoning(BaseEvent):
-    request: ModelRequest
-    chunk: ReasoningDelta
-
-
-@dataclass(frozen=True)
-class OnModelChunk(BaseEvent):
-    request: ModelRequest
-    chunk: TextDelta
-
-
-@dataclass(frozen=True)
-class AfterModel(BaseEvent):
-    request: ModelRequest
-    response: ModelResponse
-
-
-@dataclass(frozen=True)
-class BeforeTool(BaseEvent):
-    call: ToolCall
-
-
-@dataclass(frozen=True)
-class AfterTool(BaseEvent):
-    call: ToolCall
-    result: ToolResult
 
 
 @dataclass(frozen=True)

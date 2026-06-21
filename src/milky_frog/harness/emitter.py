@@ -16,28 +16,25 @@ from milky_frog.domain import (
     ToolResult,
 )
 from milky_frog.handlers import (
-    AfterModel,
-    AfterTool,
-    BeforeModel,
-    BeforeTool,
     HandlerRegistry,
-    OnModelChunk,
-    OnModelReasoning,
+    RunAfterModel,
+    RunAfterTool,
+    RunBeforeModel,
+    RunBeforeTool,
     RunCancelled,
     RunCompleted,
     RunFailed,
+    RunModelChunk,
+    RunModelReasoning,
     RunPaused,
     RunStarted,
+    RunTurnEnd,
+    RunTurnStart,
 )
 
 
 class RunEmitter:
-    """Owns the Harness persistence matrix: Checkpoint snapshot vs lifecycle notify.
-
-    Handlers observe through ``notify``; durable facts persist ``RunState``.
-    Loop slices call typed helpers here instead of touching stores directly
-    (ADR-0012).
-    """
+    """Owns the Harness persistence matrix: Checkpoint snapshot vs lifecycle notify."""
 
     def __init__(
         self,
@@ -61,45 +58,58 @@ class RunEmitter:
             final_message=final_message,
         )
 
+    # ── Run lifecycle ──────────────────────────────────────────────────────
+
     async def run_started(self, run_id: str, request: RunRequest, state: RunState) -> None:
         self.persist(state, status=RunStatus.RUNNING)
         await self._handlers.notify(RunStarted(run_id=run_id, request=deepcopy(request)))
 
     async def before_model(self, run_id: str, request: ModelRequest) -> None:
-        await self._handlers.notify(BeforeModel(run_id=run_id, request=deepcopy(request)))
+        await self._handlers.notify(RunBeforeModel(run_id=run_id, request=deepcopy(request)))
 
     async def on_model_chunk(self, run_id: str, request: ModelRequest, chunk: TextDelta) -> None:
         await self._handlers.notify(
-            OnModelChunk(run_id=run_id, request=deepcopy(request), chunk=chunk)
+            RunModelChunk(run_id=run_id, request=deepcopy(request), chunk=chunk)
         )
 
     async def on_model_reasoning(
         self, run_id: str, request: ModelRequest, chunk: ReasoningDelta
     ) -> None:
         await self._handlers.notify(
-            OnModelReasoning(run_id=run_id, request=deepcopy(request), chunk=chunk)
+            RunModelReasoning(run_id=run_id, request=deepcopy(request), chunk=chunk)
         )
 
     async def after_model(
         self, run_id: str, request: ModelRequest, response: ModelResponse
     ) -> None:
         await self._handlers.notify(
-            AfterModel(run_id=run_id, request=deepcopy(request), response=deepcopy(response))
+            RunAfterModel(run_id=run_id, request=deepcopy(request), response=deepcopy(response))
         )
 
     async def before_tool(self, run_id: str, call: ToolCall) -> None:
         await self._handlers.notify(
-            BeforeTool(run_id=run_id, call=ToolCall(call.id, call.name, deepcopy(call.arguments)))
+            RunBeforeTool(
+                run_id=run_id,
+                call=ToolCall(call.id, call.name, deepcopy(call.arguments)),
+            )
         )
 
     async def after_tool(self, run_id: str, call: ToolCall, result: ToolResult) -> None:
         await self._handlers.notify(
-            AfterTool(
+            RunAfterTool(
                 run_id=run_id,
                 call=ToolCall(call.id, call.name, deepcopy(call.arguments)),
                 result=result,
             )
         )
+
+    async def turn_started(self, run_id: str, model_call: int) -> None:
+        await self._handlers.notify(RunTurnStart(run_id=run_id, model_call=model_call))
+
+    async def turn_ended(self, run_id: str, model_call: int) -> None:
+        await self._handlers.notify(RunTurnEnd(run_id=run_id, model_call=model_call))
+
+    # ── Terminal Run flows ──────────────────────────────────────────────────
 
     async def run_completed(self, state: RunState, final_message: str, result: RunResult) -> None:
         self.persist(state, status=RunStatus.COMPLETED, final_message=final_message)
@@ -127,8 +137,6 @@ class RunEmitter:
     async def run_failed(self, state: RunState, error: Exception) -> None:
         self.persist(state, status=RunStatus.FAILED, final_message=str(error))
         await self._handlers.notify(RunFailed(run_id=state.run_id, error=error))
-
-    # ── terminal Run flows (absorbed from RunOutcomes) ──────────────────────
 
     async def finish_completed(self, state: RunState, final_message: str) -> RunResult:
         result = RunResult(
