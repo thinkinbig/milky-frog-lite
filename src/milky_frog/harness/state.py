@@ -19,6 +19,7 @@ __all__ = [
     "append_user_message",
     "seal",
     "start_run",
+    "unmatched_tool_calls",
 ]
 
 
@@ -74,7 +75,7 @@ def seal(state: RunState) -> tuple[RunState, bool]:
     result. Returns the sealed state and whether any repair was applied.
     """
     repaired = False
-    for call in _unmatched_tool_calls(state.messages):
+    for call in unmatched_tool_calls(state.messages):
         state = append_tool_result(
             state,
             call,
@@ -84,7 +85,7 @@ def seal(state: RunState) -> tuple[RunState, bool]:
     return state, repaired
 
 
-def _unmatched_tool_calls(messages: tuple[Message, ...]) -> tuple[ToolCall, ...]:
+def unmatched_tool_calls(messages: tuple[Message, ...]) -> tuple[ToolCall, ...]:
     last_assistant = next(
         (
             index

@@ -13,17 +13,14 @@ from milky_frog.domain import (
     ModelChunk,
     ModelRequest,
     ModelResponse,
+    ResumeError,
     RunRequest,
     RunStatus,
     StreamDone,
-    TextDelta,
 )
+from milky_frog.gates import AdvancePlan, ResumeGate
 from milky_frog.handlers import HandlerRegistry
-from milky_frog.harness import Harness, ResumeError
-from milky_frog.harness.resume import (
-    AdvancePlan,
-    ResumeGate,
-)
+from milky_frog.harness.runner import Harness
 from milky_frog.harness.sandbox import LocalSandbox
 from milky_frog.harness.state import (
     INTERRUPTED_TOOL_RESULT,
@@ -54,14 +51,15 @@ def test_validate_rejects_unknown_run() -> None:
         ResumeGate.validate(None, "missing", None)
 
 
-def test_validate_rejects_completed_without_prompt(tmp_path: Path) -> None:
+def test_validate_accepts_completed_run(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
     seed_run(store, "done", tmp_path, status=RunStatus.COMPLETED, final_message="ok")
     stored = store.get_run("done")
     assert stored is not None
 
-    with pytest.raises(ResumeError, match="no pending work"):
-        ResumeGate.validate(stored, "done", None)
+    # All runs can be resumed now — validate only checks existence
+    result = ResumeGate.validate(stored, "done", None)
+    assert result is stored
 
 
 def test_prepare_returns_complete_shortcut_plan(tmp_path: Path) -> None:
@@ -173,26 +171,30 @@ async def test_resume_repairs_interrupted_tool_call(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_resume_rejects_completed_run(tmp_path: Path) -> None:
+async def test_resume_continues_completed_without_prompt(tmp_path: Path) -> None:
+    """Resume without prompt on a COMPLETED run calls the model (no more rejection)."""
     store = SqliteCheckpointStore(tmp_path / "state.db")
     harness = Harness(FakeModel(), ToolRegistry((EchoTool(),)), store, HandlerRegistry())
 
-    done = await harness.run(RunRequest("echo hello", tmp_path))
-    assert done.status is RunStatus.COMPLETED
+    result = await harness.run(RunRequest("echo hello", tmp_path))
+    assert result.status is RunStatus.COMPLETED
 
-    with pytest.raises(ResumeError, match="no pending work"):
-        await harness.resume(done.run_id, max_model_calls=30)
+    # Resume without prompt — now allowed, model call happens
+    continued = await harness.resume(result.run_id, max_model_calls=30)
+    assert continued.run_id == result.run_id
+    assert continued.status is RunStatus.COMPLETED
 
 
 @pytest.mark.asyncio
-async def test_resume_rejects_failed_without_prompt(tmp_path: Path) -> None:
+async def test_resume_continues_failed_without_prompt(tmp_path: Path) -> None:
+    """Resume without prompt on a FAILED run is now allowed."""
     store = SqliteCheckpointStore(tmp_path / "state.db")
     run_id = "run-failed-no-prompt"
     seed_failed_run(store, run_id, tmp_path)
 
-    harness = Harness(FakeModel(), ToolRegistry(), store, HandlerRegistry())
-    with pytest.raises(ResumeError, match="no pending work"):
-        await harness.resume(run_id, max_model_calls=30)
+    harness = Harness(ContinuationModel("go"), ToolRegistry(), store, HandlerRegistry())
+    result = await harness.resume(run_id, max_model_calls=30)
+    assert result.status is RunStatus.COMPLETED
 
 
 @pytest.mark.asyncio
@@ -242,24 +244,18 @@ async def test_resume_rejects_live_owned_run(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_resume_finalizes_clean_response_without_model_call(tmp_path: Path) -> None:
+async def test_resume_completes_via_model_when_clean_tail(tmp_path: Path) -> None:
+    """Resume on a clean-tail run calls the model (shortcut removed)."""
     store = SqliteCheckpointStore(tmp_path / "state.db")
     run_id = "run-final-response"
     seed_assistant_turn(store, run_id, tmp_path, content="already done")
 
-    class NeverCalledModel:
-        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
-            del request
-            if False:  # pragma: no cover
-                yield TextDelta("")
-            raise AssertionError("model must not be called")
-
-    result = await Harness(NeverCalledModel(), ToolRegistry(), store, HandlerRegistry()).resume(
-        run_id, max_model_calls=30
-    )
+    result = await Harness(
+        ContinuationModel("go"), ToolRegistry(), store, HandlerRegistry()
+    ).resume(run_id, max_model_calls=30)
 
     assert result.status is RunStatus.COMPLETED
-    assert result.final_message == "already done"
+    assert result.final_message == "ack"
     assert run_status(store, run_id) is RunStatus.COMPLETED
 
 

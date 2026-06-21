@@ -13,12 +13,12 @@ from milky_frog.domain import (
     ModelChunk,
     ModelRequest,
     ModelResponse,
+    ResumeError,
     RunStatus,
     StreamDone,
     TextDelta,
 )
 from milky_frog.handlers import BaseHandler, HandlerRegistry, RunCancelled
-from milky_frog.harness import ResumeError
 from milky_frog.models import OpenAIModel
 from milky_frog.runtime import MilkyFrog, MissingModelConfiguration
 from milky_frog.settings import LangfuseSettings, Settings

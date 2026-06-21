@@ -11,8 +11,7 @@ from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.checkpoint.snapshot import dump_run_state
 from milky_frog.cli.factory import HandlerFactory
 from milky_frog.diagnostics import CheckStatus, Diagnostic
-from milky_frog.domain import RunResult
-from milky_frog.harness import ResumeError
+from milky_frog.domain import ResumeError, RunResult
 from milky_frog.project import CONFIG_FILENAME, CONFIG_TEMPLATE, PROJECT_DIRNAME
 from milky_frog.runtime import MilkyFrog, MissingModelConfiguration
 from milky_frog.settings import Settings

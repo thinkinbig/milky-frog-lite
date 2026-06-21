@@ -31,7 +31,7 @@ from milky_frog.handlers import (
     RunTurnEnd,
     RunTurnStart,
 )
-from milky_frog.harness import Harness
+from milky_frog.harness.runner import Harness
 from milky_frog.harness.tools import ToolContext, ToolRegistry, ToolResult
 from tests.checkpoint_helpers import run_status, tool_messages
 from tests.stubs import EchoTool, FakeModel, SlowStreamModel
