@@ -25,7 +25,7 @@ A model-invoked Harness operation, such as requesting user input, loading a Skil
 _Avoid_: Business tool
 
 **Handler**:
-A read-only callback registered on the Harness lifecycle-signal bus (`HandlerRegistry.notify`). Handlers observe live Runs for streaming output and observability; they do not persist state or change execution. Durable facts live in the Checkpoint snapshot instead.
+A read-only callback registered on the Harness lifecycle-signal bus (`LifecycleBus.notify`). Handlers observe live Runs for streaming output and observability; they do not persist state or change execution. Durable facts live in the Checkpoint snapshot instead.
 _Avoid_: Middleware, hook, intercept
 
 **Lifecycle signal**:
@@ -85,7 +85,7 @@ _避免使用_：插件、函数
 _避免使用_：业务工具
 
 **Handler（处理器）**：
-注册到 Harness 生命周期信号总线的只读回调（`HandlerRegistry.notify`）。Handler 在 Run 进行期间观察流式输出与可观测性；不持久化状态、不改变执行。持久化事实由 Checkpoint 快照单独记录。
+注册到 Harness 生命周期信号总线的只读回调（`LifecycleBus.notify`）。Handler 在 Run 进行期间观察流式输出与可观测性；不持久化状态、不改变执行。持久化事实由 Checkpoint 快照单独记录。
 _避免使用_：Middleware、Hook、intercept
 
 **Lifecycle signal（生命周期信号）**：

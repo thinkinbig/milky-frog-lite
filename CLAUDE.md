@@ -66,12 +66,12 @@ qualifier, and never merge them into one base type:
 | Lane | Where | Lifetime | Purpose |
 |------|-------|----------|---------|
 | **Checkpoint snapshot** | `checkpoint/snapshot.py`, `runs.state_json` | Durable (SQLite) | Resume source of truth |
-| **Lifecycle signal** | `handlers/events.py`, bus in `handlers/registry.py` | Ephemeral (in-process) | UI streaming, Langfuse (`notify`) |
+| **Lifecycle signal** | `handlers/events.py`, bus in `handlers/bus.py` | Ephemeral (in-process) | UI streaming, Langfuse (`notify`) |
 | **Harness policy** | Explicit `Protocol` deps on `Harness` (future) | Per-call | Authorization, context build, etc. |
 
 RunState snapshots are serialized via Pydantic models in `checkpoint/snapshot.py` (ADR-0014).
 Lifecycle signals are frozen Pydantic `BaseEvent` subclasses (ADR-0004, ADR-0012).
-`HandlerRegistry` is read-only: `observe` / `on` / `subscribe` and `notify` only —
+`LifecycleBus` is read-only: `observe` / `on` / `subscribe` and `notify` only —
 no intercept channel, no return values that change execution.
 
 ### Seams
@@ -82,8 +82,8 @@ named class — so alternatives can be swapped without touching the Harness:
 - `models/` — `Model` protocol, `OpenAIModel` adapter.
 - `tools/` — `Tool` protocol + `ToolRegistry` + built-in Tools.
 - `checkpoint/` — `CheckpointStore` protocol, `SqliteCheckpointStore`, `RunSnapshot` serialization (ADR-0014).
-- `harness/state.py` — transcript mutators and `seal` (interrupted-tool repair).
-- `handlers/` — lifecycle signals + read-only `HandlerRegistry` (ADR-0012).
+- `harness/state.py` — transcript mutators and `repair_transcript` (interrupted-tool repair).
+- `handlers/` — lifecycle signals + read-only `LifecycleBus` (ADR-0012).
 - `ui/protocols.py` — `RunAdvancer`, `RunCanceller` for the interactive loop.
 - `skills/` — `SkillCatalog`, declarative `SKILL.md` bundles (never executable).
 - `sandbox/` — `LocalSandbox` policy (denies `.git`, `.env`, keys; path-escape
