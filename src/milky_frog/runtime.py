@@ -10,7 +10,7 @@ from types import FrameType, TracebackType
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import ResumeError, RunCancellation, RunRequest, RunResult
 from milky_frog.gates import ToolGate
-from milky_frog.handlers import BaseHandler, HandlerRegistry
+from milky_frog.handlers import BaseHandler, LifecycleBus
 from milky_frog.harness.runner import Harness
 from milky_frog.harness.tools import ToolRegistry, default_tools
 from milky_frog.models import OpenAIModel
@@ -38,7 +38,7 @@ class MilkyFrog:
     def __init__(
         self,
         settings: Settings,
-        handlers: HandlerRegistry | None = None,
+        handlers: LifecycleBus | None = None,
         bundles: list[BaseHandler] | None = None,
     ) -> None:
         api_key, model = self.require_model_configuration(settings)
@@ -49,7 +49,7 @@ class MilkyFrog:
             model=OpenAIModel(api_key=api_key, model=model, base_url=settings.base_url),
             tools=ToolRegistry(default_tools()),
             checkpoints=self._checkpoints,
-            handlers=handlers if handlers is not None else HandlerRegistry(),
+            handlers=handlers if handlers is not None else LifecycleBus(),
             tool_gate=self._tool_gate,
         )
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -67,7 +67,7 @@ class MilkyFrog:
     def from_settings(
         cls,
         settings: Settings,
-        handlers: HandlerRegistry | None = None,
+        handlers: LifecycleBus | None = None,
         bundles: list[BaseHandler] | None = None,
     ) -> MilkyFrog:
         return cls(settings, handlers, bundles)

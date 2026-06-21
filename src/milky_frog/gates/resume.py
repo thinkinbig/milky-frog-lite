@@ -10,7 +10,7 @@ from milky_frog.harness.state import append_user_message, seal
 
 
 @dataclass(frozen=True, slots=True)
-class AdvancePlan:
+class PreparedRun:
     """``prepare`` has committed resume state; advance the loaded state."""
 
     state: RunState
@@ -37,7 +37,7 @@ class ResumeGate:
         sandbox: Sandbox,
         prompt: str | None,
         updated_at: datetime,
-    ) -> AdvancePlan:
+    ) -> PreparedRun:
         state = self._checkpoints.load_state(run_id)
         if stored.status is not RunStatus.WAITING_FOR_APPROVAL:
             state, _repaired = seal(state)
@@ -46,4 +46,4 @@ class ResumeGate:
             state = append_user_message(state, prompt)
 
         self._checkpoints.prepare_resume(run_id, updated_at, state)
-        return AdvancePlan(state=state, sandbox=sandbox)
+        return PreparedRun(state=state, sandbox=sandbox)

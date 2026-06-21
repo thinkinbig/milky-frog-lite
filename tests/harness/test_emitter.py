@@ -6,14 +6,14 @@ import pytest
 
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import RunResult, RunState, RunStatus
-from milky_frog.handlers import HandlerRegistry, RunCancelled, RunFailed, RunTurnEnd, RunTurnStart
+from milky_frog.handlers import LifecycleBus, RunCancelled, RunFailed, RunTurnEnd, RunTurnStart
 from milky_frog.harness.emitter import RunEmitter
 
 
 @pytest.mark.asyncio
 async def test_run_cancelled_persists_checkpoint_before_handler(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    registry = HandlerRegistry()
+    registry = LifecycleBus()
     checkpoint_seen = False
 
     @registry.on(RunCancelled)
@@ -35,7 +35,7 @@ async def test_run_cancelled_persists_checkpoint_before_handler(tmp_path: Path) 
 @pytest.mark.asyncio
 async def test_run_failed_persists_checkpoint_before_handler(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    registry = HandlerRegistry()
+    registry = LifecycleBus()
     checkpoint_seen = False
 
     @registry.on(RunFailed)
@@ -55,7 +55,7 @@ async def test_run_failed_persists_checkpoint_before_handler(tmp_path: Path) -> 
 
 @pytest.mark.asyncio
 async def test_turn_started_notifies_handler(tmp_path: Path) -> None:
-    registry = HandlerRegistry()
+    registry = LifecycleBus()
     seen: list[RunTurnStart] = []
 
     @registry.on(RunTurnStart)
@@ -72,7 +72,7 @@ async def test_turn_started_notifies_handler(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_turn_ended_notifies_handler(tmp_path: Path) -> None:
-    registry = HandlerRegistry()
+    registry = LifecycleBus()
     seen: list[RunTurnEnd] = []
 
     @registry.on(RunTurnEnd)

@@ -7,6 +7,7 @@ from typing import Any
 from langfuse import Langfuse
 from langfuse.types import TraceContext
 
+from milky_frog.handlers.bus import BaseHandler, LifecycleBus
 from milky_frog.handlers.events import (
     BaseEvent,
     RunAfterModel,
@@ -21,7 +22,6 @@ from milky_frog.handlers.events import (
     RunTurnEnd,
     RunTurnStart,
 )
-from milky_frog.handlers.registry import BaseHandler, HandlerRegistry
 from milky_frog.settings import LangfuseSettings, Settings
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ class LangfuseHandler(BaseHandler):
         self._tool_spans: dict[str, Any] = {}
         self._turn_spans: dict[str, Any] = {}
 
-    def register(self, registry: HandlerRegistry) -> None:
+    def register(self, registry: LifecycleBus) -> None:
         registry.on(RunStarted)(self._run_started)
         registry.on(RunCompleted)(self._on_terminal)
         registry.on(RunCancelled)(self._on_terminal)

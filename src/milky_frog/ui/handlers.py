@@ -3,7 +3,7 @@ from __future__ import annotations
 from milky_frog.domain import RunUsage
 from milky_frog.handlers import (
     BaseHandler,
-    HandlerRegistry,
+    LifecycleBus,
     RunAfterModel,
     RunAfterTool,
     RunBeforeTool,
@@ -22,7 +22,7 @@ class StreamingHandlers(BaseHandler):
         self._printer = printer
         self._running = RunUsage()
 
-    def register(self, registry: HandlerRegistry) -> None:
+    def register(self, registry: LifecycleBus) -> None:
         registry.on(RunStarted)(self._reset_usage)
         registry.on(RunModelReasoning)(self._print_reasoning)
         registry.on(RunModelChunk)(self._print_chunk)

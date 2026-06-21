@@ -25,7 +25,7 @@ class _RegistrationSortKey:
         return (-registration.priority, registration.order)
 
 
-class HandlerRegistry:
+class LifecycleBus:
     """Instance-owned read-only notification bus for Harness lifecycle signals.
 
     Handlers registered via ``observe`` (or ``on`` / ``subscribe``) may inspect
@@ -82,14 +82,14 @@ class HandlerRegistry:
 class BaseHandler(ABC):
     """A cross-cutting bundle of Handlers with an optional resource lifetime.
 
-    A bundle wires several callbacks onto a HandlerRegistry in one place (its
+    A bundle wires several callbacks onto a LifecycleBus in one place (its
     own file) via ``register``. Bundles that hold resources for the process's
     lifetime (clients, connections) override ``aclose``; the rest inherit the
     no-op default so the runtime can release every bundle uniformly.
     """
 
     @abstractmethod
-    def register(self, registry: HandlerRegistry) -> None:
+    def register(self, registry: LifecycleBus) -> None:
         """Wire this bundle's callbacks onto the registry."""
 
     async def aclose(self) -> None:  # noqa: B027 - intentional no-op default; resource-holding bundles override

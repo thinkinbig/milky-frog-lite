@@ -1,5 +1,5 @@
 from milky_frog.domain import ResumeError
-from milky_frog.gates.resume import AdvancePlan, ResumeGate
+from milky_frog.gates.resume import PreparedRun, ResumeGate
 from milky_frog.gates.tool import (
     DefaultToolPolicy,
     DenyAllPolicy,
@@ -9,10 +9,10 @@ from milky_frog.gates.tool import (
 )
 
 __all__ = [
-    "AdvancePlan",
     "DefaultToolPolicy",
     "DenyAllPolicy",
     "PermissivePolicy",
+    "PreparedRun",
     "ResumeError",
     "ResumeGate",
     "ToolGate",

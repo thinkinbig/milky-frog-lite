@@ -25,8 +25,8 @@ from milky_frog.domain import (
     ToolRunCancelled,
     is_cancelled,
 )
-from milky_frog.gates import AdvancePlan, ResumeError, ResumeGate, ToolGate
-from milky_frog.handlers import HandlerRegistry
+from milky_frog.gates import PreparedRun, ResumeError, ResumeGate, ToolGate
+from milky_frog.handlers import LifecycleBus
 from milky_frog.harness.emitter import RunEmitter
 from milky_frog.harness.sandbox import LocalSandbox, Sandbox, SandboxFactory
 from milky_frog.harness.state import (
@@ -47,7 +47,7 @@ class Harness:
         model: Model,
         tools: ToolRegistry,
         checkpoints: CheckpointStore,
-        handlers: HandlerRegistry,
+        handlers: LifecycleBus,
         sandbox_factory: SandboxFactory = LocalSandbox,
         tool_gate: ToolGate | None = None,
     ) -> None:
@@ -175,14 +175,14 @@ class Harness:
 
     async def _apply_approvals(
         self,
-        plan: AdvancePlan,
+        plan: PreparedRun,
         run_id: str,
         sandbox: Sandbox,
         cancellation: RunCancellation | None,
-    ) -> AdvancePlan | RunResult:
+    ) -> PreparedRun | RunResult:
         """Execute or deny tool calls that were pending approval on resume.
 
-        Returns an updated ``AdvancePlan`` when all pending calls are resolved,
+        Returns an updated ``PreparedRun`` when all pending calls are resolved,
         or a ``RunResult`` if approval is still needed (re-pause).
         """
         pending = unmatched_tool_calls(plan.state.messages)
@@ -203,7 +203,7 @@ class Harness:
                 result = ToolResult("denied by user", is_error=True)
             else:
                 return await self._emitter.finish_approval_needed(plan.state, [call.name])
-            plan = AdvancePlan(
+            plan = PreparedRun(
                 state=append_tool_result(plan.state, call, result),
                 sandbox=plan.sandbox,
             )

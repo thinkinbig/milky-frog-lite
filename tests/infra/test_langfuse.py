@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from milky_frog.domain import RunRequest, RunResult, RunStatus
+from milky_frog.handlers.bus import LifecycleBus
 from milky_frog.handlers.events import (
     RunCancelled,
     RunCompleted,
@@ -15,7 +16,6 @@ from milky_frog.handlers.events import (
     RunTurnEnd,
     RunTurnStart,
 )
-from milky_frog.handlers.registry import HandlerRegistry
 from milky_frog.infra.observability.langfuse import LangfuseHandler
 from milky_frog.settings import LangfuseSettings
 from tests.stubs import LangfuseClientFactory
@@ -81,7 +81,7 @@ async def test_langfuse_run_started_registers_trace(
     langfuse_handler: tuple[LangfuseHandler, FakeLangfuseClient],
 ) -> None:
     handler, client = langfuse_handler
-    registry = HandlerRegistry()
+    registry = LifecycleBus()
     handler.register(registry)
 
     await registry.notify(RunStarted(run_id="run-1", request=_run_request()))
@@ -95,7 +95,7 @@ async def test_langfuse_run_completed_records_span_and_cleans_up(
     langfuse_handler: tuple[LangfuseHandler, FakeLangfuseClient],
 ) -> None:
     handler, client = langfuse_handler
-    registry = HandlerRegistry()
+    registry = LifecycleBus()
     handler.register(registry)
     await registry.notify(RunStarted(run_id="run-1", request=_run_request()))
 
@@ -113,7 +113,7 @@ async def test_langfuse_run_cancelled_records_warning_span_and_cleans_up(
     langfuse_handler: tuple[LangfuseHandler, FakeLangfuseClient],
 ) -> None:
     handler, client = langfuse_handler
-    registry = HandlerRegistry()
+    registry = LifecycleBus()
     handler.register(registry)
     await registry.notify(RunStarted(run_id="run-1", request=_run_request()))
 
@@ -131,7 +131,7 @@ async def test_langfuse_run_paused_records_warning_span_and_cleans_up(
     langfuse_handler: tuple[LangfuseHandler, FakeLangfuseClient],
 ) -> None:
     handler, client = langfuse_handler
-    registry = HandlerRegistry()
+    registry = LifecycleBus()
     handler.register(registry)
     await registry.notify(RunStarted(run_id="run-1", request=_run_request()))
 
@@ -155,7 +155,7 @@ async def test_langfuse_run_failed_records_error_span_and_cleans_up(
     langfuse_handler: tuple[LangfuseHandler, FakeLangfuseClient],
 ) -> None:
     handler, client = langfuse_handler
-    registry = HandlerRegistry()
+    registry = LifecycleBus()
     handler.register(registry)
     await registry.notify(RunStarted(run_id="run-1", request=_run_request()))
 
@@ -173,7 +173,7 @@ async def test_langfuse_terminal_event_flushes_and_cleans_up(
     langfuse_handler: tuple[LangfuseHandler, FakeLangfuseClient],
 ) -> None:
     handler, client = langfuse_handler
-    registry = HandlerRegistry()
+    registry = LifecycleBus()
     handler.register(registry)
     await registry.notify(RunStarted(run_id="run-1", request=_run_request()))
 
@@ -200,7 +200,7 @@ async def test_langfuse_turn_events_create_and_end_span(
     langfuse_handler: tuple[LangfuseHandler, FakeLangfuseClient],
 ) -> None:
     handler, client = langfuse_handler
-    registry = HandlerRegistry()
+    registry = LifecycleBus()
     handler.register(registry)
     await registry.notify(RunStarted(run_id="run-1", request=_run_request()))
 
@@ -219,7 +219,7 @@ async def test_langfuse_turn_span_nests_model_and_tool(
 ) -> None:
     """Turn span opens at RunTurnStart and closes at RunTurnEnd."""
     handler, client = langfuse_handler
-    registry = HandlerRegistry()
+    registry = LifecycleBus()
     handler.register(registry)
     await registry.notify(RunStarted(run_id="run-1", request=_run_request()))
 
