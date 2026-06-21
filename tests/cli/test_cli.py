@@ -97,9 +97,8 @@ def test_no_arguments_starts_interactive_mode(monkeypatch: object, tmp_path: Pat
             settings: object,
             handlers: object = None,
             bundles: object = None,
-            steering_producer: object = None,
         ) -> FakeMilkyFrog:
-            del settings, handlers, bundles, steering_producer
+            del settings, handlers, bundles
             return cls()
 
         def __enter__(self) -> FakeMilkyFrog:
@@ -155,9 +154,8 @@ def test_resume_without_task_advances_pending_work(
             settings: object,
             handlers: object = None,
             bundles: object = None,
-            steering_producer: object = None,
         ) -> FakeMilkyFrog:
-            del settings, handlers, bundles, steering_producer
+            del settings, handlers, bundles
             return cls()
 
         def __enter__(self) -> FakeMilkyFrog:
@@ -203,9 +201,8 @@ def test_resume_with_task_continues_run(monkeypatch: pytest.MonkeyPatch, tmp_pat
             settings: object,
             handlers: object = None,
             bundles: object = None,
-            steering_producer: object = None,
         ) -> FakeMilkyFrog:
-            del settings, handlers, bundles, steering_producer
+            del settings, handlers, bundles
             return cls()
 
         def __enter__(self) -> FakeMilkyFrog:

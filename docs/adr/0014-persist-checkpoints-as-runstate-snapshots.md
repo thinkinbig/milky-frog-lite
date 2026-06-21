@@ -10,7 +10,7 @@ Milky Frog is a **lite** local agent. Checkpoint persistence no longer uses an a
 | [0009](0009-resume-runs-by-folding-the-checkpoint-log.md) | `fold`/`reduce`/`RunEvent` repair → `load`/`seal`/mutators; `RunState` + validation kept |
 | [0013](0013-type-checkpoint-events-as-a-pydantic-discriminated-union.md) | Entire discriminated union removed |
 
-**Still authoritative:** [0012](0012-shrink-handler-registry-to-a-read-only-lifecycle-bus.md) (lifecycle bus), [0010](0010-continue-a-run-with-a-new-user-turn.md) / [0011](0011-steer-an-active-run-via-a-background-stdin-channel.md) (behavior; persistence wording updated above).
+**Still authoritative:** [0012](0012-shrink-handler-registry-to-a-read-only-lifecycle-bus.md) (lifecycle bus), [0010](0010-continue-a-run-with-a-new-user-turn.md) (multi-turn continuation). [0011](0011-steer-an-active-run-via-a-background-stdin-channel.md) is superseded (removed; lite simplification).
 
 ## The problem
 

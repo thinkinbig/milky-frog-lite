@@ -1,37 +1,42 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+from collections.abc import Coroutine
+from copy import deepcopy
+from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from milky_frog.checkpoint import CheckpointStore, RunClaimError
 from milky_frog.domain import (
     ModelRequest,
+    ModelResponse,
+    ReasoningDelta,
     RunCancellation,
     RunRequest,
     RunResult,
     RunState,
-    SteeringChannel,
+    StreamDone,
+    TextDelta,
+    ToolCall,
+    ToolResult,
 )
 from milky_frog.handlers import HandlerRegistry
 from milky_frog.harness.cancellation import ToolRunCancelled, is_cancelled
 from milky_frog.harness.emitter import RunEmitter
-from milky_frog.harness.outcomes import RunOutcomes
 from milky_frog.harness.resume import (
-    CompleteShortcutPlan,
     ResumeError,
     ResumeGate,
+    completed_tail,
 )
 from milky_frog.harness.sandbox import LocalSandbox, Sandbox
 from milky_frog.harness.state import (
     append_model_response,
     append_tool_result,
-    append_user_message,
     start_run,
 )
-from milky_frog.harness.steering import SteeringPolicy
-from milky_frog.harness.streaming import ModelStreamer
-from milky_frog.harness.tool_runner import ToolRunner
-from milky_frog.harness.tools import ToolRegistry
+from milky_frog.harness.tools import ToolContext, ToolRegistry
 from milky_frog.models import Model
 
 
@@ -45,14 +50,11 @@ class Harness:
         checkpoints: CheckpointStore,
         handlers: HandlerRegistry,
     ) -> None:
+        self._model = model
         self._tools = tools
         self._checkpoints = checkpoints
         self._emitter = RunEmitter(checkpoints, handlers)
-        self._steering = SteeringPolicy(self._append_user_message)
-        self._outcomes = RunOutcomes(self._emitter, self._steering)
-        self._resume_gate = ResumeGate(checkpoints, self._steering)
-        self._streamer = ModelStreamer(model, self._emitter)
-        self._tool_runner = ToolRunner(tools, self._emitter)
+        self._resume_gate = ResumeGate(checkpoints)
 
     async def run(self, run_request: RunRequest) -> RunResult:
         """Start a fresh Run: seed the transcript from the prompt, then advance."""
@@ -67,7 +69,6 @@ class Harness:
                 LocalSandbox(workspace),
                 run_request.cancellation,
                 run_request.max_model_calls,
-                run_request.steering,
             )
 
     async def resume(
@@ -77,7 +78,6 @@ class Harness:
         max_model_calls: int,
         cancellation: RunCancellation | None = None,
         prompt: str | None = None,
-        steering: SteeringChannel | None = None,
     ) -> RunResult:
         """Advance an existing Run: load its snapshot and repair any interrupted
         Tool, then either pick up its pending work (no prompt) or append a new user
@@ -98,31 +98,13 @@ class Harness:
                     stored,
                     sandbox=sandbox,
                     prompt=prompt,
-                    steering=steering,
                     updated_at=stored.updated_at,
                 )
-                if isinstance(plan, CompleteShortcutPlan):
-                    result_or_state = await self._outcomes.finish_completed(
-                        plan.state,
-                        plan.tail,
-                        steering=steering,
-                    )
-                    if isinstance(result_or_state, RunState):
-                        return await self._advance(
-                            result_or_state,
-                            plan.sandbox,
-                            cancellation,
-                            max_model_calls,
-                            steering,
-                        )
-                    return result_or_state
-                return await self._advance(
-                    plan.state,
-                    plan.sandbox,
-                    cancellation,
-                    max_model_calls,
-                    steering,
-                )
+                if prompt is None:
+                    tail = completed_tail(plan.state)
+                    if tail is not None:
+                        return await self._emitter.finish_completed(plan.state, tail)
+                return await self._advance(plan.state, plan.sandbox, cancellation, max_model_calls)
         except RunClaimError as error:
             raise ResumeError(str(error)) from error
 
@@ -132,66 +114,108 @@ class Harness:
         sandbox: Sandbox,
         cancellation: RunCancellation | None,
         max_model_calls: int,
-        steering: SteeringChannel | None = None,
     ) -> RunResult:
         """Drive the model and Tool loop for at most ``max_model_calls`` fresh
         model calls, threading ``RunState`` and growing it through state mutators.
-        Steering lines drained between turns are folded in as user turns, and a
-        non-empty drain keeps the loop going instead of completing.
         """
         run_id = state.run_id
         try:
             calls = 0
             while calls < max_model_calls:
                 if is_cancelled(cancellation):
-                    return await self._outcomes.finish_cancelled(state)
-                state = self._steering.absorb_turn_boundary(state, steering)
+                    return await self._emitter.finish_cancelled(state)
                 request = ModelRequest(state.messages, self._tools.schemas())
                 await self._emitter.before_model(run_id, request)
-                response = await self._streamer.consume(run_id, cancellation, request)
+                response = await self._model_turn(run_id, cancellation, request)
                 await self._emitter.after_model(run_id, request, response)
                 state = append_model_response(state, response)
                 self._emitter.persist(state)
                 calls += 1
 
                 if not response.tool_calls:
-                    steered = self._steering.absorb_turn_boundary(state, steering)
-                    if SteeringPolicy.added_turns(state, steered):
-                        state = steered
-                        continue
-                    result_or_state = await self._outcomes.finish_completed(
-                        state,
-                        response.content,
-                        steering=steering,
-                    )
-                    if isinstance(result_or_state, RunState):
-                        state = result_or_state
-                        continue
-                    return result_or_state
+                    return await self._emitter.finish_completed(state, response.content)
 
                 for call in response.tool_calls:
                     if is_cancelled(cancellation):
-                        return await self._outcomes.finish_cancelled(state)
+                        return await self._emitter.finish_cancelled(state)
                     try:
-                        result = await self._tool_runner.execute(
+                        result = await self._execute_tool(
                             run_id, state.workspace, sandbox, call, cancellation
                         )
                     except ToolRunCancelled:
-                        return await self._outcomes.finish_cancelled(state)
+                        return await self._emitter.finish_cancelled(state)
                     state = append_tool_result(state, call, result)
                     self._emitter.persist(state)
 
-            return await self._outcomes.finish_paused(state, max_model_calls)
+            return await self._emitter.finish_paused(state, max_model_calls)
         except asyncio.CancelledError:
             if is_cancelled(cancellation):
-                return await self._outcomes.finish_cancelled(state)
+                return await self._emitter.finish_cancelled(state)
             raise
         except Exception as error:
             await self._emitter.run_failed(state, error)
             raise
 
-    def _append_user_message(self, state: RunState, content: str) -> RunState:
-        """Append a user turn, persist it, and return the updated state."""
-        state = append_user_message(state, content)
-        self._emitter.persist(state)
-        return state
+    # ── private helpers (absorbed from ModelStreamer / ToolRunner) ──────────
+
+    async def _model_turn(
+        self,
+        run_id: str,
+        cancellation: RunCancellation | None,
+        request: ModelRequest,
+    ) -> ModelResponse:
+        """Stream the model's response, forwarding text and reasoning deltas live."""
+        response: ModelResponse | None = None
+        observer_request = deepcopy(request)
+        async for chunk in self._model.stream(request):
+            if is_cancelled(cancellation):
+                raise asyncio.CancelledError
+            if isinstance(chunk, TextDelta):
+                await self._emitter.on_model_chunk(run_id, observer_request, chunk)
+            elif isinstance(chunk, ReasoningDelta):
+                await self._emitter.on_model_reasoning(run_id, observer_request, chunk)
+            elif isinstance(chunk, StreamDone):
+                response = chunk.response
+                break
+        if response is None:
+            raise RuntimeError("model stream ended without a StreamDone chunk")
+        return response
+
+    async def _execute_tool(
+        self,
+        run_id: str,
+        workspace: Path,
+        sandbox: Sandbox,
+        call: ToolCall,
+        cancellation: RunCancellation | None,
+    ) -> ToolResult:
+        """Run one Tool call with lifecycle signals and cancellation polling."""
+        await self._emitter.before_tool(run_id, call)
+        tool = self._tools.get(call.name)
+        context = ToolContext(run_id, workspace, cancellation, sandbox)
+        try:
+            input_model = tool.input_model.model_validate(call.arguments)
+            result = await self._run_with_cancellation(
+                tool.execute(context, input_model), cancellation
+            )
+        except ToolRunCancelled:
+            raise
+        except Exception as error:
+            result = ToolResult(f"{type(error).__name__}: {error}", is_error=True)
+        await self._emitter.after_tool(run_id, call, result)
+        return result
+
+    @staticmethod
+    async def _run_with_cancellation(
+        coro: Coroutine[Any, Any, ToolResult],
+        cancellation: RunCancellation | None,
+    ) -> ToolResult:
+        task: asyncio.Task[ToolResult] = asyncio.create_task(coro)
+        while not task.done():
+            if is_cancelled(cancellation):
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+                raise ToolRunCancelled
+            await asyncio.sleep(0)
+        return await task

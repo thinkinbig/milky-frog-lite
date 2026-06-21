@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import Protocol, runtime_checkable
 
 from pydantic import JsonValue
 
@@ -208,25 +207,12 @@ class RunCancellation:
         return self._cancelled
 
 
-@runtime_checkable
-class SteeringChannel(Protocol):
-    """Source of user lines to inject into an active Run between turns.
-
-    ``drain`` returns every line queued since the last call (empty when none),
-    so the Harness can fold mid-Run input in without depending on how the lines
-    are read (a background reader, a test double, …).
-    """
-
-    def drain(self) -> list[str]: ...
-
-
 @dataclass(frozen=True, slots=True)
 class RunRequest:
     prompt: str
     workspace: Path
     max_model_calls: int = DEFAULT_MAX_MODEL_CALLS
     cancellation: RunCancellation | None = None
-    steering: SteeringChannel | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -11,7 +11,6 @@ from pydantic import BaseModel
 
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import (
-    MessageRole,
     ModelChunk,
     ModelRequest,
     ModelResponse,
@@ -33,7 +32,7 @@ from milky_frog.handlers import (
 from milky_frog.harness import Harness
 from milky_frog.harness.tools import ToolContext, ToolRegistry, ToolResult
 from tests.checkpoint_helpers import run_status, tool_messages
-from tests.stubs import EchoTool, FakeModel, FakeSteering, SlowStreamModel
+from tests.stubs import EchoTool, FakeModel, SlowStreamModel
 
 
 @pytest.mark.asyncio
@@ -284,26 +283,19 @@ async def test_run_started_handler_cannot_control_live_run(tmp_path: Path) -> No
     @handlers.observe(RunStarted)
     async def mutate_handler_snapshot(event: RunStarted) -> None:
         assert event.request.cancellation is not None
-        assert event.request.steering is not None
         event.request.cancellation.cancel()
-        event.request.steering.drain()
 
-    class SteeringAwareModel:
+    class SimpleModel:
         async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
-            users = [
-                message.content for message in request.messages if message.role is MessageRole.USER
-            ]
-            assert users == ["go", "steer"]
             yield StreamDone(ModelResponse(content="done"))
 
     cancellation = RunCancellation()
-    steering = FakeSteering(["steer"])
     result = await Harness(
-        SteeringAwareModel(),
+        SimpleModel(),
         ToolRegistry(),
         SqliteCheckpointStore(tmp_path / "state.db"),
         handlers,
-    ).run(RunRequest("go", tmp_path, cancellation=cancellation, steering=steering))
+    ).run(RunRequest("go", tmp_path, cancellation=cancellation))
 
     assert result.status is RunStatus.COMPLETED
     assert not cancellation.is_cancelled

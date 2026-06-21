@@ -16,7 +16,7 @@ Checkpoint persistence unless a newer ADR says otherwise.
 | [0008](0008-compose-handlers-via-providers-with-lifetime.md) | Handler bundles | Current |
 | [0009](0009-resume-runs-by-folding-the-checkpoint-log.md) | Resume / `RunState` | **Partially superseded by 0014** (`seal`, validation kept) |
 | [0010](0010-continue-a-run-with-a-new-user-turn.md) | Multi-turn `resume(prompt)` | Current (persistence wording in 0014) |
-| [0011](0011-steer-an-active-run-via-a-background-stdin-channel.md) | Mid-run steering | Current (persistence wording in 0014) |
+| [0011](0011-steer-an-active-run-via-a-background-stdin-channel.md) | Mid-run steering | **Superseded** (removed; lite simplification) |
 | [0012](0012-shrink-handler-registry-to-a-read-only-lifecycle-bus.md) | Read-only Handler bus | Current |
 | [0013](0013-type-checkpoint-events-as-a-pydantic-discriminated-union.md) | `CheckpointBody` union | **Superseded by 0014** |
 | [0014](0014-persist-checkpoints-as-runstate-snapshots.md) | **`RunState` snapshot Checkpoint** | **Current source of truth for persistence** |

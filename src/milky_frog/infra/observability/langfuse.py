@@ -10,6 +10,7 @@ from langfuse.types import TraceContext
 from milky_frog.handlers.events import (
     AfterModel,
     AfterTool,
+    BaseEvent,
     BeforeModel,
     BeforeTool,
     RunCancelled,
@@ -29,7 +30,6 @@ class LangfuseHandler(BaseHandler):
 
     @classmethod
     def from_settings(cls, settings: Settings) -> LangfuseHandler | None:
-        """Build the Langfuse Handler when observability is configured, else None."""
         if not settings.langfuse.active:
             return None
         return cls(settings.langfuse)
@@ -46,17 +46,16 @@ class LangfuseHandler(BaseHandler):
 
     def register(self, registry: HandlerRegistry) -> None:
         registry.on(RunStarted)(self._run_started)
-        registry.on(RunCompleted)(self._run_completed)
-        registry.on(RunCancelled)(self._run_cancelled)
-        registry.on(RunPaused)(self._run_paused)
+        registry.on(RunCompleted)(self._on_terminal)
+        registry.on(RunCancelled)(self._on_terminal)
+        registry.on(RunPaused)(self._on_terminal)
+        registry.on(RunFailed)(self._on_terminal)
         registry.on(BeforeModel)(self._before_model)
         registry.on(AfterModel)(self._after_model)
         registry.on(BeforeTool)(self._before_tool)
         registry.on(AfterTool)(self._after_tool)
-        registry.on(RunFailed)(self._run_failed)
 
     async def aclose(self) -> None:
-        """Flush buffered observations and shut down the client at session end."""
         with contextlib.suppress(Exception):
             self._client.flush()
         shutdown = getattr(self._client, "shutdown", None)
@@ -64,23 +63,7 @@ class LangfuseHandler(BaseHandler):
             with contextlib.suppress(Exception):
                 shutdown()
 
-    def _finalize_run(self, run_id: str) -> None:
-        """Close any open observations for the run, then flush its batch."""
-        self._cleanup_run(run_id)
-        with contextlib.suppress(Exception):
-            self._client.flush()
-
-    def _cleanup_run(self, run_id: str) -> None:
-        self._trace_ids.pop(run_id, None)
-        gen = self._generations.pop(run_id, None)
-        if gen:
-            with contextlib.suppress(Exception):
-                gen.end()
-        orphaned = [k for k in self._tool_spans if k.startswith(f"{run_id}:")]
-        for k in orphaned:
-            span = self._tool_spans.pop(k)
-            with contextlib.suppress(Exception):
-                span.end()
+    # ── Run lifecycle ────────────────────────────────────────────────
 
     async def _run_started(self, event: RunStarted) -> None:
         try:
@@ -88,57 +71,59 @@ class LangfuseHandler(BaseHandler):
         except Exception:
             logger.exception("Langfuse run_started error")
 
-    async def _run_completed(self, event: RunCompleted) -> None:
+    async def _on_terminal(self, event: BaseEvent) -> None:
         try:
-            trace_id = self._trace_ids.get(event.run_id)
-            if trace_id:
-                self._client.start_observation(
-                    trace_context=TraceContext(trace_id=trace_id),
-                    name="run_completed",
-                    as_type="span",
-                    output=event.result.final_message,
-                ).end()
+            self._end_run(event)
         except Exception:
-            logger.exception("Langfuse run_completed error")
+            logger.exception("Langfuse terminal error: %s", type(event).__name__)
         finally:
-            self._finalize_run(event.run_id)
+            self._cleanup_run(event.run_id)
+            with contextlib.suppress(Exception):
+                self._client.flush()
 
-    async def _run_cancelled(self, event: RunCancelled) -> None:
-        try:
-            trace_id = self._trace_ids.get(event.run_id)
-            if trace_id:
-                self._client.start_observation(
-                    trace_context=TraceContext(trace_id=trace_id),
-                    name="run_cancelled",
-                    as_type="span",
-                    level="WARNING",
-                    status_message=event.reason,
-                ).end()
-        except Exception:
-            logger.exception("Langfuse run_cancelled error")
-        finally:
-            self._finalize_run(event.run_id)
+    def _end_run(self, event: BaseEvent) -> None:
+        trace_id = self._trace_ids.get(event.run_id)
+        if trace_id is None:
+            return
+        ctx = TraceContext(trace_id=trace_id)
+        if isinstance(event, RunCompleted):
+            self._client.start_observation(
+                trace_context=ctx,
+                name="run_completed",
+                as_type="span",
+                output=event.result.final_message,
+            ).end()
+        elif isinstance(event, RunFailed):
+            self._client.start_observation(
+                trace_context=ctx,
+                name="run_failed",
+                as_type="span",
+                level="ERROR",
+                status_message=f"{type(event.error).__name__}: {event.error}",
+            ).end()
+        elif isinstance(event, RunCancelled):
+            self._client.start_observation(
+                trace_context=ctx,
+                name="run_cancelled",
+                as_type="span",
+                level="WARNING",
+                status_message=event.reason,
+            ).end()
+        elif isinstance(event, RunPaused):
+            self._client.start_observation(
+                trace_context=ctx,
+                name="run_paused",
+                as_type="span",
+                level="WARNING",
+                status_message=event.reason,
+            ).end()
 
-    async def _run_paused(self, event: RunPaused) -> None:
-        try:
-            trace_id = self._trace_ids.get(event.run_id)
-            if trace_id:
-                self._client.start_observation(
-                    trace_context=TraceContext(trace_id=trace_id),
-                    name="run_paused",
-                    as_type="span",
-                    level="WARNING",
-                    status_message=event.reason,
-                ).end()
-        except Exception:
-            logger.exception("Langfuse run_paused error")
-        finally:
-            self._finalize_run(event.run_id)
+    # ── Model calls ──────────────────────────────────────────────────
 
     async def _before_model(self, event: BeforeModel) -> None:
         try:
             trace_id = self._trace_ids.setdefault(event.run_id, self._client.create_trace_id())
-            gen = self._client.start_observation(
+            self._generations[event.run_id] = self._client.start_observation(
                 trace_context=TraceContext(trace_id=trace_id),
                 name="model_call",
                 as_type="generation",
@@ -146,7 +131,6 @@ class LangfuseHandler(BaseHandler):
                     {"role": m.role.value, "content": m.content} for m in event.request.messages
                 ],
             )
-            self._generations[event.run_id] = gen
         except Exception:
             logger.exception("Langfuse before_model error")
 
@@ -167,6 +151,8 @@ class LangfuseHandler(BaseHandler):
                 gen.end()
         except Exception:
             logger.exception("Langfuse after_model error")
+
+    # ── Tool calls ───────────────────────────────────────────────────
 
     async def _before_tool(self, event: BeforeTool) -> None:
         try:
@@ -195,18 +181,16 @@ class LangfuseHandler(BaseHandler):
         except Exception:
             logger.exception("Langfuse after_tool error")
 
-    async def _run_failed(self, event: RunFailed) -> None:
-        try:
-            trace_id = self._trace_ids.get(event.run_id)
-            if trace_id:
-                self._client.start_observation(
-                    trace_context=TraceContext(trace_id=trace_id),
-                    name="run_failed",
-                    as_type="span",
-                    level="ERROR",
-                    status_message=f"{type(event.error).__name__}: {event.error}",
-                ).end()
-        except Exception:
-            logger.exception("Langfuse run_failed error")
-        finally:
-            self._finalize_run(event.run_id)
+    # ── Bookkeeping ──────────────────────────────────────────────────
+
+    def _cleanup_run(self, run_id: str) -> None:
+        self._trace_ids.pop(run_id, None)
+        gen = self._generations.pop(run_id, None)
+        if gen:
+            with contextlib.suppress(Exception):
+                gen.end()
+        orphaned = [k for k in self._tool_spans if k.startswith(f"{run_id}:")]
+        for k in orphaned:
+            span = self._tool_spans.pop(k)
+            with contextlib.suppress(Exception):
+                span.end()

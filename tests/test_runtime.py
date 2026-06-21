@@ -19,7 +19,6 @@ from milky_frog.domain import (
 )
 from milky_frog.handlers import BaseHandler, HandlerRegistry, RunCancelled
 from milky_frog.harness import ResumeError
-from milky_frog.infra.steering import StdinSteeringChannel
 from milky_frog.models import OpenAIModel
 from milky_frog.runtime import MilkyFrog, MissingModelConfiguration
 from milky_frog.settings import LangfuseSettings, Settings
@@ -190,22 +189,3 @@ def test_milky_frog_resume_rejects_unknown_run(tmp_path: Path) -> None:
 
     with pytest.raises(ResumeError, match="unknown Run"):
         MilkyFrog.from_settings(settings).resume("does-not-exist")
-
-
-def test_stdin_steering_drains_queued_lines() -> None:
-    channel = StdinSteeringChannel()
-    channel._queue.put("first")
-    channel._queue.put("second")
-
-    assert channel.drain() == ["first", "second"]
-    assert channel.drain() == []
-
-
-def test_stdin_steering_is_inert_when_unsupported(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Off-TTY / Windows: no reader thread, draining yields nothing, stop is safe.
-    monkeypatch.setattr("milky_frog.infra.steering.channels.sys.platform", "win32")
-    channel = StdinSteeringChannel()
-
-    channel.start()
-    assert channel.drain() == []
-    channel.stop()

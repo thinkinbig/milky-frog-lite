@@ -165,25 +165,6 @@ class ContinuationModel:
         yield StreamDone(ModelResponse(content="ack"))
 
 
-# ── Steering stub ─────────────────────────────────────────────────────
-
-
-class FakeSteering:
-    """Releases its queued lines on the Nth ``drain`` call, then stays empty."""
-
-    def __init__(self, lines: list[str], *, release_on: int = 1) -> None:
-        self._lines = list(lines)
-        self._release_on = release_on
-        self._calls = 0
-
-    def drain(self) -> list[str]:
-        self._calls += 1
-        if self._calls == self._release_on:
-            out, self._lines = self._lines, []
-            return out
-        return []
-
-
 # ── Interactive / CLI stubs (existing) ─────────────────────────────────
 
 

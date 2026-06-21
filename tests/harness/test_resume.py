@@ -14,7 +14,6 @@ from milky_frog.domain import (
     ModelRequest,
     ModelResponse,
     RunRequest,
-    RunState,
     RunStatus,
     StreamDone,
     TextDelta,
@@ -23,16 +22,13 @@ from milky_frog.handlers import HandlerRegistry
 from milky_frog.harness import Harness, ResumeError
 from milky_frog.harness.resume import (
     AdvancePlan,
-    CompleteShortcutPlan,
     ResumeGate,
 )
 from milky_frog.harness.sandbox import LocalSandbox
 from milky_frog.harness.state import (
     INTERRUPTED_TOOL_RESULT,
     append_model_response,
-    append_user_message,
 )
-from milky_frog.harness.steering import SteeringPolicy
 from milky_frog.harness.tools import ToolRegistry
 from tests.checkpoint_helpers import (
     run_status,
@@ -51,10 +47,6 @@ from tests.stubs import (
 )
 
 # ── ResumeGate unit tests ─────────────────────────────────────────────
-
-
-def _steering_append(state: RunState, content: str) -> RunState:
-    return append_user_message(state, content)
 
 
 def test_validate_rejects_unknown_run() -> None:
@@ -80,18 +72,18 @@ def test_prepare_returns_complete_shortcut_plan(tmp_path: Path) -> None:
     stored = store.get_run("run-1")
     assert stored is not None
 
-    gate = ResumeGate(store, SteeringPolicy(_steering_append))
+    gate = ResumeGate(store)
     plan = gate.prepare(
         "run-1",
         stored,
         sandbox=LocalSandbox(tmp_path),
         prompt=None,
-        steering=None,
         updated_at=stored.updated_at,
     )
 
-    assert isinstance(plan, CompleteShortcutPlan)
-    assert plan.tail == "all done"
+    assert isinstance(plan, AdvancePlan)
+    assert plan.state.messages[-1].role is MessageRole.ASSISTANT
+    assert plan.state.messages[-1].content == "all done"
 
 
 def test_prepare_returns_advance_plan_with_prompt(tmp_path: Path) -> None:
@@ -102,13 +94,12 @@ def test_prepare_returns_advance_plan_with_prompt(tmp_path: Path) -> None:
     stored = store.get_run("run-2")
     assert stored is not None
 
-    gate = ResumeGate(store, SteeringPolicy(_steering_append))
+    gate = ResumeGate(store)
     plan = gate.prepare(
         "run-2",
         stored,
         sandbox=LocalSandbox(tmp_path),
         prompt="follow up",
-        steering=None,
         updated_at=stored.updated_at,
     )
 

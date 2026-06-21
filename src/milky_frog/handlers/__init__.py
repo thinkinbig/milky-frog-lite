@@ -1,4 +1,3 @@
-from milky_frog.handlers.assembly import InfrastructureHandlerAssembly
 from milky_frog.handlers.events import (
     AfterModel,
     AfterTool,
@@ -18,12 +17,10 @@ from milky_frog.infra.observability.langfuse import LangfuseHandler
 __all__ = [
     "AfterModel",
     "AfterTool",
-    "BaseEvent",
     "BaseHandler",
     "BeforeModel",
     "BeforeTool",
     "HandlerRegistry",
-    "InfrastructureHandlerAssembly",
     "LangfuseHandler",
     "OnModelChunk",
     "OnModelReasoning",

@@ -9,9 +9,8 @@ coordinates model and Tool calls through a linear Harness, and persists a RunSta
 Checkpoint snapshot so interrupted Runs can be resumed safely.
 
 > The repository provides OpenAI-compatible foreground Runs, built-in file Tools, snapshot-based
-> resume (`milky-frog resume`), a multi-turn interactive loop, mid-run steering on POSIX TTYs, and
-> optional Langfuse observability. See [CONTEXT.md](CONTEXT.md) and [docs/adr/](docs/adr/) for
-> architecture details.
+> resume (`milky-frog resume`), a multi-turn interactive loop, and optional Langfuse observability.
+> See [CONTEXT.md](CONTEXT.md) and [docs/adr/](docs/adr/) for architecture details.
 
 ## Design goals
 
@@ -77,10 +76,8 @@ src/milky_frog/
 ├── cli/          # Typer commands, HandlerFactory, MilkyFrogAdvancer
 ├── handlers/     # lifecycle signals, read-only HandlerRegistry (notify)
 ├── harness/      # Harness loop, state mutators, seal
-├── foreground.py # ForegroundRun protocol (StartRun / ResumeRun)
-├── memory/       # cross-Run project knowledge seam
 ├── models/       # model-provider seam
-├── runtime.py    # MilkyFrog: sync boundary, stdin steering
+├── runtime.py    # MilkyFrog: sync boundary, assembly
 ├── sandbox/      # Local Sandbox policy
 ├── skills/       # progressive Skill discovery and loading
 ├── tools/        # Tool interface, registry, built-ins
@@ -114,7 +111,7 @@ MIT
 Harness 协调模型与 Tool 调用，并将 Checkpoint 保存为仅追加事件，使中断的 Run 可以安全恢复。
 
 > 当前仓库已支持兼容 OpenAI 的前台 Run、内置文件 Tool、Checkpoint 恢复（`milky-frog resume`）、
-> 多轮交互循环、POSIX TTY 上的 mid-run steering，以及可选的 Langfuse 可观测性。架构细节见
+> 多轮交互循环，以及可选的 Langfuse 可观测性。架构细节见
 > [CONTEXT.md](CONTEXT.md) 与 [docs/adr/](docs/adr/)。
 
 ## 设计目标
@@ -122,7 +119,7 @@ Harness 协调模型与 Tool 调用，并将 Checkpoint 保存为仅追加事件
 - 自主维护小型 Agent 循环，不引入通用工作流引擎。
 - 为模型提供方、Tool 和 Checkpoint 存储建立明确 seam。
 - 只读生命周期 Handler，用于流式输出与可观测性（ADR-0012）。
-- 类型化 Checkpoint 事件（Pydantic discriminated union，ADR-0013）。
+- 类型化 Checkpoint 快照（版本化 JSON，ADR-0014）。
 - 项目 Skill 仅包含声明式指令，不作为可执行插件。
 - 如实定义 Local Sandbox 策略，不宣称提供宿主机级隔离。
 

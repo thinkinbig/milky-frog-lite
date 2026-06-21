@@ -1,8 +1,14 @@
 # Steer an active Run via a background stdin channel
 
+> **Superseded.** Mid-run steering was removed as part of a lite simplification.
+> The multi-turn interactive loop (ADR-0010) covers conversational interaction;
+> steering — typing *while* a Run advances — added ~280 lines of threading and
+> protocol machinery for marginal benefit in a "one task at a time" agent.
+> The original ADR is preserved below for historical reference.
+
 > **Persistence wording superseded by [ADR-0014](0014-persist-checkpoints-as-runstate-snapshots.md).**
-> Steering still drains into user turns between model calls; each line is persisted
-> via `append_user_message` + `RunEmitter.persist`, not `UserMessageAdded` events.
+> (Historical: steering drained into user turns between model calls; each line
+> was persisted via `append_user_message` + `RunEmitter.persist`.)
 
 A user can now type a line *while* a Run is advancing; it is injected as the next
 user turn at the following turn boundary. Input is read by a background thread

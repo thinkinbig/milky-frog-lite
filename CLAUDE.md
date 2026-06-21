@@ -11,12 +11,11 @@ foreground task at a time, coordinating model and Tool calls through a linear
 Harness and persisting a RunState Checkpoint snapshot so Runs can be resumed.
 
 Status: OpenAI-compatible foreground Runs, built-in Tools, snapshot-based
-resume (`milky-frog resume`), a multi-turn interactive loop, and mid-run
-steering work today. Resume loads a persisted `RunState` and repairs an
-interrupted Tool (ADR-0009, ADR-0014); `resume(run_id, prompt)` continues a Run with a new
+resume (`milky-frog resume`), and a multi-turn interactive loop work today.
+Resume loads a persisted `RunState` and repairs an interrupted Tool
+(ADR-0009, ADR-0014); `resume(run_id, prompt)` continues a Run with a new
 user turn so the interactive loop keeps one growing transcript across prompts
-(ADR-0010); a background stdin channel injects lines typed *while* a Run advances
-as user turns at the next turn boundary, on POSIX TTYs (ADR-0011).
+(ADR-0010).
 
 ## Commands
 
@@ -55,11 +54,9 @@ snapshot after meaningful steps and notifying lifecycle Handlers around each mod
 Tool call.
 
 `runtime.py` (`MilkyFrog`) assembles the concrete pieces from `Settings` and
-owns the sync→async boundary (a reused event loop). Foreground Runs are started
-through `foreground.py` (`ForegroundRun` protocol; `StartRun` / `ResumeRun`
-classes). `cli/app.py` is the Typer command surface; `cli/advance.py` wires the
-interactive loop via `MilkyFrogAdvancer` (`RunAdvancer` protocol). `ui/` renders
-everything via Rich.
+owns the sync→async boundary (a reused event loop). `cli/app.py` is the Typer
+command surface; `cli/advance.py` wires the interactive loop via
+`MilkyFrogAdvancer` (`RunAdvancer` protocol). `ui/` renders everything via Rich.
 
 ### Three event lanes (do not unify)
 
@@ -87,9 +84,7 @@ named class — so alternatives can be swapped without touching the Harness:
 - `checkpoint/` — `CheckpointStore` protocol, `SqliteCheckpointStore`, `RunSnapshot` serialization (ADR-0014).
 - `harness/state.py` — transcript mutators and `seal` (interrupted-tool repair).
 - `handlers/` — lifecycle signals + read-only `HandlerRegistry` (ADR-0012).
-- `foreground.py` — `ForegroundRun`, `StartRun`, `ResumeRun`.
 - `ui/protocols.py` — `RunAdvancer`, `RunCanceller` for the interactive loop.
-- `memory/` — cross-Run project knowledge seam.
 - `skills/` — `SkillCatalog`, declarative `SKILL.md` bundles (never executable).
 - `sandbox/` — `LocalSandbox` policy (denies `.git`, `.env`, keys; path-escape
   guard). A policy boundary, **not** host isolation.
@@ -105,7 +100,7 @@ both):
 | Step | Checkpoint | Lifecycle `notify` |
 |------|-----------|---------------------|
 | Run start | `save_state` (seeded transcript) | `RunStarted` |
-| User message (incl. steering) | `save_state` | — |
+| User message | `save_state` | — |
 | After model | `save_state` | `AfterModel` |
 | Streaming | — | `OnModelChunk`, `OnModelReasoning` |
 | After tool | `save_state` | `AfterTool` |
@@ -130,7 +125,7 @@ both):
 - Keep ADR decisions in mind before changing a seam; add a new ADR for
   significant architectural shifts.
 
-## Key ADRs (recent)
+## Key ADRs
 
 - [ADR-0012](docs/adr/0012-shrink-handler-registry-to-a-read-only-lifecycle-bus.md) — Handler bus is notify-only.
-- [ADR-0013](docs/adr/0013-type-checkpoint-events-as-a-pydantic-discriminated-union.md) — typed Checkpoint bodies.
+- [ADR-0014](docs/adr/0014-persist-checkpoints-as-runstate-snapshots.md) — RunState snapshot persistence.
