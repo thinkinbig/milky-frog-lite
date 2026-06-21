@@ -48,13 +48,31 @@ class StreamingPrinter:
         Resetting the phase makes the next turn open a fresh answer marker, so a
         multi-turn Run reads as distinct blocks separated by their token tallies.
         """
+        self._close_open_block()
+        self._out.print(Text(f"  ⎿ {summary}", style="bright_black"))
+
+    def tool_call(self, name: str) -> None:
+        """Open a concise one-line Tool entry; ``tool_result`` closes it.
+
+        Closes any open reasoning/answer block first so the Tool line starts
+        fresh, then prints the marker without a newline so the result mark lands
+        on the same line.
+        """
+        self._close_open_block()
+        self._out.print(Text(f"  ⏺ {name}", style="cyan"), end="")
+
+    def tool_result(self, *, is_error: bool) -> None:
+        """Close the open Tool line with a success or error mark."""
+        mark = Text(" ✗", style="red") if is_error else Text(" ✓", style="green")
+        self._out.print(mark)
+
+    def _close_open_block(self) -> None:
         if self._phase == "reasoning":
             assert self._block_console is not None
             self._block_console.print()
             self._block_console = None
         elif self._phase == "answer":
             self._out.print()
-        self._out.print(Text(f"  ⎿ {summary}", style="bright_black"))
         self._phase = None
 
     def finish(self) -> bool:

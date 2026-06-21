@@ -10,7 +10,7 @@ from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import RunCancellation, RunRequest, RunResult
 from milky_frog.handlers import BaseHandler, HandlerRegistry
 from milky_frog.harness import Harness
-from milky_frog.harness.tools import ToolRegistry
+from milky_frog.harness.tools import ToolRegistry, default_tools
 from milky_frog.models import OpenAIModel
 from milky_frog.project import load_project_config
 from milky_frog.settings import Settings
@@ -45,7 +45,7 @@ class MilkyFrog:
         self._handlers: list[BaseHandler] = list(bundles) if bundles else []
         self._harness = Harness(
             model=OpenAIModel(api_key=api_key, model=model, base_url=settings.base_url),
-            tools=ToolRegistry(),
+            tools=ToolRegistry(default_tools()),
             checkpoints=SqliteCheckpointStore(settings.database_path),
             handlers=handlers if handlers is not None else HandlerRegistry(),
         )

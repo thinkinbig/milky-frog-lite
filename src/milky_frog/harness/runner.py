@@ -42,6 +42,7 @@ from milky_frog.handlers import (
     RunStarted,
 )
 from milky_frog.harness.prompt import system_prompt
+from milky_frog.harness.sandbox import LocalSandbox
 from milky_frog.harness.tools import ToolContext, ToolRegistry
 from milky_frog.models import Model
 
@@ -79,6 +80,7 @@ class Harness:
     async def run(self, run_request: RunRequest) -> RunResult:
         run_id = uuid4().hex
         workspace = run_request.workspace.resolve(strict=True)
+        sandbox = LocalSandbox(workspace)
         completed_model_calls = 0
         run_usage = RunUsage()
         self._checkpoints.create_run(run_id, workspace)
@@ -157,7 +159,9 @@ class Harness:
                             run_id, "cancelled", completed_model_calls, run_usage
                         )
                     try:
-                        tool_result = await self._execute_tool(run_id, workspace, call, run_request)
+                        tool_result = await self._execute_tool(
+                            run_id, workspace, sandbox, call, run_request
+                        )
                     except _ToolRunCancelled:
                         return await self._finish_cancelled(
                             run_id, "cancelled", completed_model_calls, run_usage
@@ -245,6 +249,7 @@ class Harness:
         self,
         run_id: str,
         workspace: Path,
+        sandbox: LocalSandbox,
         call: ToolCall,
         run_request: RunRequest,
     ) -> ToolResult:
@@ -261,7 +266,7 @@ class Harness:
         else:
             tool = self._tools.get(call.name)
             input_model = tool.input_model.model_validate(call.arguments)
-            context = ToolContext(run_id, workspace, run_request.cancellation)
+            context = ToolContext(run_id, workspace, run_request.cancellation, sandbox)
             try:
                 result = await self._run_tool_with_cancellation(
                     tool.execute(context, input_model),
