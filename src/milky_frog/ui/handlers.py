@@ -3,7 +3,9 @@ from __future__ import annotations
 from milky_frog.domain import RunUsage
 from milky_frog.handlers import (
     AfterModel,
+    AfterTool,
     BaseHandler,
+    BeforeTool,
     HandlerRegistry,
     OnModelChunk,
     OnModelReasoning,
@@ -31,6 +33,8 @@ class StreamingHandlers(BaseHandler):
         registry.on(OnModelReasoning)(self._print_reasoning)
         registry.on(OnModelChunk)(self._print_chunk)
         registry.on(AfterModel)(self._print_usage)
+        registry.on(BeforeTool)(self._print_tool_call)
+        registry.on(AfterTool)(self._print_tool_result)
 
     async def _reset_usage(self, event: RunStarted) -> None:
         del event
@@ -50,3 +54,9 @@ class StreamingHandlers(BaseHandler):
         summary = format_run_usage(self._running)
         if event.response.tool_calls and summary is not None:
             self._printer.usage(summary)
+
+    async def _print_tool_call(self, event: BeforeTool) -> None:
+        self._printer.tool_call(event.call.name)
+
+    async def _print_tool_result(self, event: AfterTool) -> None:
+        self._printer.tool_result(is_error=event.result.is_error)
