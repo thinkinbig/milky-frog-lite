@@ -32,3 +32,7 @@ dist/
 
 # Milky-frog
 .milky-frog/
+
+# Raw Langfuse exports live uncompressed at the repo root; keep them out of git.
+# Archived (gzipped) copies under docs/evals/raw/ are committed instead.
+/*lf-events-export*.jsonl
