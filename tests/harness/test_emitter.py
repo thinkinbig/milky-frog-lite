@@ -6,7 +6,7 @@ import pytest
 
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import RunResult, RunState, RunStatus
-from milky_frog.handlers import HandlerRegistry, RunCancelled, RunFailed
+from milky_frog.handlers import HandlerRegistry, RunCancelled, RunFailed, RunTurnEnd, RunTurnStart
 from milky_frog.harness.emitter import RunEmitter
 
 
@@ -51,3 +51,37 @@ async def test_run_failed_persists_checkpoint_before_handler(tmp_path: Path) -> 
     await emitter.run_failed(state, RuntimeError("boom"))
 
     assert checkpoint_seen is True
+
+
+@pytest.mark.asyncio
+async def test_turn_started_notifies_handler(tmp_path: Path) -> None:
+    registry = HandlerRegistry()
+    seen: list[RunTurnStart] = []
+
+    @registry.on(RunTurnStart)
+    async def record(event: RunTurnStart) -> None:
+        seen.append(event)
+
+    emitter = RunEmitter(SqliteCheckpointStore(tmp_path / "state.db"), registry)
+    await emitter.turn_started("run-1", model_call=3)
+
+    assert len(seen) == 1
+    assert seen[0].run_id == "run-1"
+    assert seen[0].model_call == 3
+
+
+@pytest.mark.asyncio
+async def test_turn_ended_notifies_handler(tmp_path: Path) -> None:
+    registry = HandlerRegistry()
+    seen: list[RunTurnEnd] = []
+
+    @registry.on(RunTurnEnd)
+    async def record(event: RunTurnEnd) -> None:
+        seen.append(event)
+
+    emitter = RunEmitter(SqliteCheckpointStore(tmp_path / "state.db"), registry)
+    await emitter.turn_ended("run-1", model_call=2)
+
+    assert len(seen) == 1
+    assert seen[0].run_id == "run-1"
+    assert seen[0].model_call == 2

@@ -28,6 +28,8 @@ from milky_frog.handlers import (
     RunFailed,
     RunPaused,
     RunStarted,
+    RunTurnEnd,
+    RunTurnStart,
 )
 from milky_frog.harness import Harness
 from milky_frog.harness.tools import ToolContext, ToolRegistry, ToolResult
@@ -299,3 +301,71 @@ async def test_run_started_handler_cannot_control_live_run(tmp_path: Path) -> No
 
     assert result.status is RunStatus.COMPLETED
     assert not cancellation.is_cancelled
+
+
+@pytest.mark.asyncio
+async def test_dispatches_run_turn_events(tmp_path: Path) -> None:
+    """RunTurnStart and RunTurnEnd fire with correct numbering across two turns."""
+    registry = HandlerRegistry()
+    starts: list[RunTurnStart] = []
+    ends: list[RunTurnEnd] = []
+
+    @registry.on(RunTurnStart)
+    async def on_start(event: RunTurnStart) -> None:
+        starts.append(event)
+
+    @registry.on(RunTurnEnd)
+    async def on_end(event: RunTurnEnd) -> None:
+        ends.append(event)
+
+    harness = Harness(
+        model=FakeModel(),
+        tools=ToolRegistry((EchoTool(),)),
+        checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
+        handlers=registry,
+    )
+
+    await harness.run(RunRequest("echo hello", tmp_path, max_model_calls=2))
+
+    # FakeModel with EchoTool: each turn has one model call + one tool call.
+    # With max_model_calls=2, two full turns happen before pause.
+    assert len(starts) >= 2
+    assert len(ends) >= 2
+    assert starts[0].model_call == 1
+    assert ends[0].model_call == 1
+    assert starts[1].model_call == 2
+    assert ends[1].model_call == 2
+
+
+@pytest.mark.asyncio
+async def test_turn_events_fire_before_complete(tmp_path: Path) -> None:
+    """RunTurnEnd fires before RunCompleted when model returns no tool calls."""
+    registry = HandlerRegistry()
+    order: list[str] = []
+
+    @registry.subscribe
+    async def record(event: object) -> None:
+        order.append(type(event).__name__)
+
+    class ContentModel:
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            del request
+            yield StreamDone(ModelResponse(content="done"))
+
+    harness = Harness(
+        model=ContentModel(),
+        tools=ToolRegistry(),
+        checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
+        handlers=registry,
+    )
+
+    await harness.run(RunRequest("go", tmp_path))
+
+    assert order == [
+        "RunStarted",
+        "RunTurnStart",
+        "RunBeforeModel",
+        "RunAfterModel",
+        "RunTurnEnd",
+        "RunCompleted",
+    ]
