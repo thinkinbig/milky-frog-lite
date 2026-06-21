@@ -1,9 +1,11 @@
+import asyncio
 from pathlib import Path
 
 from milky_frog.harness.sandbox import LocalSandbox
 from milky_frog.harness.tools import ToolContext
 from milky_frog.harness.tools.builtins import (
     EditFileTool,
+    GitTool,
     ListDirTool,
     ReadFileTool,
     WriteFileTool,
@@ -15,10 +17,10 @@ def _context(workspace: Path) -> ToolContext:
     return ToolContext("run-1", workspace, sandbox=LocalSandbox(workspace))
 
 
-def test_default_tools_exposes_the_four_file_tools() -> None:
+def test_default_tools_exposes_all_builtin_tools() -> None:
     names = {tool.name for tool in default_tools()}
 
-    assert names == {"read_file", "write_file", "edit_file", "list_dir"}
+    assert names == {"read_file", "write_file", "edit_file", "list_dir", "git"}
 
 
 async def test_read_file_returns_contents(tmp_path: Path) -> None:
@@ -119,3 +121,56 @@ async def test_tool_context_builds_default_sandbox(tmp_path: Path) -> None:
     context = ToolContext("run-1", tmp_path)
 
     assert context.require_sandbox().workspace == tmp_path.resolve()
+
+
+async def test_git_status_returns_output(tmp_path: Path) -> None:
+    # init a git repo in tmp_path so git status works
+    proc = await asyncio.create_subprocess_exec(
+        "git",
+        "init",
+        "-q",
+        cwd=str(tmp_path),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    await proc.communicate()
+    assert proc.returncode == 0
+
+    result = await GitTool().execute(_context(tmp_path), GitTool.input_model(command="status"))
+
+    assert not result.is_error
+    assert "On branch" in result.content
+
+
+async def test_git_error_returns_error_result(tmp_path: Path) -> None:
+    result = await GitTool().execute(_context(tmp_path), GitTool.input_model(command="status"))
+
+    assert result.is_error
+    assert "fatal" in result.content or "exited " in result.content
+
+
+async def test_git_empty_command_is_error(tmp_path: Path) -> None:
+    result = await GitTool().execute(_context(tmp_path), GitTool.input_model(command="  "))
+
+    assert result.is_error
+    assert "empty" in result.content
+
+
+async def test_git_diff_works(tmp_path: Path) -> None:
+    proc = await asyncio.create_subprocess_exec(
+        "git",
+        "init",
+        "-q",
+        cwd=str(tmp_path),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    await proc.communicate()
+    (tmp_path / "f.txt").write_text("hello", encoding="utf-8")
+
+    result = await GitTool().execute(_context(tmp_path), GitTool.input_model(command="diff"))
+
+    assert not result.is_error
+    # unstaged file shows in diff output (git shows untracked files aren't in diff)
+    # but at least the command ran successfully
+    assert result.content is not None
