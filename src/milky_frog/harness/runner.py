@@ -30,7 +30,7 @@ from milky_frog.harness.resume import (
     ResumeGate,
     completed_tail,
 )
-from milky_frog.harness.sandbox import LocalSandbox, Sandbox
+from milky_frog.harness.sandbox import LocalSandbox, Sandbox, SandboxFactory
 from milky_frog.harness.state import (
     append_model_response,
     append_tool_result,
@@ -49,10 +49,12 @@ class Harness:
         tools: ToolRegistry,
         checkpoints: CheckpointStore,
         handlers: HandlerRegistry,
+        sandbox_factory: SandboxFactory = LocalSandbox,
     ) -> None:
         self._model = model
         self._tools = tools
         self._checkpoints = checkpoints
+        self._sandbox_factory = sandbox_factory
         self._emitter = RunEmitter(checkpoints, handlers)
         self._resume_gate = ResumeGate(checkpoints)
 
@@ -66,7 +68,7 @@ class Harness:
             await self._emitter.run_started(run_id, run_request, state)
             return await self._advance(
                 state,
-                LocalSandbox(workspace),
+                self._sandbox_factory(workspace),
                 run_request.cancellation,
                 run_request.max_model_calls,
             )
@@ -92,7 +94,7 @@ class Harness:
             with self._checkpoints.claim(run_id):
                 stored = self._checkpoints.get_run(run_id)
                 stored = ResumeGate.validate(stored, run_id, prompt)
-                sandbox = LocalSandbox(stored.workspace)
+                sandbox = self._sandbox_factory(stored.workspace)
                 plan = self._resume_gate.prepare(
                     run_id,
                     stored,
