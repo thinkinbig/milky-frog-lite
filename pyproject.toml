@@ -40,6 +40,7 @@ packages = ["src/milky_frog"]
 [tool.pytest.ini_options]
 addopts = "-q --cov=milky_frog --cov-report=term-missing --cov-fail-under=80"
 testpaths = ["tests"]
+pythonpath = ["tests"]
 asyncio_mode = "auto"
 
 [tool.coverage.run]

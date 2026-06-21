@@ -18,9 +18,11 @@ from milky_frog.domain import (
     TextDelta,
 )
 from milky_frog.handlers import BaseHandler, HandlerRegistry, RunCancelled
+from milky_frog.harness import ResumeError
 from milky_frog.models import OpenAIModel
 from milky_frog.runtime import MilkyFrog, MissingModelConfiguration
 from milky_frog.settings import LangfuseSettings, Settings
+from tests.checkpoint_helpers import run_status, seed_run
 
 _NO_LANGFUSE = LangfuseSettings(
     enabled=False, public_key=None, secret_key=None, host="https://cloud.langfuse.com"
@@ -81,7 +83,7 @@ def test_milky_frog_cancel_stops_foreground_run(
     assert result.status is RunStatus.CANCELLED
     assert len(cancelled) == 1
     store = SqliteCheckpointStore(settings.database_path)
-    assert any(event.event_type == "RunCancelled" for event in store.events(result.run_id))
+    assert run_status(store, result.run_id) is RunStatus.CANCELLED
 
 
 def test_milky_frog_context_manager_closes_its_bundles(tmp_path: Path) -> None:
@@ -159,3 +161,31 @@ def test_milky_frog_rejects_empty_model_configuration(
 
     with pytest.raises(MissingModelConfiguration, match="model configuration is missing"):
         MilkyFrog.from_settings(settings)
+
+
+def test_milky_frog_resume_advances_stored_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    async def fake_stream(self: OpenAIModel, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        del self, request
+        yield StreamDone(ModelResponse(content="resumed"))
+
+    monkeypatch.setattr(OpenAIModel, "stream", fake_stream)
+    settings = Settings(tmp_path, "test-key", "https://example.test", "test-model", _NO_LANGFUSE)
+    # A Run paused at its model-call limit, persisted before the frog is built.
+    store = SqliteCheckpointStore(settings.database_path)
+    run_id = "paused-run"
+    seed_run(store, run_id, tmp_path, status=RunStatus.PAUSED_LIMIT, final_message="limit")
+
+    result = MilkyFrog.from_settings(settings).resume(run_id)
+
+    assert result.run_id == run_id
+    assert result.status is RunStatus.COMPLETED
+    assert result.final_message == "resumed"
+
+
+def test_milky_frog_resume_rejects_unknown_run(tmp_path: Path) -> None:
+    settings = Settings(tmp_path, "test-key", "https://example.test", "test-model", _NO_LANGFUSE)
+
+    with pytest.raises(ResumeError, match="unknown Run"):
+        MilkyFrog.from_settings(settings).resume("does-not-exist")

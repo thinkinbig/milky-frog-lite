@@ -62,7 +62,10 @@ class _SessionSurface(_Surface):
         tips.add_row(Text("Tips for getting started", style="bold"))
         tips.add_row(Text("• Describe what to build, fix, or explain — be specific", style="dim"))
         tips.add_row(
-            Text("• /help lists commands · /clear resets the screen · /exit leaves", style="dim")
+            Text(
+                "• /help lists commands · /resume attaches a Run · /clear resets · /exit leaves",
+                style="dim",
+            )
         )
         self.out.print(tips)
         self.out.print()
@@ -81,6 +84,10 @@ class _SessionSurface(_Surface):
         commands.add_column(style="yellow", no_wrap=True)
         commands.add_column(style="dim")
         commands.add_row("/help", "Show available commands")
+        commands.add_row(
+            "/resume RUN_ID [prompt]",
+            "Attach to a durable Run, optionally continuing it",
+        )
         commands.add_row("/clear", "Clear the terminal")
         commands.add_row("/exit", "Leave Milky Frog")
         commands.add_row("exit · quit", "Leave Milky Frog")

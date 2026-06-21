@@ -1,0 +1,253 @@
+from __future__ import annotations
+
+import asyncio
+from collections.abc import AsyncIterator, Iterator
+
+from pydantic import BaseModel
+
+from milky_frog.domain import (
+    ModelChunk,
+    ModelRequest,
+    ModelResponse,
+    ReasoningDelta,
+    StreamDone,
+    TextDelta,
+    TokenUsage,
+    ToolCall,
+)
+from milky_frog.harness.tools import ToolContext, ToolResult
+
+# ── Tool stubs ────────────────────────────────────────────────────────
+
+
+class EchoInput(BaseModel):
+    text: str
+
+
+class EchoTool:
+    name = "echo"
+    description = "Echo text"
+    input_model = EchoInput
+
+    async def execute(self, context: ToolContext, input: BaseModel) -> ToolResult:
+        assert context.workspace.is_dir()
+        parsed = EchoInput.model_validate(input)
+        return ToolResult(parsed.text)
+
+
+# ── Model stubs ───────────────────────────────────────────────────────
+
+
+class FakeModel:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        self.calls += 1
+        if self.calls == 1:
+            assert request.tools[0]["function"]["name"] == "echo"
+            yield StreamDone(
+                ModelResponse(tool_calls=(ToolCall("call-1", "echo", {"text": "hello"}),))
+            )
+            return
+        yield TextDelta("done")
+        yield StreamDone(ModelResponse(content="done"))
+
+
+class ReasoningModel:
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        del request
+        yield ReasoningDelta("weighing options")
+        yield TextDelta("the answer")
+        yield StreamDone(ModelResponse(content="the answer", reasoning="weighing options"))
+
+
+class IdentityCapturingModel:
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        assert request.messages[0].role.value == "system"
+        assert "Milky Frog" in request.messages[0].content
+        assert "奶蛙" in request.messages[0].content
+        assert request.messages[1].role.value == "user"
+        assert request.messages[1].content == "Who are you?"
+        yield TextDelta("I am Milky Frog.")
+        yield StreamDone(ModelResponse(content="I am Milky Frog."))
+
+
+class InvalidToolArgsThenRecoverModel:
+    """First turn requests a Tool with invalid arguments; second turn sees the error."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        self.calls += 1
+        if self.calls == 1:
+            yield StreamDone(ModelResponse(tool_calls=(ToolCall("call-1", "echo", {}),)))
+            return
+        tool_messages = [message for message in request.messages if message.role.value == "tool"]
+        assert tool_messages
+        assert "ValidationError" in tool_messages[-1].content
+        yield StreamDone(ModelResponse(content="recovered"))
+
+
+class UsageReportingModel:
+    """Reports token usage per call: one tool turn, then a final answer turn."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        del request
+        self.calls += 1
+        if self.calls == 1:
+            yield StreamDone(
+                ModelResponse(
+                    tool_calls=(ToolCall("call-1", "echo", {"text": "hello"}),),
+                    usage=TokenUsage(input_tokens=100, output_tokens=20),
+                )
+            )
+            return
+        yield StreamDone(
+            ModelResponse(
+                content="done",
+                usage=TokenUsage(input_tokens=160, output_tokens=30, cached_tokens=64),
+            )
+        )
+
+
+class EarlyStreamDoneModel:
+    """Yields StreamDone before trailing chunks to assert early stream exit."""
+
+    def __init__(self) -> None:
+        self.extra_chunks_yielded = 0
+
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        yield StreamDone(ModelResponse(content="done"))
+        for index in range(995):
+            self.extra_chunks_yielded += 1
+            yield TextDelta(f"extra-{index}")
+
+
+class SlowStreamModel:
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        del request
+        yield TextDelta("partial")
+        await asyncio.sleep(0.05)
+        yield StreamDone(ModelResponse(content="done"))
+
+
+class PauseThenFinishModel:
+    """A tool turn first, then a final answer — to pause at a 1-call budget."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        del request
+        self.calls += 1
+        if self.calls == 1:
+            yield StreamDone(
+                ModelResponse(tool_calls=(ToolCall("call-1", "echo", {"text": "hi"}),))
+            )
+            return
+        yield StreamDone(ModelResponse(content="done"))
+
+
+class ContinuationModel:
+    """Completes at once, asserting the latest user turn is visible in context."""
+
+    def __init__(self, expected_user: str) -> None:
+        self.expected_user = expected_user
+
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        users = [m for m in request.messages if m.role.value == "user"]
+        assert users[-1].content == self.expected_user
+        yield StreamDone(ModelResponse(content="ack"))
+
+
+# ── Interactive / CLI stubs (existing) ─────────────────────────────────
+
+
+class LangfuseClientFactory:
+    """Stub Langfuse constructor that returns a fixed client."""
+
+    def __init__(self, client: object) -> None:
+        self._client = client
+
+    def __call__(self, **kwargs: object) -> object:
+        del kwargs
+        return self._client
+
+
+class RecordingLangfuseFactory:
+    """Stub Langfuse constructor that records kwargs and returns a placeholder."""
+
+    def __init__(self, calls: list[object], *, client: object | None = None) -> None:
+        self._calls = calls
+        self._client = client if client is not None else object()
+
+    def __call__(self, **kwargs: object) -> object:
+        self._calls.append(kwargs)
+        return self._client
+
+
+class NoOpKwargs:
+    def __call__(self, *args: object, **kwargs: object) -> None:
+        del args, kwargs
+
+
+class NoOpArgsKwargs:
+    def __call__(self, *args: object, **kwargs: object) -> None:
+        del args, kwargs
+
+
+class ScriptedPrompt:
+    def __init__(
+        self,
+        lines: tuple[str, ...] | list[str],
+        *,
+        eof_on_exhaust: bool = True,
+    ) -> None:
+        self._lines: Iterator[str] = iter(lines)
+        self._eof_on_exhaust = eof_on_exhaust
+
+    def __call__(self) -> str:
+        try:
+            return next(self._lines)
+        except StopIteration:
+            if self._eof_on_exhaust:
+                raise EOFError from None
+            raise
+
+
+class RecordingWelcome:
+    def __init__(self, events: list[str]) -> None:
+        self._events = events
+
+    def __call__(self, **kwargs: object) -> None:
+        self._events.append(f"welcome:{kwargs['model']}")
+
+
+class RecordingHelp:
+    def __init__(self, events: list[str]) -> None:
+        self._events = events
+
+    def __call__(self) -> None:
+        self._events.append("help")
+
+
+class RecordingAssistant:
+    def __init__(self, events: list[str]) -> None:
+        self._events = events
+
+    def __call__(self, message: str, **kwargs: object) -> None:
+        self._events.append(f"answer:{message}:{kwargs['run_id']}")
+
+
+class RecordingError:
+    def __init__(self, messages: list[str]) -> None:
+        self._messages = messages
+
+    def __call__(self, message: str, **kwargs: object) -> None:
+        del kwargs
+        self._messages.append(message)
