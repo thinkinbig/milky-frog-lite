@@ -92,9 +92,13 @@ def test_no_arguments_starts_interactive_mode(monkeypatch: object, tmp_path: Pat
 
         @classmethod
         def from_settings(
-            cls, settings: object, handlers: object = None, bundles: object = None
+            cls,
+            settings: object,
+            handlers: object = None,
+            bundles: object = None,
+            steering_producer: object = None,
         ) -> FakeMilkyFrog:
-            del settings, handlers, bundles
+            del settings, handlers, bundles, steering_producer
             return cls()
 
         def __enter__(self) -> FakeMilkyFrog:
@@ -103,8 +107,7 @@ def test_no_arguments_starts_interactive_mode(monkeypatch: object, tmp_path: Pat
         def __exit__(self, *exc: object) -> None:
             pass
 
-        def run(self, task: str, workspace: Path, *, stdin_steering: bool = True) -> RunResult:
-            del stdin_steering
+        def run(self, task: str, workspace: Path) -> RunResult:
             assert workspace.is_dir()
             assert task == "hello frog"
             return RunResult("run-interactive", RunStatus.COMPLETED, "hello human", 1)
@@ -147,9 +150,13 @@ def test_resume_without_task_advances_pending_work(
 
         @classmethod
         def from_settings(
-            cls, settings: object, handlers: object = None, bundles: object = None
+            cls,
+            settings: object,
+            handlers: object = None,
+            bundles: object = None,
+            steering_producer: object = None,
         ) -> FakeMilkyFrog:
-            del settings, handlers, bundles
+            del settings, handlers, bundles, steering_producer
             return cls()
 
         def __enter__(self) -> FakeMilkyFrog:
@@ -158,10 +165,7 @@ def test_resume_without_task_advances_pending_work(
         def __exit__(self, *exc: object) -> None:
             pass
 
-        def resume(
-            self, run_id: str, prompt: str | None = None, *, stdin_steering: bool = True
-        ) -> RunResult:
-            del stdin_steering
+        def resume(self, run_id: str, prompt: str | None = None) -> RunResult:
             calls.append((run_id, prompt))
             return RunResult(run_id, RunStatus.COMPLETED, "resumed", 1)
 
@@ -194,9 +198,13 @@ def test_resume_with_task_continues_run(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
         @classmethod
         def from_settings(
-            cls, settings: object, handlers: object = None, bundles: object = None
+            cls,
+            settings: object,
+            handlers: object = None,
+            bundles: object = None,
+            steering_producer: object = None,
         ) -> FakeMilkyFrog:
-            del settings, handlers, bundles
+            del settings, handlers, bundles, steering_producer
             return cls()
 
         def __enter__(self) -> FakeMilkyFrog:
@@ -205,10 +213,7 @@ def test_resume_with_task_continues_run(monkeypatch: pytest.MonkeyPatch, tmp_pat
         def __exit__(self, *exc: object) -> None:
             pass
 
-        def resume(
-            self, run_id: str, prompt: str | None = None, *, stdin_steering: bool = True
-        ) -> RunResult:
-            del stdin_steering
+        def resume(self, run_id: str, prompt: str | None = None) -> RunResult:
             calls.append((run_id, prompt))
             return RunResult(run_id, RunStatus.COMPLETED, "continued", 2)
 

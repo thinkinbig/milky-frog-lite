@@ -154,8 +154,10 @@ class LangfuseHandler(BaseHandler):
         try:
             gen = self._generations.pop(event.run_id, None)
             if gen:
+                reasoning = event.response.reasoning
                 gen.update(
                     output=event.response.content,
+                    metadata={"reasoning": reasoning} if reasoning else None,
                     model=event.response.model or None,
                     usage_details={
                         "input": event.response.usage.input_tokens,

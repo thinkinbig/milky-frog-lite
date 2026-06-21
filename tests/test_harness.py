@@ -960,3 +960,253 @@ async def test_advance_steering_continues_instead_of_completing(tmp_path: Path) 
     assert model.calls == 2
     assert result.final_message == "done2"
     assert result.status is RunStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_finish_completed_absorbs_all_steering_lines_in_one_drain(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+
+    class MultiSteerAwareModel:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            self.calls += 1
+            if self.calls == 1:
+                yield StreamDone(ModelResponse(content="done1"))
+                return
+            users = [m.content for m in request.messages if m.role is MessageRole.USER]
+            assert users.count("first steer") == 1
+            assert users.count("second steer") == 1
+            yield StreamDone(ModelResponse(content="done2"))
+
+    harness = Harness(
+        MultiSteerAwareModel(),
+        ToolRegistry(),
+        store,
+        HandlerRegistry(),
+    )
+    result = await harness.run(
+        RunRequest(
+            "go",
+            tmp_path,
+            steering=FakeSteering(["first steer", "second steer"], release_on=2),
+        )
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.final_message == "done2"
+    user_events = [
+        event.payload["content"]
+        for event in store.events(result.run_id)
+        if event.event_type == "UserMessageAdded"
+    ]
+    assert "first steer" in user_events
+    assert "second steer" in user_events
+
+
+@pytest.mark.asyncio
+async def test_finish_completed_drain_catches_late_steering(tmp_path: Path) -> None:
+    """Steering that arrives *after* the post-model absorb but before the terminal
+    checkpoint is drained inside _finish_completed and keeps the loop going."""
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+
+    class ThreePhaseModel:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            self.calls += 1
+            if self.calls == 1:
+                yield StreamDone(ModelResponse(content="done1"))
+                return
+            users = [m.content for m in request.messages if m.role is MessageRole.USER]
+            assert "late steer" in users
+            yield StreamDone(ModelResponse(content="done2"))
+
+    model = ThreePhaseModel()
+    harness = Harness(model, ToolRegistry(), store, HandlerRegistry())
+
+    # release_on=3: drains #1/#2 empty, #3 (inside _finish_completed) returns lines.
+    result = await harness.run(
+        RunRequest("go", tmp_path, steering=FakeSteering(["late steer"], release_on=3))
+    )
+
+    assert model.calls == 2
+    assert result.final_message == "done2"
+    assert result.status is RunStatus.COMPLETED
+    assert "UserMessageAdded" in [e.event_type for e in store.events(result.run_id)]
+
+
+@pytest.mark.asyncio
+async def test_finish_completed_drain_catches_multiple_late_lines(tmp_path: Path) -> None:
+    """Multiple steering lines arriving inside _finish_completed's drain are all
+    folded in and the loop continues."""
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+
+    class LateMultiModel:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            self.calls += 1
+            if self.calls == 1:
+                yield StreamDone(ModelResponse(content="done1"))
+                return
+            users = [m.content for m in request.messages if m.role is MessageRole.USER]
+            assert "first late" in users
+            assert "second late" in users
+            yield StreamDone(ModelResponse(content="done2"))
+
+    harness = Harness(LateMultiModel(), ToolRegistry(), store, HandlerRegistry())
+
+    result = await harness.run(
+        RunRequest(
+            "go",
+            tmp_path,
+            steering=FakeSteering(["first late", "second late"], release_on=3),
+        )
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.final_message == "done2"
+    user_events = [
+        event.payload["content"]
+        for event in store.events(result.run_id)
+        if event.event_type == "UserMessageAdded"
+    ]
+    assert "first late" in user_events
+    assert "second late" in user_events
+
+
+@pytest.mark.asyncio
+async def test_resume_shortcut_with_steering_but_empty_drain(tmp_path: Path) -> None:
+    """Resume shortcut: steering is present but drain returns empty → still short-circuits
+    to _finish_completed without a model call."""
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    run_id = "run-resume-empty-steer"
+    store.create_run(run_id, tmp_path)
+    store.append(
+        run_id,
+        RunEvent.from_parts("RunStarted", {"prompt": "go", "workspace": str(tmp_path)}),
+    )
+    store.append(
+        run_id,
+        RunEvent.from_parts(
+            "ModelMessageCompleted",
+            {
+                "content": "already done",
+                "reasoning": "",
+                "tool_calls": [],
+                "usage": _usage_zero(),
+            },
+        ),
+    )
+
+    class NeverCalledModel:
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            del request
+            raise AssertionError("model must not be called")
+
+    # FakeSteering with release_on=99 means drain() never returns anything.
+    result = await Harness(
+        NeverCalledModel(), ToolRegistry(), store, HandlerRegistry()
+    ).resume(
+        run_id,
+        max_model_calls=30,
+        steering=FakeSteering([], release_on=99),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.final_message == "already done"
+
+
+@pytest.mark.asyncio
+async def test_resume_shortcut_finish_completed_drain_catches_late_steering(tmp_path: Path) -> None:
+    """Resume shortcut: no steer in the first drain, but _finish_completed's drain
+    catches a late line → falls through to _advance instead of short-circuiting."""
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    run_id = "run-resume-late-steer"
+    store.create_run(run_id, tmp_path)
+    store.append(
+        run_id,
+        RunEvent.from_parts("RunStarted", {"prompt": "go", "workspace": str(tmp_path)}),
+    )
+    store.append(
+        run_id,
+        RunEvent.from_parts(
+            "ModelMessageCompleted",
+            {
+                "content": "already done",
+                "reasoning": "",
+                "tool_calls": [],
+                "usage": _usage_zero(),
+            },
+        ),
+    )
+
+    class LateSteerModel:
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            users = [m.content for m in request.messages if m.role is MessageRole.USER]
+            assert "late resume steer" in users
+            yield StreamDone(ModelResponse(content="continued"))
+
+    # release_on=2: drain #1 (in resume) empty, drain #2 (in _finish_completed) returns line.
+    result = await Harness(
+        LateSteerModel(), ToolRegistry(), store, HandlerRegistry()
+    ).resume(
+        run_id,
+        max_model_calls=30,
+        steering=FakeSteering(["late resume steer"], release_on=2),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.final_message == "continued"
+
+
+@pytest.mark.asyncio
+async def test_resume_shortcut_folds_multiple_steer_lines(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    run_id = "run-resume-steer"
+    store.create_run(run_id, tmp_path)
+    store.append(
+        run_id,
+        RunEvent.from_parts("RunStarted", {"prompt": "go", "workspace": str(tmp_path)}),
+    )
+    store.append(
+        run_id,
+        RunEvent.from_parts(
+            "ModelMessageCompleted",
+            {
+                "content": "already done",
+                "reasoning": "",
+                "tool_calls": [],
+                "usage": _usage_zero(),
+            },
+        ),
+    )
+
+    class SteerAwareModel:
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            users = [m.content for m in request.messages if m.role is MessageRole.USER]
+            assert "steer one" in users
+            assert "steer two" in users
+            yield StreamDone(ModelResponse(content="continued"))
+
+    result = await Harness(
+        SteerAwareModel(), ToolRegistry(), store, HandlerRegistry()
+    ).resume(
+        run_id,
+        max_model_calls=30,
+        steering=FakeSteering(["steer one", "steer two"]),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.final_message == "continued"
+    user_events = [
+        event.payload["content"]
+        for event in store.events(run_id)
+        if event.event_type == "UserMessageAdded"
+    ]
+    assert user_events.count("steer one") == 1
+    assert user_events.count("steer two") == 1

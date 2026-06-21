@@ -2,11 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import queue
-import select
 import signal
-import sys
-import threading
 from pathlib import Path
 from types import FrameType, TracebackType
 
@@ -19,90 +15,9 @@ from milky_frog.harness.tools import ToolRegistry, default_tools
 from milky_frog.models import OpenAIModel
 from milky_frog.project import load_project_config
 from milky_frog.settings import Settings
+from milky_frog.steering import NullSteeringProducer, SteeringProducer
 
 logger = logging.getLogger(__name__)
-
-
-class _InertSteering:
-    """Steering seam that never reads stdin.
-
-    Used by the interactive loop, which owns between-turn input via
-    ``prompt_toolkit`` and must not compete with a background reader.
-    """
-
-    def start(self) -> None:
-        pass
-
-    def stop(self) -> None:
-        pass
-
-    def drain(self) -> list[str]:
-        return []
-
-
-class _StdinSteering:
-    """Thread-backed :class:`SteeringChannel`: a background reader queues stdin
-    lines for the active Run to drain between turns.
-
-    Enabled only on a POSIX TTY, where ``select`` lets the reader wake to check
-    its stop flag and hand stdin back promptly when the Run ends — a blocking
-    ``readline`` would hold stdin until the next Enter, colliding with the
-    between-turn prompt. Elsewhere it is inert and steering is simply off.
-    """
-
-    def __init__(self) -> None:
-        self._queue: queue.Queue[str] = queue.Queue()
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._enabled = self._supported()
-
-    @staticmethod
-    def _supported() -> bool:
-        if sys.platform == "win32":
-            return False
-        try:
-            return sys.stdin.isatty()
-        except (OSError, ValueError):
-            return False
-
-    def start(self) -> None:
-        if not self._enabled:
-            return
-        self._stop.clear()
-        self._thread = threading.Thread(target=self._read_loop, daemon=True)
-        self._thread.start()
-
-    def stop(self) -> None:
-        self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout=1.0)
-            self._thread = None
-        # Drop any lines that arrived but were not drained before the Run ended,
-        # so they cannot leak into the next prompt.
-        self.drain()
-
-    def drain(self) -> list[str]:
-        lines: list[str] = []
-        while True:
-            try:
-                lines.append(self._queue.get_nowait())
-            except queue.Empty:
-                return lines
-
-    def _read_loop(self) -> None:
-        while not self._stop.is_set():
-            try:
-                ready, _, _ = select.select([sys.stdin], [], [], 0.1)
-            except (OSError, ValueError):
-                return
-            if not ready:
-                continue
-            line = sys.stdin.readline()
-            if line == "":  # EOF (Ctrl-D)
-                return
-            text = line.strip()
-            if text:
-                self._queue.put(text)
 
 
 class MissingModelConfiguration(ValueError):
@@ -125,6 +40,8 @@ class MilkyFrog:
         settings: Settings,
         handlers: HandlerRegistry | None = None,
         bundles: list[BaseHandler] | None = None,
+        *,
+        steering_producer: SteeringProducer | None = None,
     ) -> None:
         api_key, model = self.require_model_configuration(settings)
         # Handler composition is the caller's (the HandlerFactory's) job; the
@@ -139,6 +56,7 @@ class MilkyFrog:
         )
         self._loop: asyncio.AbstractEventLoop | None = None
         self._cancellation: RunCancellation | None = None
+        self._steering_producer = steering_producer or NullSteeringProducer()
 
     @staticmethod
     def require_model_configuration(settings: Settings) -> tuple[str, str]:
@@ -159,8 +77,10 @@ class MilkyFrog:
         settings: Settings,
         handlers: HandlerRegistry | None = None,
         bundles: list[BaseHandler] | None = None,
+        *,
+        steering_producer: SteeringProducer | None = None,
     ) -> MilkyFrog:
-        return cls(settings, handlers, bundles)
+        return cls(settings, handlers, bundles, steering_producer=steering_producer)
 
     def __enter__(self) -> MilkyFrog:
         return self
@@ -198,14 +118,11 @@ class MilkyFrog:
         if self._cancellation is not None:
             self._cancellation.cancel()
 
-    def run(self, prompt: str, workspace: Path, *, stdin_steering: bool = True) -> RunResult:
+    def run(self, prompt: str, workspace: Path) -> RunResult:
         """Start one goal synchronously.
 
         Successive calls reuse a single event loop (and the model's connection
         pool), so this must not be called while another event loop is running.
-
-        Disable ``stdin_steering`` when a foreground UI (the interactive loop)
-        owns between-turn input via ``prompt_toolkit``.
         """
         config = load_project_config(workspace)
         return self._drive(
@@ -214,17 +131,10 @@ class MilkyFrog:
                 prompt=prompt,
                 workspace=workspace,
                 max_model_calls=config.max_model_calls,
-            ),
-            stdin_steering=stdin_steering,
+            )
         )
 
-    def resume(
-        self,
-        run_id: str,
-        prompt: str | None = None,
-        *,
-        stdin_steering: bool = True,
-    ) -> RunResult:
+    def resume(self, run_id: str, prompt: str | None = None) -> RunResult:
         """Advance an existing Run synchronously.
 
         Without a prompt, picks up pending work (PAUSED_LIMIT / CANCELLED). With
@@ -248,20 +158,16 @@ class MilkyFrog:
                 run_id=run_id,
                 max_model_calls=config.max_model_calls,
                 prompt=prompt,
-            ),
-            stdin_steering=stdin_steering,
+            )
         )
 
-    def _drive(self, foreground: ForegroundRun, *, stdin_steering: bool = True) -> RunResult:
+    def _drive(self, foreground: ForegroundRun) -> RunResult:
         """Run one foreground awaitable on the reused loop, wiring SIGINT to a
-        cooperative cancel and, when enabled, a background stdin reader for
-        mid-Run steering for this Run's duration only."""
+        cooperative cancel and a session-scoped steering producer for this Run."""
         if self._loop is None:
             self._loop = asyncio.new_event_loop()
         self._cancellation = RunCancellation()
-        steering: _StdinSteering | _InertSteering = (
-            _StdinSteering() if stdin_steering else _InertSteering()
-        )
+        steering = self._steering_producer.start()
         previous_sigint = signal.getsignal(signal.SIGINT)
 
         def _request_cancel(signum: int, frame: FrameType | None) -> None:
@@ -276,12 +182,11 @@ class MilkyFrog:
                 signal.default_int_handler(signum, frame)
 
         signal.signal(signal.SIGINT, _request_cancel)
-        steering.start()
         try:
             result = self._loop.run_until_complete(foreground(self._cancellation, steering))
         finally:
-            # Stop the reader first so it releases stdin before the next prompt.
-            steering.stop()
+            # Stop the producer first so it releases stdin before the next prompt.
+            self._steering_producer.stop(steering)
             signal.signal(signal.SIGINT, previous_sigint)
             self._cancellation = None
             # Drain async-generator cleanup tasks (athrow GeneratorExit) that

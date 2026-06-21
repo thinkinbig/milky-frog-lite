@@ -9,6 +9,7 @@ from typing import Any
 from uuid import uuid4
 
 from milky_frog.checkpoint import CheckpointStore, RunClaimError
+from milky_frog.checkpoint.events import RunEvent
 from milky_frog.domain import (
     MessageRole,
     ModelRequest,
@@ -144,7 +145,42 @@ class Harness:
                 state, repairs = seal(state)
                 completed_tail = _completed_tail(state)
                 if prompt is None and completed_tail is not None:
-                    return await self._finish_completed(state, completed_tail)
+                    # Drain steering *before* deciding to short-circuit complete.
+                    # We must not persist steering events yet — prepare_resume
+                    # below needs an unchanged updated_at for its atomic CAS.
+                    steer_events: tuple[RunEvent, ...] = ()
+                    if steering is not None:
+                        steer_lines = steering.drain()
+                        if steer_lines:
+                            steer_events = tuple(
+                                user_message_added(line) for line in steer_lines
+                            )
+                            for event in steer_events:
+                                state = reduce(state, event)
+                    if not steer_events:
+                        result_or_state = await self._finish_completed(
+                            state, completed_tail, steering
+                        )
+                        if isinstance(result_or_state, RunState):
+                            return await self._advance(
+                                result_or_state,
+                                LocalSandbox(stored.workspace),
+                                cancellation,
+                                max_model_calls,
+                                steering,
+                            )
+                        return result_or_state
+                    # Steering arrived; fold steer events into the atomic seeds
+                    # and fall through to _advance instead of short-circuiting.
+                    seeds = (*repairs, *steer_events)
+                    self._checkpoints.prepare_resume(run_id, stored.updated_at, seeds)
+                    return await self._advance(
+                        state,
+                        LocalSandbox(stored.workspace),
+                        cancellation,
+                        max_model_calls,
+                        steering,
+                    )
 
                 prompt_event = user_message_added(prompt) if prompt is not None else None
                 seeds = (*repairs, *((prompt_event,) if prompt_event is not None else ()))
@@ -172,7 +208,8 @@ class Harness:
         """
         run_id = state.run_id
         try:
-            for _ in range(max_model_calls):
+            calls = 0
+            while calls < max_model_calls:
                 if _is_cancelled(cancellation):
                     return await self._finish_cancelled(state)
                 state = self._absorb_steering(state, steering)
@@ -191,6 +228,7 @@ class Harness:
                 completed = model_message_completed(response)
                 self._checkpoints.append(run_id, completed)
                 state = reduce(state, completed)
+                calls += 1
 
                 if not response.tool_calls:
                     # A steering line typed during the final turn turns "done"
@@ -200,7 +238,13 @@ class Harness:
                     if steered is not state:
                         state = steered
                         continue
-                    return await self._finish_completed(state, response.content)
+                    result_or_state = await self._finish_completed(
+                        state, response.content, steering
+                    )
+                    if isinstance(result_or_state, RunState):
+                        state = result_or_state
+                        continue
+                    return result_or_state
 
                 for call in response.tool_calls:
                     if _is_cancelled(cancellation):
@@ -334,7 +378,15 @@ class Harness:
             state = self._append_user_message(state, line)
         return state
 
-    async def _finish_completed(self, state: RunState, final_message: str) -> RunResult:
+    async def _finish_completed(
+        self, state: RunState, final_message: str, steering: SteeringChannel | None = None
+    ) -> RunResult | RunState:
+        # One last steering drain before persisting COMPLETED — catches lines
+        # that arrived during the completion decision window, which would
+        # otherwise be silently dropped by the producer's stop() drain.
+        steered = self._absorb_steering(state, steering)
+        if steered is not state:
+            return steered
         result = RunResult(
             state.run_id,
             RunStatus.COMPLETED,
