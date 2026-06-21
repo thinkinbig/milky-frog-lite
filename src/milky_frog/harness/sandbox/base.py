@@ -12,3 +12,9 @@ class Sandbox(Protocol):
     def resolve(self, relative_path: str, *, allow_sensitive: bool = False) -> Path: ...
 
     def command_environment(self) -> dict[str, str]: ...
+
+
+class SandboxFactory(Protocol):
+    """Create a Sandbox for a given Workspace."""
+
+    def __call__(self, workspace: Path) -> Sandbox: ...

@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -21,11 +20,9 @@ class SqliteCheckpointStore:
         self._lock = RunLock(self._path.with_name(f"{self._path.name}.locks"))
         self._initialize()
 
-    @contextmanager
-    def claim(self, run_id: str) -> Iterator[None]:
+    def claim(self, run_id: str) -> AbstractContextManager[None]:
         """Hold the OS-level ownership lock for one Run (crash-safe)."""
-        with self._lock.claim(run_id):
-            yield
+        return self._lock.claim(run_id)
 
     def create_run(self, run_id: str, workspace: Path) -> StoredRun:
         now = datetime.now(UTC)
