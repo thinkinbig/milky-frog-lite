@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from milky_frog.domain import RunUsage
 from milky_frog.handlers import (
-    AfterModel,
-    AfterTool,
     BaseHandler,
-    BeforeTool,
     HandlerRegistry,
-    OnModelChunk,
-    OnModelReasoning,
+    RunAfterModel,
+    RunAfterTool,
+    RunBeforeTool,
+    RunModelChunk,
+    RunModelReasoning,
     RunStarted,
 )
 from milky_frog.ui.streaming import StreamingPrinter
@@ -16,13 +16,7 @@ from milky_frog.ui.usage import format_run_usage
 
 
 class StreamingHandlers(BaseHandler):
-    """Streams model reasoning, text, and a running token counter to the console.
-
-    Holds the running-token accumulator as instance state. Runs are strictly
-    sequential in the foreground, so one accumulator suffices; it is reset at
-    each Run start, and the footer's final total comes from the
-    harness-authoritative RunResult.
-    """
+    """Streams model reasoning, text, and a running token counter to the console."""
 
     def __init__(self, printer: StreamingPrinter) -> None:
         self._printer = printer
@@ -30,33 +24,30 @@ class StreamingHandlers(BaseHandler):
 
     def register(self, registry: HandlerRegistry) -> None:
         registry.on(RunStarted)(self._reset_usage)
-        registry.on(OnModelReasoning)(self._print_reasoning)
-        registry.on(OnModelChunk)(self._print_chunk)
-        registry.on(AfterModel)(self._print_usage)
-        registry.on(BeforeTool)(self._print_tool_call)
-        registry.on(AfterTool)(self._print_tool_result)
+        registry.on(RunModelReasoning)(self._print_reasoning)
+        registry.on(RunModelChunk)(self._print_chunk)
+        registry.on(RunAfterModel)(self._print_usage)
+        registry.on(RunBeforeTool)(self._print_tool_call)
+        registry.on(RunAfterTool)(self._print_tool_result)
 
     async def _reset_usage(self, event: RunStarted) -> None:
         del event
         self._running = RunUsage()
 
-    async def _print_reasoning(self, event: OnModelReasoning) -> None:
+    async def _print_reasoning(self, event: RunModelReasoning) -> None:
         self._printer.on_reasoning(event.chunk.content)
 
-    async def _print_chunk(self, event: OnModelChunk) -> None:
+    async def _print_chunk(self, event: RunModelChunk) -> None:
         self._printer.on_delta(event.chunk.content)
 
-    async def _print_usage(self, event: AfterModel) -> None:
+    async def _print_usage(self, event: RunAfterModel) -> None:
         self._running = self._running.record(event.response.usage)
-        # Only emit a live line for a turn that continues (has tool calls); the
-        # final turn's total is rendered once in the footer, and leaving its
-        # stream open lets the loop detect whether anything was streamed.
         summary = format_run_usage(self._running)
         if event.response.tool_calls and summary is not None:
             self._printer.usage(summary)
 
-    async def _print_tool_call(self, event: BeforeTool) -> None:
+    async def _print_tool_call(self, event: RunBeforeTool) -> None:
         self._printer.tool_call(event.call.name)
 
-    async def _print_tool_result(self, event: AfterTool) -> None:
+    async def _print_tool_result(self, event: RunAfterTool) -> None:
         self._printer.tool_result(is_error=event.result.is_error)

@@ -1,22 +1,12 @@
 from __future__ import annotations
 
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
-from pydantic import JsonValue
-
-from milky_frog.domain import RunStatus
-
-
-@dataclass(frozen=True, slots=True)
-class RunEvent:
-    event_type: str
-    payload: dict[str, JsonValue]
-    version: int = 1
-    sequence: int | None = None
-    created_at: datetime | None = None
+from milky_frog.domain import RunState, RunStatus
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,14 +16,35 @@ class StoredRun:
     status: RunStatus
     created_at: datetime
     updated_at: datetime
+    final_message: str | None = None
+
+
+class RunClaimError(RuntimeError):
+    """A Run is currently owned by another live foreground process."""
 
 
 class CheckpointStore(Protocol):
+    def claim(self, run_id: str) -> AbstractContextManager[None]: ...
+
     def create_run(self, run_id: str, workspace: Path) -> StoredRun: ...
 
-    def append(self, run_id: str, event: RunEvent, status: RunStatus | None = None) -> RunEvent: ...
+    def save_state(
+        self,
+        run_id: str,
+        state: RunState,
+        *,
+        status: RunStatus | None = None,
+        final_message: str | None = None,
+    ) -> None: ...
 
-    def events(self, run_id: str) -> tuple[RunEvent, ...]: ...
+    def load_state(self, run_id: str) -> RunState: ...
+
+    def prepare_resume(
+        self,
+        run_id: str,
+        expected_updated_at: datetime,
+        state: RunState,
+    ) -> StoredRun: ...
 
     def get_run(self, run_id: str) -> StoredRun | None: ...
 

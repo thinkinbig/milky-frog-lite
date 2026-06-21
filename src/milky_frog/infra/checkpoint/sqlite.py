@@ -1,0 +1,169 @@
+from __future__ import annotations
+
+import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import UTC, datetime
+from pathlib import Path
+
+from milky_frog.checkpoint.base import StoredRun
+from milky_frog.checkpoint.snapshot import dump_run_state, load_run_state
+from milky_frog.domain import RunState, RunStatus
+from milky_frog.infra.checkpoint._locking import RunLock
+
+
+class SqliteCheckpointStore:
+    """SQLite adapter for the RunState snapshot Checkpoint seam."""
+
+    def __init__(self, path: Path) -> None:
+        self._path = path.resolve()
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = RunLock(self._path.with_name(f"{self._path.name}.locks"))
+        self._initialize()
+
+    @contextmanager
+    def claim(self, run_id: str) -> Iterator[None]:
+        """Hold the OS-level ownership lock for one Run (crash-safe)."""
+        with self._lock.claim(run_id):
+            yield
+
+    def create_run(self, run_id: str, workspace: Path) -> StoredRun:
+        now = datetime.now(UTC)
+        resolved = workspace.resolve()
+        empty = dump_run_state(RunState(run_id=run_id, workspace=resolved))
+        with self._db as conn:
+            conn.execute(
+                "INSERT INTO runs("
+                "run_id, workspace, status, state_json, final_message, created_at, updated_at"
+                ") VALUES (?, ?, ?, ?, NULL, ?, ?)",
+                (run_id, str(resolved), RunStatus.RUNNING, empty, now.isoformat(), now.isoformat()),
+            )
+        return StoredRun(run_id, resolved, RunStatus.RUNNING, now, now)
+
+    def save_state(
+        self,
+        run_id: str,
+        state: RunState,
+        *,
+        status: RunStatus | None = None,
+        final_message: str | None = None,
+    ) -> None:
+        now = datetime.now(UTC)
+        with self._db as conn:
+            conn.execute(
+                "UPDATE runs SET state_json = ?, status = COALESCE(?, status), "
+                "final_message = COALESCE(?, final_message), updated_at = ? WHERE run_id = ?",
+                (
+                    dump_run_state(state),
+                    status,
+                    final_message,
+                    now.isoformat(),
+                    run_id,
+                ),
+            )
+
+    def load_state(self, run_id: str) -> RunState:
+        stored = self.get_run(run_id)
+        if stored is None:
+            raise LookupError(run_id)
+        with self._db as conn:
+            row = conn.execute("SELECT state_json FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+        if row is None:
+            raise LookupError(run_id)
+        return load_run_state(run_id, stored.workspace, str(row["state_json"]))
+
+    def prepare_resume(
+        self,
+        run_id: str,
+        expected_updated_at: datetime,
+        state: RunState,
+    ) -> StoredRun:
+        """Atomically CAS the Run back to RUNNING and persist the resume state."""
+        now = datetime.now(UTC)
+        with self._db as conn:
+            updated = conn.execute(
+                "UPDATE runs SET status = ?, state_json = ?, updated_at = ? "
+                "WHERE run_id = ? AND updated_at = ?",
+                (
+                    RunStatus.RUNNING,
+                    dump_run_state(state),
+                    now.isoformat(),
+                    run_id,
+                    expected_updated_at.isoformat(),
+                ),
+            ).rowcount
+            if updated == 0:
+                raise RuntimeError(f"Run {run_id} changed while resume was being prepared")
+            row = conn.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+        if row is None:
+            raise RuntimeError(f"Run {run_id} disappeared while resume was being prepared")
+        return self._row_to_stored_run(row)
+
+    def get_run(self, run_id: str) -> StoredRun | None:
+        with self._db as conn:
+            row = conn.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+        return None if row is None else self._row_to_stored_run(row)
+
+    def list_runs(self, limit: int = 20) -> tuple[StoredRun, ...]:
+        with self._db as conn:
+            rows = conn.execute(
+                "SELECT * FROM runs ORDER BY updated_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return tuple(self._row_to_stored_run(row) for row in rows)
+
+    def resolve_run_id(self, token: str) -> str:
+        exact = self.get_run(token)
+        if exact is not None:
+            return exact.run_id
+        matches = tuple(
+            run.run_id for run in self.list_runs(limit=100) if run.run_id.startswith(token)
+        )
+        if not matches:
+            raise LookupError(token)
+        if len(matches) > 1:
+            raise ValueError(token)
+        return matches[0]
+
+    @property
+    def _db(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self._path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
+
+    def _initialize(self) -> None:
+        with self._db as conn:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS runs (
+                    run_id TEXT PRIMARY KEY,
+                    workspace TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    state_json TEXT NOT NULL DEFAULT '{}',
+                    final_message TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                """
+            )
+            columns = {
+                str(row["name"]) for row in conn.execute("PRAGMA table_info(runs)").fetchall()
+            }
+            if "state_json" not in columns:
+                conn.execute("ALTER TABLE runs ADD COLUMN state_json TEXT NOT NULL DEFAULT '{}'")
+            if "final_message" not in columns:
+                conn.execute("ALTER TABLE runs ADD COLUMN final_message TEXT")
+            conn.execute("DROP TABLE IF EXISTS run_events")
+
+    @staticmethod
+    def _row_to_stored_run(row: sqlite3.Row) -> StoredRun:
+        final_message = row["final_message"]
+        return StoredRun(
+            run_id=str(row["run_id"]),
+            workspace=Path(str(row["workspace"])),
+            status=RunStatus(str(row["status"])),
+            created_at=datetime.fromisoformat(str(row["created_at"])),
+            updated_at=datetime.fromisoformat(str(row["updated_at"])),
+            final_message=None if final_message is None else str(final_message),
+        )

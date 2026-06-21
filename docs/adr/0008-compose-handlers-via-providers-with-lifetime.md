@@ -1,18 +1,18 @@
 # Compose Handlers via providers with a base lifetime
 
-Settings-driven infrastructure Handlers (observability now; persistence and authorization later) are composed through an explicit one-line roster of provider functions, and share resource lifetime through a `BaseHandler` base class — rather than the runtime naming each Handler concretely.
+Settings-driven infrastructure Handlers (observability now; future policy seams such as authorization are explicit `Harness` dependencies instead) are composed through an explicit one-line roster of provider types, and share resource lifetime through a `BaseHandler` base class — rather than the runtime naming each Handler concretely.
 
 Previously `MilkyFrog` imported `LangfuseHandler` directly: it read `settings.langfuse.active`, constructed and registered it, and drove its `flush`/`finalize` from inside `run()`. Every Handler that needs lifecycle beyond pure event observation forced the runtime to grow concrete knowledge of it. The streaming UI Handlers were already decoupled (the CLI builds them and injects the registry), so the coupling was specifically about *infrastructure* Handlers with a resource lifetime.
 
 We split the concern into a registrant bundle plus two lifetime scopes:
 
 - **`BaseHandler`** (`handlers/registry.py`) — a cross-cutting bundle of Handlers. `register(registry)` is abstract (each bundle wires its own callbacks, in its own file); `aclose()` is a concrete **no-op default** that resource-holding bundles override. The no-op default lets the runtime release every bundle uniformly with no `isinstance` check.
-- **Per-run** teardown is expressed as **events**: `LangfuseHandler` flushes its batch from the terminal-event handlers (`RunCompleted`/`RunFailed`/`RunCancelled`/`RunPaused`), which already fire from inside `Harness.run`. No runtime side-channel.
+- **Per-run** teardown is expressed as **events**: `LangfuseHandler` flushes its batch from the terminal lifecycle signals (`RunCompleted`/`RunFailed`/`RunCancelled`/`RunPaused`), which already fire from inside `Harness.run`. No runtime side-channel.
 - **Instance-lifetime** teardown is the `BaseHandler.aclose` seam: `LangfuseHandler.aclose` flushes and shuts down its client. `MilkyFrog` is now a context manager that, on `__exit__`, `aclose`s every bundle it was handed on its reused event loop and then closes the loop.
 
 Composition lives at the **composition root**, a `HandlerFactory` (`cli/factory.py`) that owns both the presentation dependency (a live `StreamingPrinter`) and `Settings`. Its `build()` composes the full bundle list — `StreamingHandlers` plus the settings-driven infrastructure — registers each onto one registry, and returns `(registry, bundles)`. The runtime is handed both; it no longer composes anything, it only owns the bundles' lifetime.
 
-The infrastructure half stays in `handlers/assembly.py`: a `HANDLER_PROVIDERS` tuple of `Callable[[Settings], BaseHandler | None]`, and `build_infrastructure_handlers(settings)` that builds each active provider (`None` means inactive) and returns the bundles **unregistered** (the factory registers the whole roster uniformly). Each provider — e.g. `build_langfuse_handler` — lives in its own Handler's file with its settings gate. Adding an infrastructure Handler is a new file plus **one line** in the roster.
+The infrastructure half stays in `handlers/assembly.py`: `InfrastructureHandlerAssembly._ROSTER` lists settings-driven Handler types (each implements `SettingsDrivenHandler.from_settings`); `build()` returns active bundles **unregistered** (the factory registers the whole roster uniformly). Adding an infrastructure Handler is a new file plus **one line** in the roster.
 
 The factory must sit at the composition root rather than in `handlers/`: the UI bundle depends on `ui/`, which already imports `handlers/`, so centralizing UI and infrastructure composition any lower would invert the layering and create an import cycle.
 
@@ -32,7 +32,7 @@ The CLI's streaming Handlers also became a `BaseHandler` (`StreamingHandlers`) f
 
 # 通过 provider 组装 Handler，并以基类承载生命周期
 
-由配置驱动的基础设施 Handler（当前是可观测性，日后包括持久化与授权）通过一份显式的、每个 Handler 一行的 provider 名册来组装，并通过 `BaseHandler` 基类共享资源生命周期——而不再由 runtime 具名地引用每个 Handler。
+由配置驱动的基础设施 Handler（当前是可观测性；日后的授权等策略以 `Harness` 显式依赖注入，而非 Handler 总线）通过一份显式的、每个 Handler 一行的类型名册来组装，并通过 `BaseHandler` 基类共享资源生命周期——而不再由 runtime 具名地引用每个 Handler。
 
 此前 `MilkyFrog` 直接 import `LangfuseHandler`：读取 `settings.langfuse.active`、构造并注册它，并在 `run()` 内部驱动其 `flush`/`finalize`。任何需要超出纯事件观察之生命周期的 Handler，都会迫使 runtime 增长对它的具体认知。流式 UI Handler 早已解耦（由 CLI 构造并注入 registry），因此真正的耦合点专指带资源生命周期的*基础设施* Handler。
 
@@ -44,7 +44,7 @@ The CLI's streaming Handlers also became a `BaseHandler` (`StreamingHandlers`) f
 
 组装发生在**组装根**——一个 `HandlerFactory`（`cli/factory.py`），它同时持有表现层依赖（实时的 `StreamingPrinter`）与 `Settings`。其 `build()` 组合出完整的 bundle 列表（`StreamingHandlers` 加上配置驱动的基础设施），将每个注册到同一 registry，并返回 `(registry, bundles)`。runtime 同时收到二者；它不再组装任何东西，只负责 bundle 的生命周期。
 
-基础设施那一半仍住在 `handlers/assembly.py`：一个 `HANDLER_PROVIDERS` 元组（类型 `Callable[[Settings], BaseHandler | None]`），以及 `build_infrastructure_handlers(settings)`——构造每个活跃 provider（返回 `None` 表示未启用）并返回**未注册**的 bundle（由 factory 统一注册整份名册）。每个 provider（如 `build_langfuse_handler`）连同其配置门槛都住在对应 Handler 自己的文件里。新增一个基础设施 Handler = 一个新文件加名册里**一行**。
+基础设施那一半仍住在 `handlers/assembly.py`：`InfrastructureHandlerAssembly._ROSTER` 列出由配置驱动的 Handler 类型（各实现 `SettingsDrivenHandler.from_settings`）；`build()` 返回活跃 bundle 的**未注册**列表（由 factory 统一注册整份名册）。新增一个基础设施 Handler = 一个新文件加名册里**一行**。
 
 factory 必须位于组装根而非 `handlers/`：UI bundle 依赖 `ui/`，而 `ui/` 已经 import `handlers/`，因此若把 UI 与基础设施的组装下沉到更低层会倒置分层并造成循环 import。
 

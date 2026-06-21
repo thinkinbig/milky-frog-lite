@@ -7,9 +7,11 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from milky_frog.checkpoint import RunEvent, SqliteCheckpointStore
+from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.cli import app
 from milky_frog.domain import RunResult, RunStatus
+from tests.checkpoint_helpers import seed_run
+from tests.stubs import RecordingLangfuseFactory
 
 runner = CliRunner()
 
@@ -64,8 +66,8 @@ def test_build_streaming_frog_does_not_leak_handlers_on_missing_config(
 
     constructed: list[object] = []
     monkeypatch.setattr(
-        "milky_frog.handlers.langfuse.Langfuse",
-        lambda **kwargs: constructed.append(kwargs) or object(),
+        "milky_frog.infra.observability.langfuse.Langfuse",
+        RecordingLangfuseFactory(constructed),
     )
     langfuse = LangfuseSettings(
         enabled=True, public_key="public", secret_key="secret", host="https://langfuse.test"
@@ -91,7 +93,10 @@ def test_no_arguments_starts_interactive_mode(monkeypatch: object, tmp_path: Pat
 
         @classmethod
         def from_settings(
-            cls, settings: object, handlers: object = None, bundles: object = None
+            cls,
+            settings: object,
+            handlers: object = None,
+            bundles: object = None,
         ) -> FakeMilkyFrog:
             del settings, handlers, bundles
             return cls()
@@ -128,6 +133,103 @@ def test_no_arguments_starts_interactive_mode(monkeypatch: object, tmp_path: Pat
     assert "run-inte" in result.stdout
     assert "test-model" in result.stdout
     assert "/clear" in result.stdout
+    assert "/resume" in result.stdout
+
+
+def test_resume_without_task_advances_pending_work(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cli_module = import_module("milky_frog.cli.app")
+    calls: list[tuple[str, str | None]] = []
+
+    class FakeMilkyFrog:
+        @staticmethod
+        def require_model_configuration(settings: object) -> tuple[str, str]:
+            del settings
+            return "test-key", "test-model"
+
+        @classmethod
+        def from_settings(
+            cls,
+            settings: object,
+            handlers: object = None,
+            bundles: object = None,
+        ) -> FakeMilkyFrog:
+            del settings, handlers, bundles
+            return cls()
+
+        def __enter__(self) -> FakeMilkyFrog:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            pass
+
+        def resume(self, run_id: str, prompt: str | None = None) -> RunResult:
+            calls.append((run_id, prompt))
+            return RunResult(run_id, RunStatus.COMPLETED, "resumed", 1)
+
+    monkeypatch.setattr(cli_module, "MilkyFrog", FakeMilkyFrog)  # type: ignore[attr-defined]
+    result = runner.invoke(
+        app,
+        ["resume", "run-abc"],
+        env={
+            "MILKY_FROG_HOME": str(tmp_path),
+            "MILKY_FROG_API_KEY": "test-key",
+            "MILKY_FROG_MODEL": "test-model",
+            "NO_COLOR": "1",
+        },
+    )
+
+    assert result.exit_code == 0
+    assert calls == [("run-abc", None)]
+    assert "resumed" in result.stdout
+
+
+def test_resume_with_task_continues_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    cli_module = import_module("milky_frog.cli.app")
+    calls: list[tuple[str, str | None]] = []
+
+    class FakeMilkyFrog:
+        @staticmethod
+        def require_model_configuration(settings: object) -> tuple[str, str]:
+            del settings
+            return "test-key", "test-model"
+
+        @classmethod
+        def from_settings(
+            cls,
+            settings: object,
+            handlers: object = None,
+            bundles: object = None,
+        ) -> FakeMilkyFrog:
+            del settings, handlers, bundles
+            return cls()
+
+        def __enter__(self) -> FakeMilkyFrog:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            pass
+
+        def resume(self, run_id: str, prompt: str | None = None) -> RunResult:
+            calls.append((run_id, prompt))
+            return RunResult(run_id, RunStatus.COMPLETED, "continued", 2)
+
+    monkeypatch.setattr(cli_module, "MilkyFrog", FakeMilkyFrog)  # type: ignore[attr-defined]
+    result = runner.invoke(
+        app,
+        ["resume", "run-abc", "follow up"],
+        env={
+            "MILKY_FROG_HOME": str(tmp_path),
+            "MILKY_FROG_API_KEY": "test-key",
+            "MILKY_FROG_MODEL": "test-model",
+            "NO_COLOR": "1",
+        },
+    )
+
+    assert result.exit_code == 0
+    assert calls == [("run-abc", "follow up")]
+    assert "continued" in result.stdout
 
 
 def test_no_arguments_requires_model_configuration(tmp_path: Path) -> None:
@@ -170,12 +272,7 @@ def test_show_json_is_clean_machine_output(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    store.create_run("run-123", workspace)
-    store.append(
-        "run-123",
-        RunEvent("RunCompleted", {"final_message": "done"}),
-        RunStatus.COMPLETED,
-    )
+    seed_run(store, "run-123", workspace, status=RunStatus.COMPLETED, final_message="done")
 
     result = runner.invoke(
         app,
