@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from milky_frog.checkpoint import RunEvent, SqliteCheckpointStore
+from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import (
     ModelChunk,
     ModelRequest,
@@ -19,10 +19,11 @@ from milky_frog.domain import (
 )
 from milky_frog.handlers import BaseHandler, HandlerRegistry, RunCancelled
 from milky_frog.harness import ResumeError
+from milky_frog.infra.steering import StdinSteeringChannel
 from milky_frog.models import OpenAIModel
 from milky_frog.runtime import MilkyFrog, MissingModelConfiguration
 from milky_frog.settings import LangfuseSettings, Settings
-from milky_frog.steering import StdinSteeringChannel
+from tests.checkpoint_helpers import run_status, seed_run
 
 _NO_LANGFUSE = LangfuseSettings(
     enabled=False, public_key=None, secret_key=None, host="https://cloud.langfuse.com"
@@ -83,7 +84,7 @@ def test_milky_frog_cancel_stops_foreground_run(
     assert result.status is RunStatus.CANCELLED
     assert len(cancelled) == 1
     store = SqliteCheckpointStore(settings.database_path)
-    assert any(event.event_type == "RunCancelled" for event in store.events(result.run_id))
+    assert run_status(store, result.run_id) is RunStatus.CANCELLED
 
 
 def test_milky_frog_context_manager_closes_its_bundles(tmp_path: Path) -> None:
@@ -175,16 +176,7 @@ def test_milky_frog_resume_advances_stored_run(
     # A Run paused at its model-call limit, persisted before the frog is built.
     store = SqliteCheckpointStore(settings.database_path)
     run_id = "paused-run"
-    store.create_run(run_id, tmp_path)
-    store.append(
-        run_id,
-        RunEvent.from_parts("RunStarted", {"prompt": "go", "workspace": str(tmp_path)}),
-    )
-    store.append(
-        run_id,
-        RunEvent.from_parts("RunPaused", {"reason": "limit", "model_calls": 1}),
-        RunStatus.PAUSED_LIMIT,
-    )
+    seed_run(store, run_id, tmp_path, status=RunStatus.PAUSED_LIMIT, final_message="limit")
 
     result = MilkyFrog.from_settings(settings).resume(run_id)
 
@@ -211,7 +203,7 @@ def test_stdin_steering_drains_queued_lines() -> None:
 
 def test_stdin_steering_is_inert_when_unsupported(monkeypatch: pytest.MonkeyPatch) -> None:
     # Off-TTY / Windows: no reader thread, draining yields nothing, stop is safe.
-    monkeypatch.setattr("milky_frog.steering.sys.platform", "win32")
+    monkeypatch.setattr("milky_frog.infra.steering.channels.sys.platform", "win32")
     channel = StdinSteeringChannel()
 
     channel.start()

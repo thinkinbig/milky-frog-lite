@@ -1,5 +1,9 @@
 # Steer an active Run via a background stdin channel
 
+> **Persistence wording superseded by [ADR-0014](0014-persist-checkpoints-as-runstate-snapshots.md).**
+> Steering still drains into user turns between model calls; each line is persisted
+> via `append_user_message` + `RunEmitter.persist`, not `UserMessageAdded` events.
+
 A user can now type a line *while* a Run is advancing; it is injected as the next
 user turn at the following turn boundary. Input is read by a background thread
 into a `SteeringChannel` the Harness drains between turns. This is phase 2b, the
@@ -26,18 +30,17 @@ that briefly opens the box is the future polish, deliberately deferred.
   needs `isinstance` to work against the Protocol.
 
 - **One queue, two drain points.** `_advance` drains the channel (a) at the top
-  of each iteration — folding lines in as `UserMessageAdded` turns before the next
+  of each iteration — appending lines as user turns before the next
   model call (steering) — and (b) **instead of completing**: when the model
-  returns no tool calls but a drain yields lines, it folds them in and continues
+  returns no tool calls but a drain yields lines, it appends them and continues
   rather than finishing (follow-up). One unified queue covers both, which suits a
   single bounded foreground Run; pi needs two queues only because its `Agent` is a
   long-lived multi-prompt object. `max_model_calls` still bounds it — endless
   steering simply reaches `PAUSED_LIMIT`.
 
-- **Steering lines are durable user turns.** Each drained line is a
-  `UserMessageAdded` event folded by the single `reduce` (ADR-0009), identical to
-  a 2a follow-up. So `fold` reconstructs a steered transcript exactly, and a
-  steered Run resumes like any other.
+- **Steering lines are durable user turns.** Each drained line is persisted through
+  `append_user_message` (ADR-0014), identical in effect to a 2a follow-up. A
+  steered Run resumes from the same snapshot shape as any other Run.
 
 - **Concurrency model A: a runtime-owned reader thread.** `_StdinSteering` runs a
   daemon thread that `select`s on stdin with a short timeout, reads ready lines,
@@ -56,9 +59,10 @@ that briefly opens the box is the future polish, deliberately deferred.
 ## Consequences
 
 Mid-Run steering works on POSIX TTYs and reuses the whole phase-1/2a engine —
-a steering line is just a `UserMessageAdded` event arriving from a different
-producer. The seam is also the inert-by-default `steering_queue` poll that
-ADR-0009 declined to pre-place: it now exists *with* a producer, not before one.
+a steering line is just a user turn from a different producer, persisted through
+the same snapshot path as a 2a follow-up. The seam is also the inert-by-default
+`steering_queue` poll that ADR-0009 declined to pre-place: it now exists *with*
+a producer, not before one.
 
 The accepted cost is echo-interleave: with the terminal in cooked mode, typed
 characters appear amid the streaming output. This is the explicit trade of the
@@ -79,6 +83,10 @@ committed phase.
 ---
 
 # 通过后台 stdin 通道引导一个活跃的 Run
+
+> **持久化表述已被 [ADR-0014](0014-persist-checkpoints-as-runstate-snapshots.md) 取代。**
+> steering 仍在模型调用之间的轮次边界注入用户轮次；每行经 `append_user_message` +
+> `RunEmitter.persist` 持久化，而非 `UserMessageAdded` 事件。
 
 用户现在可以在一个 Run *推进期间*输入一行，它会在下一个轮次边界作为下一个用户轮次注
 入。输入由后台线程读入一个 `SteeringChannel`，Harness 在轮次之间排空它。这是第二阶
@@ -101,15 +109,14 @@ committed phase.
   校验（经 `RunStarted`），需要 `isinstance` 能对该 Protocol 工作。
 
 - **一个队列，两个排空点。** `_advance` 在 (a) 每次迭代开头排空通道——把行作为
-  `UserMessageAdded` 轮次在下一次模型调用前折叠进去（steering）——以及 (b) **在完成
-  之前**排空：当模型返回无工具调用但排空得到行时，折叠进去并继续而非结束（follow-up）。
+  用户轮次在下一次模型调用前追加进去（steering）——以及 (b) **在完成
+  之前**排空：当模型返回无工具调用但排空得到行时，追加进去并继续而非结束（follow-up）。
   一个统一队列覆盖二者，契合单个有界的前台 Run；pi 需要两个队列仅因其 `Agent` 是长生
   命周期的多输入对象。`max_model_calls` 仍是上界——无尽 steering 只会到达
   `PAUSED_LIMIT`。
 
-- **steering 行是持久的用户轮次。** 每个排空出的行都是由单一 `reduce` 折叠的
-  `UserMessageAdded` 事件（ADR-0009），与 2a 的 follow-up 完全相同。于是 `fold` 能精
-  确重建被 steer 的转录，被 steer 的 Run 也像任何 Run 一样可恢复。
+- **steering 行是持久的用户轮次。** 每个排空出的行经 `append_user_message` 持久化
+  （ADR-0014），与 2a 的 follow-up 效果相同。被 steer 的 Run 与任何 Run 一样从同一快照形状恢复。
 
 - **并发模型 A：runtime 持有的读取线程。** `_StdinSteering` 运行一个守护线程，对 stdin
   做带短超时的 `select`，读取就绪的行，并将非空行入队。`_drive` 在
@@ -125,8 +132,8 @@ committed phase.
 ## 影响
 
 运行中 steering 在 POSIX TTY 上可用，并复用整套第一/2a 阶段引擎——一个 steering 行
-只是来自不同生产者的 `UserMessageAdded` 事件。该 seam 也正是 ADR-0009 拒绝预先放置的、
-默认无效的 `steering_queue` 轮询：它如今*伴随*生产者存在，而非先于生产者。
+只是来自不同生产者的用户轮次，经与 2a follow-up 相同的快照路径持久化。该 seam 也正是
+ADR-0009 拒绝预先放置的、默认无效的 `steering_queue` 轮询：它如今*伴随*生产者存在，而非先于生产者。
 
 被接受的代价是回显交错：终端处于 cooked 模式时，输入字符会出现在流式输出之间。这是最
 小机制的明确取舍；热键打断路径（raw 模式按键 → 暂停流 → 闪现输入框 → 恢复）是打磨项，

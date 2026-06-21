@@ -1,96 +1,87 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import replace
-from pathlib import Path
 
-from milky_frog.checkpoint.events import (
-    ModelMessageCompletedBody,
-    RunEvent,
-    RunStartedBody,
-    ToolCallCompletedBody,
-    UserMessageAddedBody,
-    token_usage_from_fields,
-    tool_call_from_fields,
-)
-from milky_frog.domain import Message, MessageRole, RunState, ToolCall
-from milky_frog.harness.events import INTERRUPTED_TOOL_RESULT, interrupted_tool_call_completed
+from milky_frog.domain import Message, MessageRole, ModelResponse, RunState, ToolCall, ToolResult
 from milky_frog.harness.prompt import system_prompt
 
-__all__ = ["INTERRUPTED_TOOL_RESULT", "fold", "reduce", "seal"]
+# Appended as the result of a tool call that was interrupted before completion.
+# The model sees the interruption and re-decides; the Tool is never blindly
+# re-executed, since its side effects are unknown (see ADR-0002 and ADR-0009).
+INTERRUPTED_TOOL_RESULT = (
+    "Tool execution was interrupted before it completed; its effect is unknown."
+)
+
+__all__ = [
+    "INTERRUPTED_TOOL_RESULT",
+    "append_model_response",
+    "append_tool_result",
+    "append_user_message",
+    "seal",
+    "start_run",
+]
 
 
-def reduce(state: RunState, event: RunEvent) -> RunState:
-    """Fold one Checkpoint event into a ``RunState``.
-
-    The sole writer of a Run's transcript: the live loop calls it as each event
-    is emitted, and ``fold`` calls it while replaying a persisted log. Events
-    that do not change the transcript (``ToolCallRequested``, terminal markers)
-    are returned unchanged.
-    """
-    match event.body:
-        case RunStartedBody(prompt=prompt):
-            return replace(
-                state,
-                messages=(
-                    Message(MessageRole.SYSTEM, system_prompt(state.workspace)),
-                    Message(MessageRole.USER, prompt),
-                ),
-            )
-        case UserMessageAddedBody(content=content):
-            return replace(state, messages=(*state.messages, Message(MessageRole.USER, content)))
-        case ModelMessageCompletedBody(content=content, tool_calls=tool_calls, usage=usage):
-            # Reasoning is intentionally dropped from the transcript: reasoning providers
-            # reject their own reasoning_content on input. It survives in the Checkpoint.
-            return replace(
-                state,
-                messages=(
-                    *state.messages,
-                    Message(
-                        MessageRole.ASSISTANT,
-                        content,
-                        tuple(tool_call_from_fields(call) for call in tool_calls),
-                    ),
-                ),
-                completed_model_calls=state.completed_model_calls + 1,
-                usage=state.usage.record(token_usage_from_fields(usage)),
-            )
-        case ToolCallCompletedBody(id=tool_call_id, content=content):
-            return replace(
-                state,
-                messages=(
-                    *state.messages,
-                    Message(MessageRole.TOOL, content, tool_call_id=tool_call_id),
-                ),
-            )
-        case _:
-            return state
+def start_run(state: RunState, prompt: str) -> RunState:
+    return replace(
+        state,
+        messages=(
+            Message(MessageRole.SYSTEM, system_prompt(state.workspace)),
+            Message(MessageRole.USER, prompt),
+        ),
+    )
 
 
-def fold(run_id: str, workspace: Path, events: Iterable[RunEvent]) -> RunState:
-    """Replay a Run's persisted events into a ``RunState``."""
-    state = RunState(run_id=run_id, workspace=workspace)
-    for event in events:
-        state = reduce(state, event)
-    return state
+def append_user_message(state: RunState, content: str) -> RunState:
+    return replace(state, messages=(*state.messages, Message(MessageRole.USER, content)))
 
 
-def seal(state: RunState) -> tuple[RunState, tuple[RunEvent, ...]]:
+def append_model_response(state: RunState, response: ModelResponse) -> RunState:
+    # Reasoning is intentionally dropped from the transcript: reasoning providers
+    # reject their own reasoning_content on input. It survives in reasoning_log.
+    return replace(
+        state,
+        messages=(
+            *state.messages,
+            Message(
+                MessageRole.ASSISTANT,
+                response.content,
+                response.tool_calls,
+            ),
+        ),
+        completed_model_calls=state.completed_model_calls + 1,
+        reasoning_log=(*state.reasoning_log, response.reasoning),
+        usage=state.usage.record(response.usage),
+    )
+
+
+def append_tool_result(state: RunState, call: ToolCall, result: ToolResult) -> RunState:
+    return replace(
+        state,
+        messages=(
+            *state.messages,
+            Message(MessageRole.TOOL, result.content, tool_call_id=call.id),
+        ),
+    )
+
+
+def seal(state: RunState) -> tuple[RunState, bool]:
     """Repair a transcript that ends mid-turn so its tail is a valid next request.
 
-    A Run interrupted between ``ToolCallRequested`` and ``ToolCallCompleted``
-    folds to a trailing assistant message whose tool calls have no result, which
-    most providers reject. For each unmatched call, append a synthetic
-    ``is_error`` ``ToolCallCompleted`` — a real, durable event — and fold it in.
-    Returns the sealed state and the repair events to persist (empty when the
-    transcript already ends on a clean boundary).
+    A Run interrupted after a model turn but before every tool result completes
+    leaves a trailing assistant message whose tool calls have no result, which most
+    providers reject. For each unmatched call, append a synthetic ``is_error`` tool
+    result. Returns the sealed state and whether any repair was applied.
     """
-    repairs: list[RunEvent] = []
+    repaired = False
     for call in _unmatched_tool_calls(state.messages):
-        event = interrupted_tool_call_completed(call)
-        repairs.append(event)
-        state = reduce(state, event)
-    return state, tuple(repairs)
+        state = append_tool_result(
+            state,
+            call,
+            ToolResult(INTERRUPTED_TOOL_RESULT, is_error=True),
+        )
+        repaired = True
+    return state, repaired
 
 
 def _unmatched_tool_calls(messages: tuple[Message, ...]) -> tuple[ToolCall, ...]:

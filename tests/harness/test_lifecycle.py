@@ -1,0 +1,309 @@
+"""Harness lifecycle: run events, pause, cancel, fail, handler isolation."""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import AsyncIterator
+from pathlib import Path
+
+import pytest
+from pydantic import BaseModel
+
+from milky_frog.checkpoint import SqliteCheckpointStore
+from milky_frog.domain import (
+    MessageRole,
+    ModelChunk,
+    ModelRequest,
+    ModelResponse,
+    RunCancellation,
+    RunRequest,
+    RunResult,
+    RunStatus,
+    StreamDone,
+    ToolCall,
+)
+from milky_frog.handlers import (
+    BeforeTool,
+    HandlerRegistry,
+    RunCancelled,
+    RunFailed,
+    RunPaused,
+    RunStarted,
+)
+from milky_frog.harness import Harness
+from milky_frog.harness.tools import ToolContext, ToolRegistry, ToolResult
+from tests.checkpoint_helpers import run_status, tool_messages
+from tests.stubs import EchoTool, FakeModel, FakeSteering, SlowStreamModel
+
+
+@pytest.mark.asyncio
+async def test_dispatches_run_lifecycle_events(tmp_path: Path) -> None:
+    registry = HandlerRegistry()
+    seen: list[str] = []
+
+    @registry.subscribe
+    async def record(event: object) -> None:
+        seen.append(type(event).__name__)
+
+    harness = Harness(
+        model=FakeModel(),
+        tools=ToolRegistry((EchoTool(),)),
+        checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
+        handlers=registry,
+    )
+
+    result = await harness.run(RunRequest("echo hello", tmp_path))
+
+    assert result.status is RunStatus.COMPLETED
+    assert seen[0] == "RunStarted"
+    assert seen[-1] == "RunCompleted"
+    assert "RunPaused" not in seen
+    assert "RunCancelled" not in seen
+
+
+@pytest.mark.asyncio
+async def test_dispatches_run_paused_event(tmp_path: Path) -> None:
+    registry = HandlerRegistry()
+    paused: list[RunPaused] = []
+
+    @registry.on(RunPaused)
+    async def record(event: RunPaused) -> None:
+        paused.append(event)
+
+    class NoToolModel:
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            del request
+            yield StreamDone(
+                ModelResponse(tool_calls=(ToolCall("call-1", "echo", {"text": "hello"}),))
+            )
+
+    harness = Harness(
+        model=NoToolModel(),
+        tools=ToolRegistry((EchoTool(),)),
+        checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
+        handlers=registry,
+    )
+
+    result = await harness.run(RunRequest("loop forever", tmp_path, max_model_calls=1))
+
+    assert result.status is RunStatus.PAUSED_LIMIT
+    assert len(paused) == 1
+    assert paused[0].status is RunStatus.PAUSED_LIMIT
+
+
+@pytest.mark.asyncio
+async def test_cancellation_stops_run(tmp_path: Path) -> None:
+    registry = HandlerRegistry()
+    cancelled: list[RunCancelled] = []
+
+    @registry.on(RunCancelled)
+    async def record(event: RunCancelled) -> None:
+        cancelled.append(event)
+
+    cancellation = RunCancellation()
+    harness = Harness(
+        model=SlowStreamModel(),
+        tools=ToolRegistry(),
+        checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
+        handlers=registry,
+    )
+
+    async def run_and_cancel() -> RunResult:
+        task = asyncio.create_task(
+            harness.run(RunRequest("slow", tmp_path, cancellation=cancellation))
+        )
+        await asyncio.sleep(0.01)
+        cancellation.cancel()
+        return await task
+
+    result = await run_and_cancel()
+
+    assert result.status is RunStatus.CANCELLED
+    assert len(cancelled) == 1
+    assert cancelled[0].reason == "cancelled"
+    assert cancelled[0].model_calls == 0
+    assert result.model_calls == 0
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    assert run_status(store, result.run_id) is RunStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_tool_execution(tmp_path: Path) -> None:
+    class SlowToolInput(BaseModel):
+        pass
+
+    class SlowTool:
+        name = "slow"
+        description = "Slow tool"
+        input_model = SlowToolInput
+
+        async def execute(self, context: ToolContext, input: BaseModel) -> ToolResult:
+            del input
+            await asyncio.sleep(0.1)
+            return ToolResult("done")
+
+    class SlowToolModel:
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            del request
+            yield StreamDone(ModelResponse(tool_calls=(ToolCall("call-1", "slow", {}),)))
+
+    cancellation = RunCancellation()
+    harness = Harness(
+        model=SlowToolModel(),
+        tools=ToolRegistry((SlowTool(),)),
+        checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
+        handlers=HandlerRegistry(),
+    )
+
+    async def run_and_cancel() -> RunResult:
+        task = asyncio.create_task(
+            harness.run(RunRequest("slow tool", tmp_path, cancellation=cancellation))
+        )
+        await asyncio.sleep(0.01)
+        cancellation.cancel()
+        return await task
+
+    result = await run_and_cancel()
+
+    assert result.status is RunStatus.CANCELLED
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    assert not tool_messages(store.load_state(result.run_id))
+
+
+def test_tool_context_exposes_cancellation_poll() -> None:
+    cancellation = RunCancellation()
+    context = ToolContext("run-1", Path("."), cancellation)
+
+    assert context.is_cancelled() is False
+    cancellation.cancel()
+    assert context.is_cancelled() is True
+
+
+@pytest.mark.asyncio
+async def test_cancelled_handler_runs_after_checkpoint(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    registry = HandlerRegistry()
+    checkpoint_seen = False
+
+    @registry.on(RunCancelled)
+    async def record(event: RunCancelled) -> None:
+        nonlocal checkpoint_seen
+        run = store.get_run(event.run_id)
+        checkpoint_seen = run is not None and run.status is RunStatus.CANCELLED
+
+    cancellation = RunCancellation()
+    harness = Harness(
+        model=SlowStreamModel(),
+        tools=ToolRegistry(),
+        checkpoints=store,
+        handlers=registry,
+    )
+
+    async def run_and_cancel() -> RunResult:
+        task = asyncio.create_task(
+            harness.run(RunRequest("slow", tmp_path, cancellation=cancellation))
+        )
+        await asyncio.sleep(0.01)
+        cancellation.cancel()
+        return await task
+
+    await run_and_cancel()
+
+    assert checkpoint_seen is True
+
+
+@pytest.mark.asyncio
+async def test_external_cancellation_reraises(tmp_path: Path) -> None:
+    harness = Harness(
+        model=SlowStreamModel(),
+        tools=ToolRegistry(),
+        checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
+        handlers=HandlerRegistry(),
+    )
+
+    task = asyncio.create_task(harness.run(RunRequest("slow", tmp_path)))
+    await asyncio.sleep(0.01)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_dispatches_run_failed_event(tmp_path: Path) -> None:
+    registry = HandlerRegistry()
+    failed: list[RunFailed] = []
+
+    @registry.on(RunFailed)
+    async def record(event: RunFailed) -> None:
+        failed.append(event)
+
+    class BrokenModel:
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            del request
+            raise RuntimeError("boom")
+            yield StreamDone(ModelResponse())  # pragma: no cover
+
+    harness = Harness(
+        model=BrokenModel(),
+        tools=ToolRegistry(),
+        checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
+        handlers=registry,
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await harness.run(RunRequest("fail", tmp_path))
+
+    assert len(failed) == 1
+    assert isinstance(failed[0].error, RuntimeError)
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    assert run_status(store, failed[0].run_id) is RunStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_before_tool_handler_cannot_mutate_executed_call(tmp_path: Path) -> None:
+    handlers = HandlerRegistry()
+
+    @handlers.observe(BeforeTool)
+    async def mutate_handler_copy(event: BeforeTool) -> None:
+        event.call.arguments["text"] = "tampered"
+
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    result = await Harness(FakeModel(), ToolRegistry((EchoTool(),)), store, handlers).run(
+        RunRequest("echo hello", tmp_path)
+    )
+
+    loaded = store.load_state(result.run_id)
+    assert tool_messages(loaded)[0] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_run_started_handler_cannot_control_live_run(tmp_path: Path) -> None:
+    handlers = HandlerRegistry()
+
+    @handlers.observe(RunStarted)
+    async def mutate_handler_snapshot(event: RunStarted) -> None:
+        assert event.request.cancellation is not None
+        assert event.request.steering is not None
+        event.request.cancellation.cancel()
+        event.request.steering.drain()
+
+    class SteeringAwareModel:
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            users = [
+                message.content for message in request.messages if message.role is MessageRole.USER
+            ]
+            assert users == ["go", "steer"]
+            yield StreamDone(ModelResponse(content="done"))
+
+    cancellation = RunCancellation()
+    steering = FakeSteering(["steer"])
+    result = await Harness(
+        SteeringAwareModel(),
+        ToolRegistry(),
+        SqliteCheckpointStore(tmp_path / "state.db"),
+        handlers,
+    ).run(RunRequest("go", tmp_path, cancellation=cancellation, steering=steering))
+
+    assert result.status is RunStatus.COMPLETED
+    assert not cancellation.is_cancelled

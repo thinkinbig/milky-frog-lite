@@ -8,12 +8,12 @@ trade-offs behind the architecture.
 
 Milky Frog (奶蛙) is a lightweight local coding-agent CLI. It runs one
 foreground task at a time, coordinating model and Tool calls through a linear
-Harness and persisting an append-only Checkpoint so Runs can be resumed.
+Harness and persisting a RunState Checkpoint snapshot so Runs can be resumed.
 
-Status: OpenAI-compatible foreground Runs, built-in Tools, Checkpoint-replay
+Status: OpenAI-compatible foreground Runs, built-in Tools, snapshot-based
 resume (`milky-frog resume`), a multi-turn interactive loop, and mid-run
-steering work today. Resume folds the event log into a `RunState` and repairs an
-interrupted Tool (ADR-0009); `resume(run_id, prompt)` continues a Run with a new
+steering work today. Resume loads a persisted `RunState` and repairs an
+interrupted Tool (ADR-0009, ADR-0014); `resume(run_id, prompt)` continues a Run with a new
 user turn so the interactive loop keeps one growing transcript across prompts
 (ADR-0010); a background stdin channel injects lines typed *while* a Run advances
 as user turns at the next turn boundary, on POSIX TTYs (ADR-0011).
@@ -50,8 +50,8 @@ and is safe to commit. Credentials must never be committed.
 ## Architecture
 
 The agent loop lives in `harness/runner.py` (`Harness.run`): a linear
-model → Tool → model loop bounded by `max_model_calls`, appending a Checkpoint
-event at every step and notifying lifecycle Handlers around each model and
+model → Tool → model loop bounded by `max_model_calls`, persisting a Checkpoint
+snapshot after meaningful steps and notifying lifecycle Handlers around each model and
 Tool call.
 
 `runtime.py` (`MilkyFrog`) assembles the concrete pieces from `Settings` and
@@ -68,11 +68,11 @@ qualifier, and never merge them into one base type:
 
 | Lane | Where | Lifetime | Purpose |
 |------|-------|----------|---------|
-| **Checkpoint event** | `checkpoint/events.py`, factories in `harness/events.py` | Durable (SQLite) | Resume / `fold` source of truth |
+| **Checkpoint snapshot** | `checkpoint/snapshot.py`, `runs.state_json` | Durable (SQLite) | Resume source of truth |
 | **Lifecycle signal** | `handlers/events.py`, bus in `handlers/registry.py` | Ephemeral (in-process) | UI streaming, Langfuse (`notify`) |
 | **Harness policy** | Explicit `Protocol` deps on `Harness` (future) | Per-call | Authorization, context build, etc. |
 
-Checkpoint bodies are a Pydantic discriminated union (`CheckpointBody`, ADR-0013).
+RunState snapshots are serialized via Pydantic models in `checkpoint/snapshot.py` (ADR-0014).
 Lifecycle signals are frozen Pydantic `BaseEvent` subclasses (ADR-0004, ADR-0012).
 `HandlerRegistry` is read-only: `observe` / `on` / `subscribe` and `notify` only —
 no intercept channel, no return values that change execution.
@@ -84,10 +84,8 @@ named class — so alternatives can be swapped without touching the Harness:
 
 - `models/` — `Model` protocol, `OpenAIModel` adapter.
 - `tools/` — `Tool` protocol + `ToolRegistry` + built-in Tools.
-- `checkpoint/` — `CheckpointStore` protocol, `SqliteCheckpointStore`, typed
-  `CheckpointBody` / `RunEvent` (ADR-0013).
-- `harness/events.py` — Checkpoint event factories (write path into the log).
-- `harness/state.py` — `fold` / `reduce` / `seal` (read path from the log).
+- `checkpoint/` — `CheckpointStore` protocol, `SqliteCheckpointStore`, `RunSnapshot` serialization (ADR-0014).
+- `harness/state.py` — transcript mutators and `seal` (interrupted-tool repair).
 - `handlers/` — lifecycle signals + read-only `HandlerRegistry` (ADR-0012).
 - `foreground.py` — `ForegroundRun`, `StartRun`, `ResumeRun`.
 - `ui/protocols.py` — `RunAdvancer`, `RunCanceller` for the interactive loop.
@@ -106,13 +104,12 @@ both):
 
 | Step | Checkpoint | Lifecycle `notify` |
 |------|-----------|---------------------|
-| Run start | `run_started` | `RunStarted` |
-| User message (incl. steering) | `user_message_added` | — |
-| Before model | — | `BeforeModel` |
+| Run start | `save_state` (seeded transcript) | `RunStarted` |
+| User message (incl. steering) | `save_state` | — |
+| After model | `save_state` | `AfterModel` |
 | Streaming | — | `OnModelChunk`, `OnModelReasoning` |
-| After model | `model_message_completed` | `AfterModel` |
-| Tool requested / completed | `tool_call_*` | `BeforeTool`, `AfterTool` |
-| Run terminal | `run_completed` / `run_paused` / … | matching signal |
+| After tool | `save_state` | `AfterTool` |
+| Run terminal | `save_state` + status | matching signal |
 
 ## Conventions
 

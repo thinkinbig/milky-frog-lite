@@ -242,15 +242,14 @@ class RunResult:
 class RunState:
     """The live transcript and accounting of one Run, threaded through the loop.
 
-    A frozen in-memory mirror of the append-only Checkpoint log: it is only ever
-    grown by the single reducer (``milky_frog.harness.state.reduce``), fed both
-    by the running loop and by replaying persisted events. A state folded from a
-    Checkpoint is therefore indistinguishable from one built live, which is what
-    makes ``resume`` correct by construction rather than by reconciliation.
+    Also the durable Checkpoint snapshot: the Harness grows this value in memory and
+    persists it after each meaningful step. ``resume`` loads the same shape rather
+    than replaying an event log.
     """
 
     run_id: str
     workspace: Path
     messages: tuple[Message, ...] = ()
     completed_model_calls: int = 0
+    reasoning_log: tuple[str, ...] = ()
     usage: RunUsage = field(default_factory=RunUsage)

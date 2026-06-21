@@ -6,9 +6,9 @@ from pathlib import Path
 
 from rich.console import Console
 
-from milky_frog.checkpoint import RunEvent, StoredRun
+from milky_frog.checkpoint import StoredRun
 from milky_frog.diagnostics import CheckStatus, Diagnostic
-from milky_frog.domain import RunStatus, RunUsage, TokenUsage
+from milky_frog.domain import Message, MessageRole, RunState, RunStatus, RunUsage, TokenUsage
 from milky_frog.ui.presenter import Presenter
 from milky_frog.ui.streaming import StreamingPrinter
 
@@ -119,26 +119,23 @@ def test_render_interactive_help_lists_local_commands() -> None:
     assert "/exit" in rendered
 
 
-def test_render_run_shows_summary_and_events_without_payload() -> None:
+def test_render_run_shows_summary_and_transcript_without_secrets() -> None:
     presenter, stdout, _ = _presenter()
     now = datetime(2026, 6, 20, 12, 0, tzinfo=UTC)
-    run = StoredRun("run-123", Path("/workspace"), RunStatus.COMPLETED, now, now)
-    events = (
-        RunEvent.from_parts(
-            "RunStarted",
-            {"prompt": "secret", "workspace": "/tmp"},
-            sequence=1,
-            created_at=now,
-        ),
+    run = StoredRun("run-123", Path("/workspace"), RunStatus.COMPLETED, now, now, "done")
+    state = RunState(
+        run_id="run-123",
+        workspace=Path("/workspace"),
+        messages=(Message(MessageRole.USER, "secret"),),
     )
 
-    presenter.run(run, events)
+    presenter.run(run, state)
 
     output = stdout.getvalue()
     assert "run-123" in output
     assert "completed" in output
-    assert "RunStarted" in output
-    assert "secret" not in output
+    assert "Transcript" in output
+    assert "secret" in output
 
 
 def test_render_error_uses_stderr_and_escapes_markup() -> None:

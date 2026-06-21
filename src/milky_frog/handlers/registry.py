@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, TypeVar, cast
 
-from milky_frog.handlers.base import BaseEvent
+from milky_frog.handlers.events import BaseEvent
 
 EventT = TypeVar("EventT", bound=BaseEvent)
 NotifyHandler = Callable[[EventT], Awaitable[None]]
@@ -30,7 +30,7 @@ class HandlerRegistry:
 
     Handlers registered via ``observe`` (or ``on`` / ``subscribe``) may inspect
     signals only; they cannot change Harness execution. Checkpoint events are
-    separate — see ``milky_frog.harness.events``.
+    separate — see ``milky_frog.harness.state``.
     """
 
     def __init__(self) -> None:

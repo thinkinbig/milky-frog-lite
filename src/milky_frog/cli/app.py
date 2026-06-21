@@ -8,7 +8,7 @@ import typer
 
 from milky_frog import __version__
 from milky_frog.checkpoint import SqliteCheckpointStore
-from milky_frog.cli.advance import MilkyFrogAdvancer
+from milky_frog.checkpoint.snapshot import dump_run_state
 from milky_frog.cli.factory import HandlerFactory
 from milky_frog.diagnostics import CheckStatus, Diagnostic
 from milky_frog.domain import RunResult
@@ -28,6 +28,18 @@ from milky_frog.ui import (
     run_interactive,
 )
 from milky_frog.ui.prompt import configure_history
+from milky_frog.ui.protocols import RunAdvancer
+
+
+def _make_advancer(frog: MilkyFrog, workspace: Path) -> RunAdvancer:
+    """Adapt ``MilkyFrog`` to the ``RunAdvancer`` protocol for the interactive loop."""
+
+    def advance(task: str, run_id: str | None) -> RunResult:
+        if run_id is None:
+            return frog.run(task, workspace)
+        return frog.resume(run_id, task)
+
+    return advance
 
 
 def _render_run_output(printer: StreamingPrinter, result: RunResult) -> None:
@@ -120,7 +132,7 @@ def interactive() -> None:
 
     with frog:
         run_interactive(
-            MilkyFrogAdvancer(frog, workspace),
+            _make_advancer(frog, workspace),
             model=settings.model or "unknown",
             workspace=workspace,
             printer=printer,
@@ -201,13 +213,13 @@ def show(
     run_id: Annotated[str, typer.Argument()],
     as_json: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    """Show a Run and its Checkpoint events."""
+    """Show a Run and its Checkpoint snapshot."""
     store = SqliteCheckpointStore(Settings.from_environment().database_path)
     run = store.get_run(run_id)
     if run is None:
         render_error(f"Unknown Run: {run_id}", hint="List available Runs with: milky-frog runs")
         raise typer.Exit(code=1)
-    events = store.events(run_id)
+    state = store.load_state(run_id)
     if as_json:
         typer.echo(
             json.dumps(
@@ -215,21 +227,14 @@ def show(
                     "run_id": run.run_id,
                     "status": run.status,
                     "workspace": str(run.workspace),
-                    "events": [
-                        {
-                            "sequence": event.sequence,
-                            "type": event.event_type,
-                            "version": event.version,
-                            "payload": event.payload,
-                        }
-                        for event in events
-                    ],
+                    "final_message": run.final_message,
+                    "state": json.loads(dump_run_state(state)),
                 },
                 ensure_ascii=False,
             )
         )
         return
-    render_run(run, events)
+    render_run(run, state)
 
 
 @app.command()

@@ -1,5 +1,10 @@
 # Continue a Run with a new user turn
 
+> **Resume/persistence details superseded by [ADR-0014](0014-persist-checkpoints-as-runstate-snapshots.md).**
+> Optional `prompt`, status×prompt validation, and multi-turn interactive loop
+> are unchanged. Follow-up turns are durable **user messages in the snapshot**,
+> not `UserMessageAdded` Checkpoint events.
+
 `resume` gains an optional `prompt`: `resume(run_id, prompt=None)`. Without a
 prompt it picks up a Run's pending work (ADR-0009, unchanged). With a prompt it
 appends the next user turn to an existing Run and advances — so a conversation
@@ -27,18 +32,18 @@ phase-1 decision flips on its changed premise rather than on taste.
 
 - **One verb, optional prompt.** `Harness.resume(run_id, *, max_model_calls,
   cancellation=None, prompt=None)` and `MilkyFrog.resume(run_id, prompt=None)`.
-  No prompt → fold, seal, advance pending work. With a prompt → fold, seal,
+  No prompt → load, seal, advance pending work. With a prompt → load, seal,
   append the user turn, advance. We did not add a second verb: `continue` is a
   Python keyword, and a distinct method would duplicate ~95% of `resume`
-  (fold→seed→advance) to carry one extra seed line. The seam stays the phase-1
-  shape — **fold → seed → `_advance`** — with the prompt as one more seed.
+  to carry one extra user line. The seam stays the phase-1
+  shape — **load → seal → (optional user turn) → `_advance`** — with the prompt
+  as one more in-memory (then persisted) user message.
 
-- **The follow-up turn is a durable event.** A prompt is recorded as a new
-  `UserMessageAdded` Checkpoint event, which `reduce` folds into a
-  `Message(USER, …)`. The append-only log therefore reconstructs the full
-  multi-turn transcript, and `reduce` stays the single transcript writer
-  (ADR-0009). The user turn is appended *after* `seal`, so a follow-up to an
-  interrupted Run lands after that Run's repaired Tool result.
+- **The follow-up turn is durable.** A prompt is recorded via
+  `append_user_message` and `RunEmitter.persist` into `runs.state_json`, not as
+  a separate event type. The snapshot therefore reconstructs the full
+  multi-turn transcript. The user turn is applied *after* `seal`, so a follow-up
+  to an interrupted Run lands after that Run's repaired Tool result.
 
 - **Validation by status × prompt.** Without a prompt, `PAUSED_LIMIT` /
   `CANCELLED` (pending work, no error) advance; `COMPLETED` / `FAILED` are
@@ -84,6 +89,10 @@ scope and keeps its own future ADR. Phase 2a adds no between-turn queue poll to
 
 # 用新的用户轮次延续一个 Run
 
+> **Resume/持久细节已被 [ADR-0014](0014-persist-checkpoints-as-runstate-snapshots.md) 取代。**
+> 可选 `prompt`、status×prompt 校验与多轮交互循环不变；follow-up 为快照中的**用户消息**，
+> 而非 `UserMessageAdded` Checkpoint 事件。
+
 `resume` 新增可选的 `prompt`：`resume(run_id, prompt=None)`。不带 prompt 时，它
 接续一个 Run 的待办工作（ADR-0009，行为不变）。带 prompt 时，它向既有 Run 追加下
 一个用户轮次并推进——于是一段对话在多次输入间累积为一份转录，而不是每次都冷启动一
@@ -106,15 +115,13 @@ scope and keeps its own future ADR. Phase 2a adds no between-turn queue poll to
 
 - **一个动词，可选 prompt。** `Harness.resume(run_id, *, max_model_calls,
   cancellation=None, prompt=None)` 与 `MilkyFrog.resume(run_id, prompt=None)`。
-  无 prompt → fold、seal、推进待办工作。带 prompt → fold、seal、追加用户轮次、推
-  进。我们没有新增第二个动词：`continue` 是 Python 关键字，且独立方法会为多一行播种
-  而重复 `resume` 约 95% 的逻辑（fold→seed→advance）。seam 保持第一阶段形状——
-  **fold → seed → `_advance`**——prompt 只是多一个播种项。
+  无 prompt → load、seal、推进待办工作。带 prompt → load、seal、追加用户轮次、推进。
+  我们没有新增第二个动词：`continue` 是 Python 关键字，且独立方法会重复 `resume` 约 95% 的逻辑。
+  seam 保持第一阶段形状——**load → seal →（可选用户轮次）→ `_advance`**。
 
-- **后续轮次是持久事件。** prompt 被记录为新的 `UserMessageAdded` Checkpoint 事件，
-  由 `reduce` 折叠为 `Message(USER, …)`。仅追加日志因此能重建完整的多轮转录，且
-  `reduce` 仍是唯一的转录书写者（ADR-0009）。用户轮次在 `seal` *之后*追加，因此对一
-  个被中断的 Run 的后续输入会落在该 Run 已修复的 Tool 结果之后。
+- **后续轮次可 durable。** prompt 经 `append_user_message` 与 `RunEmitter.persist`
+  写入 `runs.state_json`，而非 `UserMessageAdded` 事件。快照因此能重建完整多轮转录。
+  用户轮次在 `seal` *之后*追加，因此 follow-up 落在已修复的 tool 结果之后。
 
 - **按状态 × prompt 校验。** 无 prompt 时，`PAUSED_LIMIT` / `CANCELLED`（有待办、
   无错误）可推进；`COMPLETED` / `FAILED` 被拒（"无待办工作；请提供 prompt"）。带

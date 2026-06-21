@@ -20,8 +20,8 @@ type-specific observe handlers.
 
 Decorators are registration syntax only; they register functions against
 signals such as `BeforeTool`, `AfterTool`, and `RunFailed`. Ordering remains
-visible and testable. Durable Run state is recorded separately as Checkpoint
-events (`harness/events.py`), not through this bus.
+visible and testable. Durable Run state is recorded separately as a Checkpoint
+snapshot (`checkpoint/snapshot.py`, `save_state`), not through this bus.
 
 ---
 
@@ -44,5 +44,5 @@ wildcard `subscribe` Handler 与类型特定的 observe Handler 使用同一套 
 ## 影响
 
 装饰器仅作为注册语法，将函数注册到 `BeforeTool`、`AfterTool` 和 `RunFailed`
-等信号。执行顺序保持可见且可测试。可 durable 的 Run 状态通过 Checkpoint 事件
-（`harness/events.py`）单独记录，不经过此总线。
+等信号。执行顺序保持可见且可测试。可 durable 的 Run 状态通过 Checkpoint 快照
+（`checkpoint/snapshot.py`、`save_state`）单独记录，不经过此总线。

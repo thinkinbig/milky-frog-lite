@@ -12,10 +12,10 @@ from milky_frog.foreground import ForegroundRun, ResumeRun, StartRun
 from milky_frog.handlers import BaseHandler, HandlerRegistry
 from milky_frog.harness import Harness, ResumeError
 from milky_frog.harness.tools import ToolRegistry, default_tools
+from milky_frog.infra.steering import NullSteeringProducer, SteeringProducer, steering_channel
 from milky_frog.models import OpenAIModel
 from milky_frog.project import load_project_config
 from milky_frog.settings import Settings
-from milky_frog.steering import NullSteeringProducer, SteeringProducer
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +167,6 @@ class MilkyFrog:
         if self._loop is None:
             self._loop = asyncio.new_event_loop()
         self._cancellation = RunCancellation()
-        steering = self._steering_producer.start()
         previous_sigint = signal.getsignal(signal.SIGINT)
 
         def _request_cancel(signum: int, frame: FrameType | None) -> None:
@@ -183,10 +182,9 @@ class MilkyFrog:
 
         signal.signal(signal.SIGINT, _request_cancel)
         try:
-            result = self._loop.run_until_complete(foreground(self._cancellation, steering))
+            with steering_channel(self._steering_producer) as steering:
+                result = self._loop.run_until_complete(foreground(self._cancellation, steering))
         finally:
-            # Stop the producer first so it releases stdin before the next prompt.
-            self._steering_producer.stop(steering)
             signal.signal(signal.SIGINT, previous_sigint)
             self._cancellation = None
             # Drain async-generator cleanup tasks (athrow GeneratorExit) that

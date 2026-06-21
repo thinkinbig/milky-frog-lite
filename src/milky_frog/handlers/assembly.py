@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from milky_frog.handlers.langfuse import LangfuseHandler
 from milky_frog.handlers.registry import BaseHandler
+from milky_frog.infra.observability.langfuse import LangfuseHandler
 from milky_frog.settings import Settings
 
 

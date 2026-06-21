@@ -1,5 +1,9 @@
 # Type Checkpoint events as a Pydantic discriminated union
 
+> **Superseded by [ADR-0014](0014-persist-checkpoints-as-runstate-snapshots.md).**
+> `RunEvent`, `CheckpointBody`, `harness/events.py`, and `checkpoint/events.py`
+> are removed. Durable persistence is a versioned `RunSnapshot` of `RunState`.
+
 Checkpoint records were stored as `event_type: str` plus an untyped
 `payload: dict[str, JsonValue]`. Factories and `reduce` duplicated the schema
 as string literals and defensive `dict.get` parsing in `harness/events.py`.
@@ -29,6 +33,9 @@ ephemeral, in-process, and not replayed from the Checkpoint log.
 ---
 
 # 将 Checkpoint 事件类型化为 Pydantic discriminated union
+
+> **已被 [ADR-0014](0014-persist-checkpoints-as-runstate-snapshots.md) 取代。**
+> `RunEvent`、`CheckpointBody` 及相关模块已删除；durable 形态为 `RunState` 的 `RunSnapshot`。
 
 Checkpoint 记录原先以 `event_type: str` 加无类型的 `payload: dict[str, JsonValue]` 存储。工厂与 `reduce` 在 `harness/events.py` 里用字符串字面量和防御性 `dict.get` 重复维护 schema。
 

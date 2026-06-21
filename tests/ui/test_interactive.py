@@ -6,7 +6,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from stubs import (
+
+from milky_frog.domain import RunResult, RunStatus
+from milky_frog.harness import ResumeError
+from tests.stubs import (
     NoOpArgsKwargs,
     NoOpKwargs,
     RecordingAssistant,
@@ -15,9 +18,6 @@ from stubs import (
     RecordingWelcome,
     ScriptedPrompt,
 )
-
-from milky_frog.domain import RunResult, RunStatus
-from milky_frog.harness import ResumeError
 
 interactive = import_module("milky_frog.ui.interactive")
 

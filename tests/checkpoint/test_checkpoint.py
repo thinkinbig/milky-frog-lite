@@ -2,10 +2,12 @@ import multiprocessing
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
 
-from milky_frog.checkpoint import RunClaimError, RunEvent, SqliteCheckpointStore
-from milky_frog.domain import RunStatus
+from milky_frog.checkpoint import RunClaimError, SqliteCheckpointStore
+from milky_frog.checkpoint.snapshot import dump_run_state, load_run_state
+from milky_frog.domain import MessageRole, RunState, RunStatus
+from milky_frog.harness.state import append_user_message, start_run
+from tests.checkpoint_helpers import seed_run
 
 
 def _hold_run_claim(database: str, acquired: object, release: object) -> None:
@@ -40,31 +42,24 @@ def test_sqlite_store_resolve_run_id_rejects_unknown_and_ambiguous(tmp_path: Pat
         store.resolve_run_id("aaa")
 
 
-def test_sqlite_store_appends_events_and_projects_status(tmp_path: Path) -> None:
+def test_sqlite_store_persists_state_and_projects_status(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
 
-    store.create_run("run-1", workspace)
-    first = store.append(
-        "run-1",
-        RunEvent.from_parts("RunStarted", {"prompt": "hello", "workspace": str(workspace)}),
-    )
-    second = store.append(
-        "run-1",
-        RunEvent.from_parts("RunCompleted", {"final_message": "done"}),
-        RunStatus.COMPLETED,
-    )
+    state = seed_run(store, "run-1", workspace, prompt="hello")
+    store.save_state(state.run_id, state, status=RunStatus.COMPLETED, final_message="done")
 
-    assert first.sequence == 1
-    assert second.sequence == 2
-    assert [event.event_type for event in store.events("run-1")] == [
-        "RunStarted",
-        "RunCompleted",
+    loaded = store.load_state("run-1")
+    assert [message.role for message in loaded.messages] == [
+        MessageRole.SYSTEM,
+        MessageRole.USER,
     ]
+    assert loaded.messages[-1].content == "hello"
     run = store.get_run("run-1")
     assert run is not None
     assert run.status is RunStatus.COMPLETED
+    assert run.final_message == "done"
 
 
 def test_sqlite_store_prepares_resume_atomically(tmp_path: Path) -> None:
@@ -72,15 +67,23 @@ def test_sqlite_store_prepares_resume_atomically(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
 
-    created = store.create_run("run-1", workspace)
-    event = RunEvent.from_parts("UserMessageAdded", {"content": "follow up"})
-    persisted = store.prepare_resume("run-1", created.updated_at, (event,))
+    store.create_run("run-1", workspace)
+    base = start_run(RunState(run_id="run-1", workspace=workspace), "hello")
+    store.save_state("run-1", base, status=RunStatus.COMPLETED, final_message="done")
+    stored = store.get_run("run-1")
+    assert stored is not None
+    resumed = append_user_message(store.load_state("run-1"), "follow up")
+    store.prepare_resume("run-1", stored.updated_at, resumed)
 
     run = store.get_run("run-1")
     assert run is not None
     assert run.status is RunStatus.RUNNING
-    assert persisted[0].sequence == 1
-    assert [item.event_type for item in store.events("run-1")] == ["UserMessageAdded"]
+    loaded = store.load_state("run-1")
+    assert user_messages(loaded) == ("hello", "follow up")
+
+
+def user_messages(state: RunState) -> tuple[str, ...]:
+    return tuple(message.content for message in state.messages if message.role is MessageRole.USER)
 
 
 def test_sqlite_store_rejects_second_live_claim(tmp_path: Path) -> None:
@@ -135,27 +138,28 @@ def test_sqlite_store_uses_canonical_database_path_for_claims(tmp_path: Path) ->
 def test_prepare_resume_rolls_back_on_stale_projection(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
     created = store.create_run("run-1", tmp_path)
-    store.append(
-        "run-1",
-        RunEvent.from_parts("RunCompleted", {"final_message": "done"}),
-        RunStatus.COMPLETED,
-    )
+    state = start_run(RunState(run_id="run-1", workspace=tmp_path), "hello")
+    store.save_state("run-1", state, status=RunStatus.COMPLETED, final_message="done")
 
-    follow_up = RunEvent.from_parts("UserMessageAdded", {"content": "lost"})
+    follow_up = append_user_message(state, "lost")
     with pytest.raises(RuntimeError, match="changed"):
-        store.prepare_resume("run-1", created.updated_at, (follow_up,))
+        store.prepare_resume("run-1", created.updated_at, follow_up)
 
     run = store.get_run("run-1")
     assert run is not None
     assert run.status is RunStatus.COMPLETED
-    assert [event.event_type for event in store.events("run-1")] == ["RunCompleted"]
+    loaded = store.load_state("run-1")
+    assert user_messages(loaded) == ("hello",)
 
 
-def test_run_event_rejects_unknown_event_type() -> None:
-    with pytest.raises(ValidationError):
-        RunEvent.from_parts("NotARealEvent", {"prompt": "hello"})
+def test_snapshot_rejects_invalid_role() -> None:
+    state = start_run(RunState(run_id="run-1", workspace=Path(".")), "hello")
+    raw = dump_run_state(state).replace('"role":"user"', '"role":"not-a-role"')
+    with pytest.raises(ValueError, match="not a valid MessageRole"):
+        load_run_state("run-1", Path("."), raw)
 
 
-def test_run_event_rejects_missing_required_fields() -> None:
-    with pytest.raises(ValidationError):
-        RunEvent.from_parts("RunStarted", {"prompt": "hello"})
+def test_snapshot_round_trips_run_state(tmp_path: Path) -> None:
+    state = start_run(RunState(run_id="run-1", workspace=tmp_path), "hello")
+    loaded = load_run_state("run-1", tmp_path, dump_run_state(state))
+    assert loaded == state

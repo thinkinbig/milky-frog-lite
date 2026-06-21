@@ -5,10 +5,10 @@
 </p>
 
 Milky Frog (Chinese: 奶蛙) is a lightweight local coding-agent CLI. It runs one foreground task at a time,
-coordinates model and Tool calls through a linear Harness, and persists an append-only Checkpoint
-so interrupted Runs can be resumed safely.
+coordinates model and Tool calls through a linear Harness, and persists a RunState
+Checkpoint snapshot so interrupted Runs can be resumed safely.
 
-> The repository provides OpenAI-compatible foreground Runs, built-in file Tools, Checkpoint-replay
+> The repository provides OpenAI-compatible foreground Runs, built-in file Tools, snapshot-based
 > resume (`milky-frog resume`), a multi-turn interactive loop, mid-run steering on POSIX TTYs, and
 > optional Langfuse observability. See [CONTEXT.md](CONTEXT.md) and [docs/adr/](docs/adr/) for
 > architecture details.
@@ -18,7 +18,7 @@ so interrupted Runs can be resumed safely.
 - A small, owned agent loop instead of a general workflow engine.
 - Explicit seams for model providers, Tools, and Checkpoint storage.
 - Read-only lifecycle Handlers for streaming output and observability (ADR-0012).
-- Typed Checkpoint events as a Pydantic discriminated union (ADR-0013).
+- Typed Checkpoint snapshots as versioned JSON (ADR-0014).
 - Project Skills as declarative instructions, never executable plugins.
 - An honest Local Sandbox policy without claiming host-level isolation.
 
@@ -73,10 +73,10 @@ milky-frog resume RUN_ID          # replay pending work
 
 ```text
 src/milky_frog/
-├── checkpoint/   # CheckpointStore seam, typed CheckpointBody (Pydantic), SQLite adapter
+├── checkpoint/   # CheckpointStore seam, RunSnapshot JSON, SQLite adapter
 ├── cli/          # Typer commands, HandlerFactory, MilkyFrogAdvancer
 ├── handlers/     # lifecycle signals, read-only HandlerRegistry (notify)
-├── harness/      # Harness loop, state fold, checkpoint event factories
+├── harness/      # Harness loop, state mutators, seal
 ├── foreground.py # ForegroundRun protocol (StartRun / ResumeRun)
 ├── memory/       # cross-Run project knowledge seam
 ├── models/       # model-provider seam

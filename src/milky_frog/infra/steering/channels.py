@@ -4,20 +4,17 @@ import queue
 import select
 import sys
 import threading
-from typing import Protocol, runtime_checkable
-
-from milky_frog.domain import SteeringChannel
 
 
 class NullSteeringChannel:
-    """Inert :class:`SteeringChannel` for sessions that own stdin elsewhere."""
+    """Inert :class:`~milky_frog.domain.SteeringChannel` for sessions that own stdin elsewhere."""
 
     def drain(self) -> list[str]:
         return []
 
 
 class StdinSteeringChannel:
-    """Thread-backed :class:`SteeringChannel`: a background reader queues stdin
+    """Thread-backed :class:`~milky_frog.domain.SteeringChannel`: a background reader queues stdin
     lines for the active Run to drain between turns.
 
     Enabled only on a POSIX TTY, where ``select`` lets the reader wake to check
@@ -79,46 +76,3 @@ class StdinSteeringChannel:
             text = line.strip()
             if text:
                 self._queue.put(text)
-
-
-@runtime_checkable
-class SteeringProducer(Protocol):
-    """Session-scoped factory for the :class:`SteeringChannel` used during one Run."""
-
-    def start(self) -> SteeringChannel:
-        """Acquire a channel for the foreground Run that is about to start."""
-        ...
-
-    def stop(self, channel: SteeringChannel) -> None:
-        """Release the channel after the foreground Run ends."""
-        ...
-
-
-class NullSteeringProducer:
-    """Producer for interactive sessions that read between-turn input via the UI."""
-
-    _CHANNEL = NullSteeringChannel()
-
-    def start(self) -> SteeringChannel:
-        return self._CHANNEL
-
-    def stop(self, channel: SteeringChannel) -> None:
-        del channel
-
-
-class StdinSteeringProducer:
-    """Producer for headless Runs that accept mid-Run stdin steering.
-
-    Not wired into the CLI today — there is no front-end affordance for blind
-    mid-stream input. Pass explicitly to :class:`MilkyFrog` when experimenting or
-    embedding Milky Frog in a host that owns concurrent stdin.
-    """
-
-    def start(self) -> SteeringChannel:
-        channel = StdinSteeringChannel()
-        channel.start()
-        return channel
-
-    def stop(self, channel: SteeringChannel) -> None:
-        if isinstance(channel, StdinSteeringChannel):
-            channel.stop()

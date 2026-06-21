@@ -1,11 +1,12 @@
 from unittest.mock import patch
 
-from milky_frog.steering import (
+from milky_frog.infra.steering import (
     NullSteeringChannel,
     NullSteeringProducer,
     StdinSteeringChannel,
     StdinSteeringProducer,
     SteeringProducer,
+    steering_channel,
 )
 
 
@@ -101,3 +102,12 @@ def test_null_steering_producer_stop_is_idempotent() -> None:
     producer.stop(channel)
     # stopping twice must not raise
     producer.stop(channel)
+
+
+def test_steering_channel_releases_producer() -> None:
+    producer = StdinSteeringProducer()
+    with steering_channel(producer) as channel:
+        assert isinstance(channel, StdinSteeringChannel)
+        channel._queue.put("steer")
+        assert channel.drain() == ["steer"]
+    assert channel.drain() == []
