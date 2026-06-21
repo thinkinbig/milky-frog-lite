@@ -9,7 +9,7 @@ import pytest
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import MessageRole, RunRequest, RunStatus, TokenUsage
 from milky_frog.handlers import HandlerRegistry
-from milky_frog.harness import Harness
+from milky_frog.harness.runner import Harness
 from milky_frog.harness.tools import ToolRegistry
 from tests.checkpoint_helpers import run_status, tool_messages
 from tests.stubs import (

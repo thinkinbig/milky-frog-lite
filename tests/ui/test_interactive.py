@@ -7,8 +7,7 @@ from typing import Any
 
 import pytest
 
-from milky_frog.domain import RunResult, RunStatus
-from milky_frog.harness import ResumeError
+from milky_frog.domain import ResumeError, RunResult, RunStatus
 from tests.stubs import (
     NoOpArgsKwargs,
     NoOpKwargs,

@@ -171,3 +171,23 @@ class RunEmitter:
         )
         await self.run_cancelled(state, reason, result)
         return result
+
+    async def finish_approval_needed(self, state: RunState, tool_names: list[str]) -> RunResult:
+        message = f"approval needed for: {', '.join(tool_names)}"
+        result = RunResult(
+            state.run_id,
+            RunStatus.WAITING_FOR_APPROVAL,
+            message,
+            state.completed_model_calls,
+            state.usage,
+        )
+        self.persist(state, status=RunStatus.WAITING_FOR_APPROVAL)
+        await self._handlers.notify(
+            RunPaused(
+                run_id=state.run_id,
+                status=RunStatus.WAITING_FOR_APPROVAL,
+                reason=message,
+                model_calls=state.completed_model_calls,
+            )
+        )
+        return result

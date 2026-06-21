@@ -16,46 +16,17 @@ class RunStatus(StrEnum):
     FAILED = "failed"
     CANCELLED = "cancelled"
 
-    @property
-    def is_orphaned_active(self) -> bool:
-        """True for non-terminal states that may survive a crash without a
-        terminal Checkpoint event — a ``RUNNING`` row whose process died."""
-        return self in _ORPHANED_ACTIVE
 
-    @property
-    def is_resumable(self) -> bool:
-        """True when the Run has pending work and can advance with no new input.
-
-        Includes paused/cancelled Runs and every orphaned-active state.
-        ``COMPLETED`` has nothing pending and ``FAILED`` usually recurs on a
-        blind re-advance — both need a prompt instead.
-        """
-        return self in (RunStatus.PAUSED_LIMIT, RunStatus.CANCELLED) or self.is_orphaned_active
-
-    @property
-    def is_continuable(self) -> bool:
-        """True when the Run can accept a new user turn to continue.
-
-        Any terminal status (including ``COMPLETED`` and ``FAILED``) plus every
-        orphaned-active state qualifies.
-        """
-        return (
-            self
-            in (
-                RunStatus.COMPLETED,
-                RunStatus.FAILED,
-                RunStatus.PAUSED_LIMIT,
-                RunStatus.CANCELLED,
-            )
-            or self.is_orphaned_active
-        )
+class ResumeError(Exception):
+    """A Run cannot be advanced as requested."""
 
 
-_ORPHANED_ACTIVE: tuple[RunStatus, ...] = (
-    RunStatus.RUNNING,
-    RunStatus.WAITING_FOR_INPUT,
-    RunStatus.WAITING_FOR_APPROVAL,
-)
+class ToolDecision(StrEnum):
+    """Permission decision for a tool call before execution."""
+
+    ALLOW = "allow"
+    DENY = "deny"
+    NEEDS_APPROVAL = "needs_approval"
 
 
 class MessageRole(StrEnum):
@@ -205,6 +176,14 @@ class RunCancellation:
     @property
     def is_cancelled(self) -> bool:
         return self._cancelled
+
+
+class ToolRunCancelled(Exception):
+    """Cooperative cancel arrived while a Tool was executing."""
+
+
+def is_cancelled(cancellation: RunCancellation | None) -> bool:
+    return cancellation is not None and cancellation.is_cancelled
 
 
 @dataclass(frozen=True, slots=True)

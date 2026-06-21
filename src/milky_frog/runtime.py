@@ -8,9 +8,10 @@ from pathlib import Path
 from types import FrameType, TracebackType
 
 from milky_frog.checkpoint import SqliteCheckpointStore
-from milky_frog.domain import RunCancellation, RunRequest, RunResult
+from milky_frog.domain import ResumeError, RunCancellation, RunRequest, RunResult
+from milky_frog.gates import ToolGate
 from milky_frog.handlers import BaseHandler, HandlerRegistry
-from milky_frog.harness import Harness, ResumeError
+from milky_frog.harness.runner import Harness
 from milky_frog.harness.tools import ToolRegistry, default_tools
 from milky_frog.models import OpenAIModel
 from milky_frog.project import load_project_config
@@ -43,11 +44,13 @@ class MilkyFrog:
         api_key, model = self.require_model_configuration(settings)
         self._handlers: list[BaseHandler] = list(bundles) if bundles else []
         self._checkpoints = SqliteCheckpointStore(settings.database_path)
+        self._tool_gate = ToolGate()
         self._harness = Harness(
             model=OpenAIModel(api_key=api_key, model=model, base_url=settings.base_url),
             tools=ToolRegistry(default_tools()),
             checkpoints=self._checkpoints,
             handlers=handlers if handlers is not None else HandlerRegistry(),
+            tool_gate=self._tool_gate,
         )
         self._loop: asyncio.AbstractEventLoop | None = None
         self._cancellation: RunCancellation | None = None
@@ -94,6 +97,11 @@ class MilkyFrog:
             self._handlers = []
             self._loop.close()
             self._loop = None
+
+    @property
+    def tool_gate(self) -> ToolGate:
+        """Shared ToolGate for CLI to approve/deny before resume."""
+        return self._tool_gate
 
     def cancel(self) -> None:
         """Request cooperative cancellation of the foreground Run."""

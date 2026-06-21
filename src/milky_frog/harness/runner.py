@@ -20,21 +20,20 @@ from milky_frog.domain import (
     StreamDone,
     TextDelta,
     ToolCall,
+    ToolDecision,
     ToolResult,
+    ToolRunCancelled,
+    is_cancelled,
 )
+from milky_frog.gates import AdvancePlan, ResumeError, ResumeGate, ToolGate
 from milky_frog.handlers import HandlerRegistry
-from milky_frog.harness.cancellation import ToolRunCancelled, is_cancelled
 from milky_frog.harness.emitter import RunEmitter
-from milky_frog.harness.resume import (
-    ResumeError,
-    ResumeGate,
-    completed_tail,
-)
 from milky_frog.harness.sandbox import LocalSandbox, Sandbox, SandboxFactory
 from milky_frog.harness.state import (
     append_model_response,
     append_tool_result,
     start_run,
+    unmatched_tool_calls,
 )
 from milky_frog.harness.tools import ToolContext, ToolRegistry
 from milky_frog.models import Model
@@ -50,6 +49,7 @@ class Harness:
         checkpoints: CheckpointStore,
         handlers: HandlerRegistry,
         sandbox_factory: SandboxFactory = LocalSandbox,
+        tool_gate: ToolGate | None = None,
     ) -> None:
         self._model = model
         self._tools = tools
@@ -57,6 +57,7 @@ class Harness:
         self._sandbox_factory = sandbox_factory
         self._emitter = RunEmitter(checkpoints, handlers)
         self._resume_gate = ResumeGate(checkpoints)
+        self._tool_gate = tool_gate
 
     async def run(self, run_request: RunRequest) -> RunResult:
         """Start a fresh Run: seed the transcript from the prompt, then advance."""
@@ -81,15 +82,8 @@ class Harness:
         cancellation: RunCancellation | None = None,
         prompt: str | None = None,
     ) -> RunResult:
-        """Advance an existing Run: load its snapshot and repair any interrupted
-        Tool, then either pick up its pending work (no prompt) or append a new user
-        turn (with prompt) and advance.
-
-        Without a prompt, only a Run with pending work (PAUSED_LIMIT, CANCELLED,
-        or an orphaned RUNNING / WAITING_*) can be advanced. With a prompt, any
-        terminal Run can — a finished conversation is continued by adding the
-        next user message.
-        """
+        """Advance an existing Run: load its snapshot, repair interrupted
+        Tools, optionally append a new user turn, then advance."""
         try:
             with self._checkpoints.claim(run_id):
                 stored = self._checkpoints.get_run(run_id)
@@ -102,10 +96,11 @@ class Harness:
                     prompt=prompt,
                     updated_at=stored.updated_at,
                 )
-                if prompt is None:
-                    tail = completed_tail(plan.state)
-                    if tail is not None:
-                        return await self._emitter.finish_completed(plan.state, tail)
+                # Process pending tool approvals before advancing.
+                resolved = await self._apply_approvals(plan, run_id, sandbox, cancellation)
+                if isinstance(resolved, RunResult):
+                    return resolved
+                plan = resolved
                 return await self._advance(plan.state, plan.sandbox, cancellation, max_model_calls)
         except RunClaimError as error:
             raise ResumeError(str(error)) from error
@@ -129,7 +124,12 @@ class Harness:
                 request = ModelRequest(state.messages, self._tools.schemas())
                 await self._emitter.turn_started(run_id, model_call=calls + 1)
                 await self._emitter.before_model(run_id, request)
-                response = await self._model_turn(run_id, cancellation, request)
+                try:
+                    response = await self._run_cancellable(
+                        self._model_turn(run_id, request), cancellation
+                    )
+                except ToolRunCancelled:
+                    return await self._emitter.finish_cancelled(state)
                 await self._emitter.after_model(run_id, request, response)
                 state = append_model_response(state, response)
                 self._emitter.persist(state)
@@ -142,12 +142,21 @@ class Harness:
                 for call in response.tool_calls:
                     if is_cancelled(cancellation):
                         return await self._emitter.finish_cancelled(state)
-                    try:
-                        result = await self._execute_tool(
-                            run_id, state.workspace, sandbox, call, cancellation
-                        )
-                    except ToolRunCancelled:
-                        return await self._emitter.finish_cancelled(state)
+                    if self._tool_gate is not None:
+                        decision = self._tool_gate.check(call)
+                    else:
+                        decision = ToolDecision.ALLOW
+                    if decision is ToolDecision.DENY:
+                        result = ToolResult("denied by tool policy", is_error=True)
+                    elif decision is ToolDecision.NEEDS_APPROVAL:
+                        return await self._emitter.finish_approval_needed(state, [call.name])
+                    else:
+                        try:
+                            result = await self._execute_tool(
+                                run_id, state.workspace, sandbox, call, cancellation
+                            )
+                        except ToolRunCancelled:
+                            return await self._emitter.finish_cancelled(state)
                     state = append_tool_result(state, call, result)
                     self._emitter.persist(state)
 
@@ -164,18 +173,53 @@ class Harness:
 
     # ── private helpers (absorbed from ModelStreamer / ToolRunner) ──────────
 
+    async def _apply_approvals(
+        self,
+        plan: AdvancePlan,
+        run_id: str,
+        sandbox: Sandbox,
+        cancellation: RunCancellation | None,
+    ) -> AdvancePlan | RunResult:
+        """Execute or deny tool calls that were pending approval on resume.
+
+        Returns an updated ``AdvancePlan`` when all pending calls are resolved,
+        or a ``RunResult`` if approval is still needed (re-pause).
+        """
+        pending = unmatched_tool_calls(plan.state.messages)
+        if not pending or self._tool_gate is None:
+            return plan
+        for call in pending:
+            if is_cancelled(cancellation):
+                return await self._emitter.finish_cancelled(plan.state)
+            decision = self._tool_gate.check(call)
+            if decision is ToolDecision.ALLOW:
+                try:
+                    result = await self._execute_tool(
+                        run_id, plan.state.workspace, sandbox, call, cancellation
+                    )
+                except ToolRunCancelled:
+                    return await self._emitter.finish_cancelled(plan.state)
+            elif decision is ToolDecision.DENY:
+                result = ToolResult("denied by user", is_error=True)
+            else:
+                return await self._emitter.finish_approval_needed(plan.state, [call.name])
+            plan = AdvancePlan(
+                state=append_tool_result(plan.state, call, result),
+                sandbox=plan.sandbox,
+            )
+            self._emitter.persist(plan.state)
+        return plan
+
     async def _model_turn(
         self,
         run_id: str,
-        cancellation: RunCancellation | None,
         request: ModelRequest,
     ) -> ModelResponse:
-        """Stream the model's response, forwarding text and reasoning deltas live."""
+        """Stream model response — cancellation polling is handled by the
+        caller via ``_run_cancellable``."""
         response: ModelResponse | None = None
         observer_request = deepcopy(request)
         async for chunk in self._model.stream(request):
-            if is_cancelled(cancellation):
-                raise asyncio.CancelledError
             if isinstance(chunk, TextDelta):
                 await self._emitter.on_model_chunk(run_id, observer_request, chunk)
             elif isinstance(chunk, ReasoningDelta):
@@ -201,7 +245,7 @@ class Harness:
         context = ToolContext(run_id, workspace, cancellation, sandbox)
         try:
             input_model = tool.input_model.model_validate(call.arguments)
-            result = await self._run_with_cancellation(
+            result: ToolResult = await self._run_cancellable(
                 tool.execute(context, input_model), cancellation
             )
         except ToolRunCancelled:
@@ -212,11 +256,12 @@ class Harness:
         return result
 
     @staticmethod
-    async def _run_with_cancellation(
-        coro: Coroutine[Any, Any, ToolResult],
+    async def _run_cancellable(
+        coro: Coroutine[Any, Any, Any],
         cancellation: RunCancellation | None,
-    ) -> ToolResult:
-        task: asyncio.Task[ToolResult] = asyncio.create_task(coro)
+    ) -> Any:
+        """Run *coro* as a task and cancel it when *cancellation* is set."""
+        task: asyncio.Task[Any] = asyncio.create_task(coro)
         while not task.done():
             if is_cancelled(cancellation):
                 task.cancel()

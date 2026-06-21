@@ -5,8 +5,7 @@ from pathlib import Path
 
 from rich.text import Text
 
-from milky_frog.domain import RunStatus
-from milky_frog.harness import ResumeError
+from milky_frog.domain import ResumeError, RunStatus
 from milky_frog.ui.console import console
 from milky_frog.ui.presenter import (
     render_assistant,
