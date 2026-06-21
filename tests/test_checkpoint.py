@@ -17,6 +17,29 @@ def _hold_run_claim(database: str, acquired: object, release: object) -> None:
         release_event.wait()
 
 
+def test_sqlite_store_resolve_run_id_by_unique_prefix(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store.create_run("abcdef0123456789", workspace)
+
+    assert store.resolve_run_id("abcdef0123456789") == "abcdef0123456789"
+    assert store.resolve_run_id("abcdef") == "abcdef0123456789"
+
+
+def test_sqlite_store_resolve_run_id_rejects_unknown_and_ambiguous(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store.create_run("aaa111", workspace)
+    store.create_run("aaa222", workspace)
+
+    with pytest.raises(LookupError):
+        store.resolve_run_id("missing")
+    with pytest.raises(ValueError):
+        store.resolve_run_id("aaa")
+
+
 def test_sqlite_store_appends_events_and_projects_status(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
     workspace = tmp_path / "workspace"

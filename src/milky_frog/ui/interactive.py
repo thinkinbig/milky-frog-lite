@@ -39,7 +39,8 @@ def run_interactive(
     workspace: Path,
     printer: StreamingPrinter,
     cancel: RunCanceller | None = None,
-    validate_run: Callable[[str], None] | None = None,
+    resolve_run: Callable[[str], str] | None = None,
+    recover_run: Callable[[], str | None] | None = None,
 ) -> None:
     """Own one foreground Terminal UI interaction loop.
 
@@ -79,9 +80,9 @@ def run_interactive(
                     hint="List available Runs with: milky-frog runs",
                 )
                 continue
-            if validate_run is not None:
+            if resolve_run is not None:
                 try:
-                    validate_run(attach_id)
+                    attach_id = resolve_run(attach_id)
                 except ResumeError as error:
                     render_error(str(error), hint="List available Runs with: milky-frog runs")
                     continue
@@ -104,6 +105,8 @@ def run_interactive(
             if cancel is not None:
                 cancel()
             printer.finish()
+            if run_id is None and recover_run is not None:
+                run_id = recover_run()
             render_error(
                 "Cancelled the current task.",
                 hint="Press Ctrl+C again at the prompt to exit.",

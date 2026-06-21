@@ -210,7 +210,7 @@ def test_interactive_resume_attaches_run_and_threads_next_prompt(
         model="test-model",
         workspace=Path("/workspace"),
         printer=interactive.StreamingPrinter(),
-        validate_run=lambda _run_id: None,
+        resolve_run=lambda run_id: run_id,
     )
 
     assert seen == ["run-attach"]
@@ -237,7 +237,7 @@ def test_interactive_resume_with_prompt_runs_immediately(
         model="test-model",
         workspace=Path("/workspace"),
         printer=interactive.StreamingPrinter(),
-        validate_run=lambda _run_id: None,
+        resolve_run=lambda run_id: run_id,
     )
 
     assert events == ["run:keep going", "answer:done:run-attach"]
@@ -257,16 +257,55 @@ def test_interactive_resume_rejects_unknown_run(
     monkeypatch.setattr(interactive, "render_interactive_welcome", NoOpKwargs())
     monkeypatch.setattr(interactive, "render_error", RecordingError(errors))
 
-    def reject_unknown(run_id: str) -> None:
+    def reject_unknown(run_id: str) -> str:
         if run_id == "missing-run":
             raise ResumeError(f"unknown Run: {run_id}")
+        return run_id
 
     interactive.run_interactive(
         ThreadingAdvancer([]),
         model="test-model",
         workspace=Path("/workspace"),
         printer=interactive.StreamingPrinter(),
-        validate_run=reject_unknown,
+        resolve_run=reject_unknown,
     )
 
     assert errors == ["unknown Run: missing-run"]
+
+
+def test_interactive_keyboard_interrupt_recovers_latest_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[str | None] = []
+
+    monkeypatch.setattr(
+        interactive,
+        "prompt_in_box",
+        ScriptedPrompt(("first task", "second task", "/exit")),
+    )
+    monkeypatch.setattr(interactive, "console", FakeConsole())
+    monkeypatch.setattr(interactive, "render_interactive_welcome", NoOpKwargs())
+    monkeypatch.setattr(interactive, "render_interactive_statusbar", NoOpKwargs())
+    monkeypatch.setattr(interactive, "render_assistant", NoOpArgsKwargs())
+    monkeypatch.setattr(interactive, "render_error", NoOpArgsKwargs())
+
+    class InterruptThenContinueAdvancer:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self, task: str, run_id: str | None) -> RunResult:
+            self.calls += 1
+            if self.calls == 1:
+                raise KeyboardInterrupt
+            seen.append(run_id)
+            return RunResult("conv-1", RunStatus.COMPLETED, "done", 1)
+
+    interactive.run_interactive(
+        InterruptThenContinueAdvancer(),
+        model="test-model",
+        workspace=Path("/workspace"),
+        printer=interactive.StreamingPrinter(),
+        recover_run=lambda: "conv-1",
+    )
+
+    assert seen == ["conv-1"]

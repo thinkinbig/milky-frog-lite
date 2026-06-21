@@ -23,6 +23,23 @@ from milky_frog.settings import Settings
 logger = logging.getLogger(__name__)
 
 
+class _InertSteering:
+    """Steering seam that never reads stdin.
+
+    Used by the interactive loop, which owns between-turn input via
+    ``prompt_toolkit`` and must not compete with a background reader.
+    """
+
+    def start(self) -> None:
+        pass
+
+    def stop(self) -> None:
+        pass
+
+    def drain(self) -> list[str]:
+        return []
+
+
 class _StdinSteering:
     """Thread-backed :class:`SteeringChannel`: a background reader queues stdin
     lines for the active Run to drain between turns.
@@ -181,11 +198,14 @@ class MilkyFrog:
         if self._cancellation is not None:
             self._cancellation.cancel()
 
-    def run(self, prompt: str, workspace: Path) -> RunResult:
+    def run(self, prompt: str, workspace: Path, *, stdin_steering: bool = True) -> RunResult:
         """Start one goal synchronously.
 
         Successive calls reuse a single event loop (and the model's connection
         pool), so this must not be called while another event loop is running.
+
+        Disable ``stdin_steering`` when a foreground UI (the interactive loop)
+        owns between-turn input via ``prompt_toolkit``.
         """
         config = load_project_config(workspace)
         return self._drive(
@@ -194,10 +214,17 @@ class MilkyFrog:
                 prompt=prompt,
                 workspace=workspace,
                 max_model_calls=config.max_model_calls,
-            )
+            ),
+            stdin_steering=stdin_steering,
         )
 
-    def resume(self, run_id: str, prompt: str | None = None) -> RunResult:
+    def resume(
+        self,
+        run_id: str,
+        prompt: str | None = None,
+        *,
+        stdin_steering: bool = True,
+    ) -> RunResult:
         """Advance an existing Run synchronously.
 
         Without a prompt, picks up pending work (PAUSED_LIMIT / CANCELLED). With
@@ -205,6 +232,12 @@ class MilkyFrog:
         Run, including a COMPLETED conversation. Raises ``ResumeError`` if the
         Run is unknown or cannot be advanced as requested.
         """
+        try:
+            run_id = self._checkpoints.resolve_run_id(run_id)
+        except LookupError as error:
+            raise ResumeError(f"unknown Run: {run_id}") from error
+        except ValueError as error:
+            raise ResumeError(f"ambiguous Run prefix: {run_id}") from error
         stored = self._checkpoints.get_run(run_id)
         if stored is None:
             raise ResumeError(f"unknown Run: {run_id}")
@@ -215,17 +248,20 @@ class MilkyFrog:
                 run_id=run_id,
                 max_model_calls=config.max_model_calls,
                 prompt=prompt,
-            )
+            ),
+            stdin_steering=stdin_steering,
         )
 
-    def _drive(self, foreground: ForegroundRun) -> RunResult:
+    def _drive(self, foreground: ForegroundRun, *, stdin_steering: bool = True) -> RunResult:
         """Run one foreground awaitable on the reused loop, wiring SIGINT to a
-        cooperative cancel and a background stdin reader to mid-Run steering, both
-        for this Run's duration only."""
+        cooperative cancel and, when enabled, a background stdin reader for
+        mid-Run steering for this Run's duration only."""
         if self._loop is None:
             self._loop = asyncio.new_event_loop()
         self._cancellation = RunCancellation()
-        steering = _StdinSteering()
+        steering: _StdinSteering | _InertSteering = (
+            _StdinSteering() if stdin_steering else _InertSteering()
+        )
         previous_sigint = signal.getsignal(signal.SIGINT)
 
         def _request_cancel(signum: int, frame: FrameType | None) -> None:

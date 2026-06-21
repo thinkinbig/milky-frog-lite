@@ -103,7 +103,8 @@ def test_no_arguments_starts_interactive_mode(monkeypatch: object, tmp_path: Pat
         def __exit__(self, *exc: object) -> None:
             pass
 
-        def run(self, task: str, workspace: Path) -> RunResult:
+        def run(self, task: str, workspace: Path, *, stdin_steering: bool = True) -> RunResult:
+            del stdin_steering
             assert workspace.is_dir()
             assert task == "hello frog"
             return RunResult("run-interactive", RunStatus.COMPLETED, "hello human", 1)
@@ -157,7 +158,10 @@ def test_resume_without_task_advances_pending_work(
         def __exit__(self, *exc: object) -> None:
             pass
 
-        def resume(self, run_id: str, prompt: str | None = None) -> RunResult:
+        def resume(
+            self, run_id: str, prompt: str | None = None, *, stdin_steering: bool = True
+        ) -> RunResult:
+            del stdin_steering
             calls.append((run_id, prompt))
             return RunResult(run_id, RunStatus.COMPLETED, "resumed", 1)
 
@@ -201,7 +205,10 @@ def test_resume_with_task_continues_run(monkeypatch: pytest.MonkeyPatch, tmp_pat
         def __exit__(self, *exc: object) -> None:
             pass
 
-        def resume(self, run_id: str, prompt: str | None = None) -> RunResult:
+        def resume(
+            self, run_id: str, prompt: str | None = None, *, stdin_steering: bool = True
+        ) -> RunResult:
+            del stdin_steering
             calls.append((run_id, prompt))
             return RunResult(run_id, RunStatus.COMPLETED, "continued", 2)
 

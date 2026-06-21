@@ -145,6 +145,24 @@ class SqliteCheckpointStore:
             row = connection.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,)).fetchone()
         return None if row is None else self._stored_run(row)
 
+    def resolve_run_id(self, token: str) -> str:
+        """Resolve a full id or unique prefix to the canonical ``run_id``.
+
+        Raises ``LookupError`` when no Run matches and ``ValueError`` when the
+        prefix is ambiguous.
+        """
+        exact = self.get_run(token)
+        if exact is not None:
+            return exact.run_id
+        matches = tuple(
+            run.run_id for run in self.list_runs(limit=100) if run.run_id.startswith(token)
+        )
+        if not matches:
+            raise LookupError(token)
+        if len(matches) > 1:
+            raise ValueError(token)
+        return matches[0]
+
     def list_runs(self, limit: int = 20) -> tuple[StoredRun, ...]:
         with self._connect() as connection:
             rows = connection.execute(

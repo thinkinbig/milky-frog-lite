@@ -104,9 +104,19 @@ def interactive() -> None:
     configure_history(settings.home / "prompt_history")
     store = SqliteCheckpointStore(settings.database_path)
 
-    def validate_run(run_id: str) -> None:
-        if store.get_run(run_id) is None:
-            raise ResumeError(f"unknown Run: {run_id}")
+    def resolve_run(token: str) -> str:
+        try:
+            return store.resolve_run_id(token)
+        except LookupError as error:
+            raise ResumeError(f"unknown Run: {token}") from error
+        except ValueError as error:
+            raise ResumeError(f"ambiguous Run prefix: {token}") from error
+
+    def recover_run() -> str | None:
+        for run in store.list_runs(limit=20):
+            if run.workspace.resolve() == workspace.resolve():
+                return run.run_id
+        return None
 
     with frog:
         run_interactive(
@@ -115,7 +125,8 @@ def interactive() -> None:
             workspace=workspace,
             printer=printer,
             cancel=frog.cancel,
-            validate_run=validate_run,
+            resolve_run=resolve_run,
+            recover_run=recover_run,
         )
 
 
