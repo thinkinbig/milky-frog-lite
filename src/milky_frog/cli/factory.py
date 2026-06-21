@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from milky_frog.handlers import BaseHandler, HandlerRegistry, LangfuseHandler
+from milky_frog.handlers import BaseHandler, LangfuseHandler, LifecycleBus
 from milky_frog.settings import Settings
 from milky_frog.ui.handlers import StreamingHandlers
 from milky_frog.ui.streaming import StreamingPrinter
@@ -19,8 +19,8 @@ class HandlerFactory:
         self._settings = settings
         self._printer = printer
 
-    def build(self) -> tuple[HandlerRegistry, list[BaseHandler]]:
-        registry = HandlerRegistry()
+    def build(self) -> tuple[LifecycleBus, list[BaseHandler]]:
+        registry = LifecycleBus()
         bundles: list[BaseHandler] = [StreamingHandlers(self._printer)]
         langfuse = LangfuseHandler.from_settings(self._settings)
         if langfuse is not None:

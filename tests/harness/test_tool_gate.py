@@ -19,7 +19,7 @@ from milky_frog.gates import (
     PermissivePolicy,
     ToolGate,
 )
-from milky_frog.handlers import HandlerRegistry
+from milky_frog.handlers import LifecycleBus
 from milky_frog.harness.runner import Harness
 from milky_frog.harness.tools import ToolRegistry
 from tests.checkpoint_helpers import run_status, tool_messages, user_messages
@@ -89,7 +89,7 @@ async def test_tool_denied_by_policy_returns_error_result(tmp_path: Path) -> Non
         checkpoints=__import__(
             "milky_frog.checkpoint", fromlist=["SqliteCheckpointStore"]
         ).SqliteCheckpointStore(tmp_path / "state.db"),
-        handlers=HandlerRegistry(),
+        handlers=LifecycleBus(),
         tool_gate=ToolGate(DenyAllPolicy()),
     )
 
@@ -114,7 +114,7 @@ async def test_approval_pauses_run_and_resume_executes_approved_tool(
         model=FakeModel(),
         tools=ToolRegistry((EchoTool(),)),
         checkpoints=store,
-        handlers=HandlerRegistry(),
+        handlers=LifecycleBus(),
         tool_gate=gate,
     )
 
@@ -149,7 +149,7 @@ async def test_approval_deny_returns_error_and_continues(tmp_path: Path) -> None
         model=FakeModel(),
         tools=ToolRegistry((EchoTool(),)),
         checkpoints=store,
-        handlers=HandlerRegistry(),
+        handlers=LifecycleBus(),
         tool_gate=gate,
     )
 
@@ -183,7 +183,7 @@ async def test_approval_repauses_when_still_unapproved(tmp_path: Path) -> None:
         model=FakeModel(),
         tools=ToolRegistry((EchoTool(),)),
         checkpoints=store,
-        handlers=HandlerRegistry(),
+        handlers=LifecycleBus(),
         tool_gate=gate,
     )
 
@@ -208,7 +208,7 @@ async def test_approval_pause_with_prompt_continues_normally(tmp_path: Path) -> 
         model=FakeModel(),
         tools=ToolRegistry((EchoTool(),)),
         checkpoints=store,
-        handlers=HandlerRegistry(),
+        handlers=LifecycleBus(),
         tool_gate=gate,
     )
 
@@ -235,7 +235,7 @@ async def test_permissive_gate_runs_normally(tmp_path: Path) -> None:
         model=FakeModel(),
         tools=ToolRegistry((EchoTool(),)),
         checkpoints=store,
-        handlers=HandlerRegistry(),
+        handlers=LifecycleBus(),
         tool_gate=ToolGate(PermissivePolicy()),
     )
 

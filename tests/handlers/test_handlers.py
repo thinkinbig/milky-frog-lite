@@ -3,8 +3,8 @@ from dataclasses import dataclass
 import pytest
 
 from milky_frog.domain import ToolCall
+from milky_frog.handlers.bus import LifecycleBus
 from milky_frog.handlers.events import BaseEvent, RunBeforeTool
-from milky_frog.handlers.registry import HandlerRegistry
 
 
 @dataclass(frozen=True)
@@ -14,7 +14,7 @@ class SampleEvent(BaseEvent):
 
 @pytest.mark.asyncio
 async def test_observe_handlers_run_by_priority_then_registration_order() -> None:
-    registry = HandlerRegistry()
+    registry = LifecycleBus()
     calls: list[str] = []
 
     @registry.observe(SampleEvent, priority=10)
@@ -36,7 +36,7 @@ async def test_observe_handlers_run_by_priority_then_registration_order() -> Non
 
 @pytest.mark.asyncio
 async def test_on_registers_observe_handlers() -> None:
-    registry = HandlerRegistry()
+    registry = LifecycleBus()
     calls: list[str] = []
 
     @registry.on(SampleEvent)
@@ -50,7 +50,7 @@ async def test_on_registers_observe_handlers() -> None:
 
 @pytest.mark.asyncio
 async def test_subscribe_receives_every_notified_signal() -> None:
-    registry = HandlerRegistry()
+    registry = LifecycleBus()
     seen: list[str] = []
 
     @registry.subscribe
@@ -65,7 +65,7 @@ async def test_subscribe_receives_every_notified_signal() -> None:
 
 @pytest.mark.asyncio
 async def test_subscribe_runs_by_priority_with_typed_observe_handlers() -> None:
-    registry = HandlerRegistry()
+    registry = LifecycleBus()
     calls: list[str] = []
 
     async def wildcard_first(_event: BaseEvent) -> None:

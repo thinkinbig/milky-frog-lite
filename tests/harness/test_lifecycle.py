@@ -22,7 +22,7 @@ from milky_frog.domain import (
     ToolCall,
 )
 from milky_frog.handlers import (
-    HandlerRegistry,
+    LifecycleBus,
     RunBeforeTool,
     RunCancelled,
     RunFailed,
@@ -39,7 +39,7 @@ from tests.stubs import EchoTool, FakeModel, SlowStreamModel
 
 @pytest.mark.asyncio
 async def test_dispatches_run_lifecycle_events(tmp_path: Path) -> None:
-    registry = HandlerRegistry()
+    registry = LifecycleBus()
     seen: list[str] = []
 
     @registry.subscribe
@@ -64,7 +64,7 @@ async def test_dispatches_run_lifecycle_events(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_dispatches_run_paused_event(tmp_path: Path) -> None:
-    registry = HandlerRegistry()
+    registry = LifecycleBus()
     paused: list[RunPaused] = []
 
     @registry.on(RunPaused)
@@ -94,7 +94,7 @@ async def test_dispatches_run_paused_event(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_cancellation_stops_run(tmp_path: Path) -> None:
-    registry = HandlerRegistry()
+    registry = LifecycleBus()
     cancelled: list[RunCancelled] = []
 
     @registry.on(RunCancelled)
@@ -153,7 +153,7 @@ async def test_cancellation_during_tool_execution(tmp_path: Path) -> None:
         model=SlowToolModel(),
         tools=ToolRegistry((SlowTool(),)),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
-        handlers=HandlerRegistry(),
+        handlers=LifecycleBus(),
     )
 
     async def run_and_cancel() -> RunResult:
@@ -183,7 +183,7 @@ def test_tool_context_exposes_cancellation_poll() -> None:
 @pytest.mark.asyncio
 async def test_cancelled_handler_runs_after_checkpoint(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    registry = HandlerRegistry()
+    registry = LifecycleBus()
     checkpoint_seen = False
 
     @registry.on(RunCancelled)
@@ -219,7 +219,7 @@ async def test_external_cancellation_reraises(tmp_path: Path) -> None:
         model=SlowStreamModel(),
         tools=ToolRegistry(),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
-        handlers=HandlerRegistry(),
+        handlers=LifecycleBus(),
     )
 
     task = asyncio.create_task(harness.run(RunRequest("slow", tmp_path)))
@@ -232,7 +232,7 @@ async def test_external_cancellation_reraises(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_dispatches_run_failed_event(tmp_path: Path) -> None:
-    registry = HandlerRegistry()
+    registry = LifecycleBus()
     failed: list[RunFailed] = []
 
     @registry.on(RunFailed)
@@ -263,7 +263,7 @@ async def test_dispatches_run_failed_event(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_before_tool_handler_cannot_mutate_executed_call(tmp_path: Path) -> None:
-    handlers = HandlerRegistry()
+    handlers = LifecycleBus()
 
     @handlers.observe(RunBeforeTool)
     async def mutate_handler_copy(event: RunBeforeTool) -> None:
@@ -280,7 +280,7 @@ async def test_before_tool_handler_cannot_mutate_executed_call(tmp_path: Path) -
 
 @pytest.mark.asyncio
 async def test_run_started_handler_cannot_control_live_run(tmp_path: Path) -> None:
-    handlers = HandlerRegistry()
+    handlers = LifecycleBus()
 
     @handlers.observe(RunStarted)
     async def mutate_handler_snapshot(event: RunStarted) -> None:
@@ -306,7 +306,7 @@ async def test_run_started_handler_cannot_control_live_run(tmp_path: Path) -> No
 @pytest.mark.asyncio
 async def test_dispatches_run_turn_events(tmp_path: Path) -> None:
     """RunTurnStart and RunTurnEnd fire with correct numbering across two turns."""
-    registry = HandlerRegistry()
+    registry = LifecycleBus()
     starts: list[RunTurnStart] = []
     ends: list[RunTurnEnd] = []
 
@@ -340,7 +340,7 @@ async def test_dispatches_run_turn_events(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_turn_events_fire_before_complete(tmp_path: Path) -> None:
     """RunTurnEnd fires before RunCompleted when model returns no tool calls."""
-    registry = HandlerRegistry()
+    registry = LifecycleBus()
     order: list[str] = []
 
     @registry.subscribe

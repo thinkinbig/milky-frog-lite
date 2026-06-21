@@ -16,7 +16,7 @@ from milky_frog.domain import (
     ToolResult,
 )
 from milky_frog.handlers import (
-    HandlerRegistry,
+    LifecycleBus,
     RunAfterModel,
     RunAfterTool,
     RunBeforeModel,
@@ -39,7 +39,7 @@ class RunEmitter:
     def __init__(
         self,
         checkpoints: CheckpointStore,
-        handlers: HandlerRegistry,
+        handlers: LifecycleBus,
     ) -> None:
         self._checkpoints = checkpoints
         self._handlers = handlers
