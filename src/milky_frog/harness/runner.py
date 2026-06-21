@@ -124,7 +124,12 @@ class Harness:
                 request = ModelRequest(state.messages, self._tools.schemas())
                 await self._emitter.turn_started(run_id, model_call=calls + 1)
                 await self._emitter.before_model(run_id, request)
-                response = await self._model_turn(run_id, cancellation, request)
+                try:
+                    response = await self._run_cancellable(
+                        self._model_turn(run_id, request), cancellation
+                    )
+                except ToolRunCancelled:
+                    return await self._emitter.finish_cancelled(state)
                 await self._emitter.after_model(run_id, request, response)
                 state = append_model_response(state, response)
                 self._emitter.persist(state)
@@ -208,15 +213,13 @@ class Harness:
     async def _model_turn(
         self,
         run_id: str,
-        cancellation: RunCancellation | None,
         request: ModelRequest,
     ) -> ModelResponse:
-        """Stream the model's response, forwarding text and reasoning deltas live."""
+        """Stream model response — cancellation polling is handled by the
+        caller via ``_run_cancellable``."""
         response: ModelResponse | None = None
         observer_request = deepcopy(request)
         async for chunk in self._model.stream(request):
-            if is_cancelled(cancellation):
-                raise asyncio.CancelledError
             if isinstance(chunk, TextDelta):
                 await self._emitter.on_model_chunk(run_id, observer_request, chunk)
             elif isinstance(chunk, ReasoningDelta):
@@ -242,7 +245,7 @@ class Harness:
         context = ToolContext(run_id, workspace, cancellation, sandbox)
         try:
             input_model = tool.input_model.model_validate(call.arguments)
-            result = await self._run_with_cancellation(
+            result: ToolResult = await self._run_cancellable(
                 tool.execute(context, input_model), cancellation
             )
         except ToolRunCancelled:
@@ -253,11 +256,12 @@ class Harness:
         return result
 
     @staticmethod
-    async def _run_with_cancellation(
-        coro: Coroutine[Any, Any, ToolResult],
+    async def _run_cancellable(
+        coro: Coroutine[Any, Any, Any],
         cancellation: RunCancellation | None,
-    ) -> ToolResult:
-        task: asyncio.Task[ToolResult] = asyncio.create_task(coro)
+    ) -> Any:
+        """Run *coro* as a task and cancel it when *cancellation* is set."""
+        task: asyncio.Task[Any] = asyncio.create_task(coro)
         while not task.done():
             if is_cancelled(cancellation):
                 task.cancel()
