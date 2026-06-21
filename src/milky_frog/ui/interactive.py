@@ -18,15 +18,22 @@ from milky_frog.ui.streaming import StreamingPrinter
 
 
 def run_interactive(
-    execute: Callable[[str], RunResult],
+    advance: Callable[[str, str | None], RunResult],
     *,
     model: str,
     workspace: Path,
     printer: StreamingPrinter,
     cancel: Callable[[], None] | None = None,
 ) -> None:
-    """Own one foreground Terminal UI interaction loop."""
+    """Own one foreground Terminal UI interaction loop.
+
+    ``advance(task, run_id)`` starts a fresh Run when ``run_id`` is ``None`` and
+    otherwise continues that Run with ``task`` as the next user turn, so the
+    conversation accumulates one transcript across prompts. ``/clear`` drops the
+    cursor to begin a new conversation.
+    """
     render_interactive_welcome(model=model, workspace=workspace)
+    run_id: str | None = None
     while True:
         try:
             task = prompt_in_box().strip()
@@ -44,11 +51,12 @@ def run_interactive(
             continue
         if command == "/clear":
             console.clear()
+            run_id = None
             continue
 
         render_interactive_statusbar(model=model, workspace=workspace, state="working")
         try:
-            result = execute(task)
+            result = advance(task, run_id)
         except KeyboardInterrupt:
             if cancel is not None:
                 cancel()
@@ -62,6 +70,9 @@ def run_interactive(
             printer.finish()
             render_error(f"{type(error).__name__}: {error}")
             continue
+        # Continue this Run on the next prompt — including after a cancel or a
+        # pause — so the conversation keeps one growing transcript.
+        run_id = result.run_id
         if result.status is RunStatus.CANCELLED:
             printer.finish()
             render_error(

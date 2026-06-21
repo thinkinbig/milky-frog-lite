@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 from pydantic import JsonValue
 
@@ -166,12 +167,25 @@ class RunCancellation:
         return self._cancelled
 
 
+@runtime_checkable
+class SteeringChannel(Protocol):
+    """Source of user lines to inject into an active Run between turns.
+
+    ``drain`` returns every line queued since the last call (empty when none),
+    so the Harness can fold mid-Run input in without depending on how the lines
+    are read (a background reader, a test double, …).
+    """
+
+    def drain(self) -> list[str]: ...
+
+
 @dataclass(frozen=True, slots=True)
 class RunRequest:
     prompt: str
     workspace: Path
     max_model_calls: int = DEFAULT_MAX_MODEL_CALLS
     cancellation: RunCancellation | None = None
+    steering: SteeringChannel | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,4 +194,22 @@ class RunResult:
     status: RunStatus
     final_message: str
     model_calls: int
+    usage: RunUsage = field(default_factory=RunUsage)
+
+
+@dataclass(frozen=True, slots=True)
+class RunState:
+    """The live transcript and accounting of one Run, threaded through the loop.
+
+    A frozen in-memory mirror of the append-only Checkpoint log: it is only ever
+    grown by the single reducer (``milky_frog.harness.state.reduce``), fed both
+    by the running loop and by replaying persisted events. A state folded from a
+    Checkpoint is therefore indistinguishable from one built live, which is what
+    makes ``resume`` correct by construction rather than by reconciliation.
+    """
+
+    run_id: str
+    workspace: Path
+    messages: tuple[Message, ...] = ()
+    completed_model_calls: int = 0
     usage: RunUsage = field(default_factory=RunUsage)

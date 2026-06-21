@@ -10,6 +10,7 @@ from milky_frog import __version__
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.cli.factory import HandlerFactory
 from milky_frog.diagnostics import CheckStatus, Diagnostic
+from milky_frog.harness import ResumeError
 from milky_frog.project import CONFIG_FILENAME, CONFIG_TEMPLATE, PROJECT_DIRNAME
 from milky_frog.runtime import MilkyFrog, MissingModelConfiguration
 from milky_frog.settings import Settings
@@ -75,7 +76,9 @@ def interactive() -> None:
     configure_history(settings.home / "prompt_history")
     with frog:
         run_interactive(
-            lambda task: frog.run(task, workspace),
+            lambda task, run_id: (
+                frog.run(task, workspace) if run_id is None else frog.resume(run_id, task)
+            ),
             model=settings.model or "unknown",
             workspace=workspace,
             printer=printer,
@@ -209,10 +212,25 @@ def run(task: Annotated[str, typer.Argument()]) -> None:
 
 @app.command()
 def resume(run_id: Annotated[str, typer.Argument()]) -> None:
-    """Resume a Run (replay is the next implementation slice)."""
-    del run_id
-    render_error(
-        "Checkpoint replay is not wired yet.",
-        hint="Inspect the Run with: milky-frog show RUN_ID",
-    )
-    raise typer.Exit(code=2)
+    """Resume a stopped Run, advancing its pending work from the Checkpoint."""
+    settings = Settings.from_environment()
+    try:
+        frog, printer = _build_streaming_frog(settings)
+    except MissingModelConfiguration:
+        _render_configuration_error()
+        raise typer.Exit(code=2) from None
+    with frog:
+        try:
+            result = frog.resume(run_id)
+        except ResumeError as error:
+            printer.finish()
+            render_error(str(error), hint="List resumable Runs with: milky-frog runs")
+            raise typer.Exit(code=1) from error
+        except Exception as error:
+            printer.finish()
+            render_error(f"{type(error).__name__}: {error}")
+            raise typer.Exit(code=1) from error
+    if printer.finish():
+        render_assistant_footer(result.run_id, usage=result.usage)
+    else:
+        render_assistant(result.final_message, run_id=result.run_id, usage=result.usage)

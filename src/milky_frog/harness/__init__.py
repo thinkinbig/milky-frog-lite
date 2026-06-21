@@ -1,3 +1,3 @@
-from milky_frog.harness.runner import Harness
+from milky_frog.harness.runner import Harness, ResumeError
 
-__all__ = ["Harness"]
+__all__ = ["Harness", "ResumeError"]

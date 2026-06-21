@@ -49,7 +49,7 @@ async def test_factory_registers_bundles_onto_returned_registry(tmp_path: Path) 
             seen.append(text)
 
     registry, _ = HandlerFactory(_settings(tmp_path, _INACTIVE), SpyPrinter()).build()
-    await registry.dispatch(
+    await registry.notify(
         OnModelChunk(run_id="run-1", request=ModelRequest((), ()), chunk=TextDelta("hi"))
     )
 

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from milky_frog.checkpoint import SqliteCheckpointStore
+from milky_frog.checkpoint import RunEvent, SqliteCheckpointStore
 from milky_frog.domain import (
     ModelChunk,
     ModelRequest,
@@ -18,8 +18,9 @@ from milky_frog.domain import (
     TextDelta,
 )
 from milky_frog.handlers import BaseHandler, HandlerRegistry, RunCancelled
+from milky_frog.harness import ResumeError
 from milky_frog.models import OpenAIModel
-from milky_frog.runtime import MilkyFrog, MissingModelConfiguration
+from milky_frog.runtime import MilkyFrog, MissingModelConfiguration, _StdinSteering
 from milky_frog.settings import LangfuseSettings, Settings
 
 _NO_LANGFUSE = LangfuseSettings(
@@ -159,3 +160,56 @@ def test_milky_frog_rejects_empty_model_configuration(
 
     with pytest.raises(MissingModelConfiguration, match="model configuration is missing"):
         MilkyFrog.from_settings(settings)
+
+
+def test_milky_frog_resume_advances_stored_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    async def fake_stream(self: OpenAIModel, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        del self, request
+        yield StreamDone(ModelResponse(content="resumed"))
+
+    monkeypatch.setattr(OpenAIModel, "stream", fake_stream)
+    settings = Settings(tmp_path, "test-key", "https://example.test", "test-model", _NO_LANGFUSE)
+    # A Run paused at its model-call limit, persisted before the frog is built.
+    store = SqliteCheckpointStore(settings.database_path)
+    run_id = "paused-run"
+    store.create_run(run_id, tmp_path)
+    store.append(run_id, RunEvent("RunStarted", {"prompt": "go", "workspace": str(tmp_path)}))
+    store.append(
+        run_id,
+        RunEvent("RunPaused", {"reason": "limit", "model_calls": 1}),
+        RunStatus.PAUSED_LIMIT,
+    )
+
+    result = MilkyFrog.from_settings(settings).resume(run_id)
+
+    assert result.run_id == run_id
+    assert result.status is RunStatus.COMPLETED
+    assert result.final_message == "resumed"
+
+
+def test_milky_frog_resume_rejects_unknown_run(tmp_path: Path) -> None:
+    settings = Settings(tmp_path, "test-key", "https://example.test", "test-model", _NO_LANGFUSE)
+
+    with pytest.raises(ResumeError, match="unknown Run"):
+        MilkyFrog.from_settings(settings).resume("does-not-exist")
+
+
+def test_stdin_steering_drains_queued_lines() -> None:
+    channel = _StdinSteering()
+    channel._queue.put("first")
+    channel._queue.put("second")
+
+    assert channel.drain() == ["first", "second"]
+    assert channel.drain() == []
+
+
+def test_stdin_steering_is_inert_when_unsupported(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Off-TTY / Windows: no reader thread, draining yields nothing, stop is safe.
+    monkeypatch.setattr("milky_frog.runtime.sys.platform", "win32")
+    channel = _StdinSteering()
+
+    channel.start()
+    assert channel.drain() == []
+    channel.stop()

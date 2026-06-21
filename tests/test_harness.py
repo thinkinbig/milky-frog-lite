@@ -5,9 +5,8 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from milky_frog.checkpoint import SqliteCheckpointStore
+from milky_frog.checkpoint import RunEvent, SqliteCheckpointStore
 from milky_frog.domain import (
-    Message,
     MessageRole,
     ModelChunk,
     ModelRequest,
@@ -23,16 +22,13 @@ from milky_frog.domain import (
     ToolCall,
 )
 from milky_frog.handlers import (
-    BlockTool,
     HandlerRegistry,
-    PatchToolResult,
     RunCancelled,
     RunFailed,
     RunPaused,
-    TransformContext,
 )
-from milky_frog.handlers.events import AfterTool, BeforeModel, BeforeTool
-from milky_frog.harness import Harness
+from milky_frog.harness import Harness, ResumeError
+from milky_frog.harness.state import INTERRUPTED_TOOL_RESULT, fold
 from milky_frog.harness.tools import ToolContext, ToolRegistry, ToolResult
 
 
@@ -229,97 +225,6 @@ async def test_harness_injects_milky_frog_identity_before_user_prompt(tmp_path: 
     result = await harness.run(RunRequest("Who are you?", tmp_path))
 
     assert result.final_message == "I am Milky Frog."
-
-
-class CountingEchoTool(EchoTool):
-    executions = 0
-
-    async def execute(self, context: ToolContext, input: BaseModel) -> ToolResult:
-        CountingEchoTool.executions += 1
-        return await super().execute(context, input)
-
-
-@pytest.mark.asyncio
-async def test_harness_intercept_can_block_tool_execution(tmp_path: Path) -> None:
-    CountingEchoTool.executions = 0
-    store = SqliteCheckpointStore(tmp_path / "state.db")
-    registry = HandlerRegistry()
-
-    @registry.intercept(BeforeTool)
-    async def deny(_event: BeforeTool) -> BlockTool:
-        return BlockTool("not allowed")
-
-    harness = Harness(
-        model=FakeModel(),
-        tools=ToolRegistry((CountingEchoTool(),)),
-        checkpoints=store,
-        handlers=registry,
-    )
-
-    result = await harness.run(RunRequest("echo hello", tmp_path))
-
-    assert CountingEchoTool.executions == 0
-    assert result.status is RunStatus.COMPLETED
-    tool_completed = next(
-        event for event in store.events(result.run_id) if event.event_type == "ToolCallCompleted"
-    )
-    assert tool_completed.payload["content"] == "not allowed"
-    assert tool_completed.payload["is_error"] is True
-
-
-@pytest.mark.asyncio
-async def test_harness_intercept_can_transform_model_context(tmp_path: Path) -> None:
-    registry = HandlerRegistry()
-
-    @registry.intercept(BeforeModel)
-    async def inject_context(event: BeforeModel) -> TransformContext:
-        return TransformContext(
-            (*event.request.messages, Message(MessageRole.USER, "extra context"))
-        )
-
-    class ContextCapturingModel:
-        last_user_messages: tuple[str, ...] = ()
-
-        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
-            ContextCapturingModel.last_user_messages = tuple(
-                message.content for message in request.messages if message.role is MessageRole.USER
-            )
-            yield StreamDone(ModelResponse(content="ok"))
-
-    harness = Harness(
-        model=ContextCapturingModel(),
-        tools=ToolRegistry(),
-        checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
-        handlers=registry,
-    )
-
-    await harness.run(RunRequest("hello", tmp_path))
-
-    assert ContextCapturingModel.last_user_messages == ("hello", "extra context")
-
-
-@pytest.mark.asyncio
-async def test_harness_intercept_can_patch_tool_result(tmp_path: Path) -> None:
-    store = SqliteCheckpointStore(tmp_path / "state.db")
-    registry = HandlerRegistry()
-
-    @registry.intercept(AfterTool)
-    async def patch(_event: AfterTool) -> PatchToolResult:
-        return PatchToolResult(content="patched")
-
-    harness = Harness(
-        model=FakeModel(),
-        tools=ToolRegistry((EchoTool(),)),
-        checkpoints=store,
-        handlers=registry,
-    )
-
-    result = await harness.run(RunRequest("echo hello", tmp_path))
-
-    tool_completed = next(
-        event for event in store.events(result.run_id) if event.event_type == "ToolCallCompleted"
-    )
-    assert tool_completed.payload["content"] == "patched"
 
 
 class SlowStreamModel:
@@ -553,3 +458,242 @@ async def test_harness_dispatches_run_failed_event(tmp_path: Path) -> None:
     assert isinstance(failed[0].error, RuntimeError)
     store = SqliteCheckpointStore(tmp_path / "state.db")
     assert any(event.event_type == "RunFailed" for event in store.events(failed[0].run_id))
+
+
+class PauseThenFinishModel:
+    """A tool turn first, then a final answer — to pause at a 1-call budget."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        del request
+        self.calls += 1
+        if self.calls == 1:
+            yield StreamDone(
+                ModelResponse(tool_calls=(ToolCall("call-1", "echo", {"text": "hi"}),))
+            )
+            return
+        yield StreamDone(ModelResponse(content="done"))
+
+
+@pytest.mark.asyncio
+async def test_fold_reconstructs_live_transcript(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    harness = Harness(FakeModel(), ToolRegistry((EchoTool(),)), store, HandlerRegistry())
+
+    result = await harness.run(RunRequest("echo hello", tmp_path))
+
+    # The transcript folded purely from persisted events matches the live loop:
+    # system, user, assistant(tool call), tool result, assistant(final).
+    folded = fold(result.run_id, tmp_path, store.events(result.run_id))
+    assert [message.role for message in folded.messages] == [
+        MessageRole.SYSTEM,
+        MessageRole.USER,
+        MessageRole.ASSISTANT,
+        MessageRole.TOOL,
+        MessageRole.ASSISTANT,
+    ]
+    assert folded.messages[-1].content == "done"
+    assert folded.completed_model_calls == result.model_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_resume_continues_paused_run(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    harness = Harness(PauseThenFinishModel(), ToolRegistry((EchoTool(),)), store, HandlerRegistry())
+
+    paused = await harness.run(RunRequest("go", tmp_path, max_model_calls=1))
+    assert paused.status is RunStatus.PAUSED_LIMIT
+
+    resumed = await harness.resume(paused.run_id, max_model_calls=30)
+
+    assert resumed.run_id == paused.run_id
+    assert resumed.status is RunStatus.COMPLETED
+    assert resumed.final_message == "done"
+    # Model-call accounting continues across the resume rather than resetting.
+    assert resumed.model_calls == 2
+    assert store.get_run(paused.run_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_resume_repairs_interrupted_tool_call(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    run_id = "run-interrupted"
+    # A log interrupted between ToolCallRequested and ToolCallCompleted: the
+    # trailing assistant message has a tool call with no result.
+    store.create_run(run_id, tmp_path)
+    store.append(run_id, RunEvent("RunStarted", {"prompt": "go", "workspace": str(tmp_path)}))
+    store.append(
+        run_id,
+        RunEvent(
+            "ModelMessageCompleted",
+            {
+                "content": "",
+                "reasoning": "",
+                "tool_calls": [{"id": "call-1", "name": "echo", "arguments": {"text": "hi"}}],
+                "usage": _usage_zero(),
+            },
+        ),
+    )
+    store.append(
+        run_id,
+        RunEvent(
+            "ToolCallRequested", {"id": "call-1", "name": "echo", "arguments": {"text": "hi"}}
+        ),
+    )
+    store.append(
+        run_id,
+        RunEvent("RunCancelled", {"reason": "cancelled", "model_calls": 1}),
+        RunStatus.CANCELLED,
+    )
+
+    class InterruptionAwareModel:
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            tool_messages = [m for m in request.messages if m.role is MessageRole.TOOL]
+            assert tool_messages and tool_messages[-1].content == INTERRUPTED_TOOL_RESULT
+            yield StreamDone(ModelResponse(content="recovered"))
+
+    harness = Harness(
+        InterruptionAwareModel(), ToolRegistry((EchoTool(),)), store, HandlerRegistry()
+    )
+
+    result = await harness.resume(run_id, max_model_calls=30)
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.final_message == "recovered"
+    # The repair was persisted as a real, durable ToolCallCompleted event.
+    completed = [e for e in store.events(run_id) if e.event_type == "ToolCallCompleted"]
+    assert completed[0].payload["is_error"] is True
+    assert completed[0].payload["content"] == INTERRUPTED_TOOL_RESULT
+
+
+@pytest.mark.asyncio
+async def test_resume_rejects_completed_run(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    harness = Harness(FakeModel(), ToolRegistry((EchoTool(),)), store, HandlerRegistry())
+
+    done = await harness.run(RunRequest("echo hello", tmp_path))
+    assert done.status is RunStatus.COMPLETED
+
+    with pytest.raises(ResumeError, match="no pending work"):
+        await harness.resume(done.run_id, max_model_calls=30)
+
+
+@pytest.mark.asyncio
+async def test_resume_rejects_unknown_run(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    harness = Harness(FakeModel(), ToolRegistry(), store, HandlerRegistry())
+
+    with pytest.raises(ResumeError, match="unknown Run"):
+        await harness.resume("does-not-exist", max_model_calls=30)
+
+
+def _usage_zero() -> dict[str, int]:
+    return {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cached_tokens": 0,
+        "reasoning_tokens": 0,
+        "total_tokens": 0,
+    }
+
+
+class ContinuationModel:
+    """Completes at once, asserting the latest user turn is visible in context."""
+
+    def __init__(self, expected_user: str) -> None:
+        self.expected_user = expected_user
+
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        users = [m for m in request.messages if m.role is MessageRole.USER]
+        assert users[-1].content == self.expected_user
+        yield StreamDone(ModelResponse(content="ack"))
+
+
+@pytest.mark.asyncio
+async def test_resume_with_prompt_continues_completed_run(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    first = Harness(FakeModel(), ToolRegistry((EchoTool(),)), store, HandlerRegistry())
+    done = await first.run(RunRequest("echo hello", tmp_path))
+    assert done.status is RunStatus.COMPLETED
+
+    # A new Harness over the same store proves resume reconstructs purely from
+    # the persisted log; its model asserts it sees the appended follow-up turn.
+    second = Harness(
+        ContinuationModel("follow up"), ToolRegistry((EchoTool(),)), store, HandlerRegistry()
+    )
+    result = await second.resume(done.run_id, max_model_calls=30, prompt="follow up")
+
+    assert result.run_id == done.run_id
+    assert result.status is RunStatus.COMPLETED
+    assert result.final_message == "ack"
+    # The follow-up turn is a durable event and folds back into the transcript.
+    assert "UserMessageAdded" in [e.event_type for e in store.events(done.run_id)]
+    folded = fold(done.run_id, tmp_path, store.events(done.run_id))
+    assert [m.content for m in folded.messages if m.role is MessageRole.USER] == [
+        "echo hello",
+        "follow up",
+    ]
+
+
+class FakeSteering:
+    """Releases its queued lines on the Nth ``drain`` call, then stays empty."""
+
+    def __init__(self, lines: list[str], *, release_on: int = 1) -> None:
+        self._lines = list(lines)
+        self._release_on = release_on
+        self._calls = 0
+
+    def drain(self) -> list[str]:
+        self._calls += 1
+        if self._calls == self._release_on:
+            out, self._lines = self._lines, []
+            return out
+        return []
+
+
+@pytest.mark.asyncio
+async def test_advance_injects_steering_between_turns(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+
+    class SteerAwareModel:
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            users = [m.content for m in request.messages if m.role is MessageRole.USER]
+            assert "steer me" in users
+            yield StreamDone(ModelResponse(content="ok"))
+
+    harness = Harness(SteerAwareModel(), ToolRegistry(), store, HandlerRegistry())
+
+    result = await harness.run(RunRequest("go", tmp_path, steering=FakeSteering(["steer me"])))
+
+    assert result.status is RunStatus.COMPLETED
+    # The steering line was folded in as a durable user turn.
+    assert "UserMessageAdded" in [e.event_type for e in store.events(result.run_id)]
+
+
+@pytest.mark.asyncio
+async def test_advance_steering_continues_instead_of_completing(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+
+    class TwoPhaseModel:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            del request
+            self.calls += 1
+            yield StreamDone(ModelResponse(content=f"done{self.calls}"))
+
+    model = TwoPhaseModel()
+    harness = Harness(model, ToolRegistry(), store, HandlerRegistry())
+
+    # The first turn returns no tool calls (would complete), but a line queued on
+    # that turn is drained at the completion check and continues the Run.
+    result = await harness.run(
+        RunRequest("go", tmp_path, steering=FakeSteering(["keep going"], release_on=2))
+    )
+
+    assert model.calls == 2
+    assert result.final_message == "done2"
+    assert result.status is RunStatus.COMPLETED

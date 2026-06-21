@@ -10,9 +10,13 @@ Milky Frog (奶蛙) is a lightweight local coding-agent CLI. It runs one
 foreground task at a time, coordinating model and Tool calls through a linear
 Harness and persisting an append-only Checkpoint so Runs can be resumed.
 
-Status: OpenAI-compatible foreground Runs and an interactive loop work today.
-Built-in Tools, multi-turn state, and Checkpoint replay are not yet wired
-(`milky-frog resume` is a stub).
+Status: OpenAI-compatible foreground Runs, built-in Tools, Checkpoint-replay
+resume (`milky-frog resume`), a multi-turn interactive loop, and mid-run
+steering work today. Resume folds the event log into a `RunState` and repairs an
+interrupted Tool (ADR-0009); `resume(run_id, prompt)` continues a Run with a new
+user turn so the interactive loop keeps one growing transcript across prompts
+(ADR-0010); a background stdin channel injects lines typed *while* a Run advances
+as user turns at the next turn boundary, on POSIX TTYs (ADR-0011).
 
 ## Commands
 
@@ -47,7 +51,7 @@ and is safe to commit. Credentials must never be committed.
 
 The agent loop lives in `harness/runner.py` (`Harness.run`): a linear
 model → Tool → model loop bounded by `max_model_calls`, appending a Checkpoint
-event at every step and dispatching lifecycle Handlers around each model and
+event at every step and notifying lifecycle Handlers around each model and
 Tool call.
 
 `runtime.py` (`MilkyFrog`) assembles the concrete pieces from `Settings` and
@@ -60,8 +64,9 @@ alternatives can be swapped without touching the Harness:
 - `models/` — `Model` protocol, `OpenAIModel` adapter.
 - `tools/` — `Tool` protocol + `ToolRegistry` (no built-in Tools yet).
 - `checkpoint/` — `CheckpointStore` protocol, append-only `SqliteCheckpointStore`.
-- `handlers/` — typed lifecycle events + `HandlerRegistry` (authorization,
-  persistence, observability cross-cuts).
+- `harness/events.py` — Checkpoint event factories and payload parsing (durable).
+- `handlers/` — ephemeral lifecycle signals + read-only `HandlerRegistry` bus
+  (UI streaming, Langfuse observability; ADR-0012).
 - `memory/` — cross-Run project knowledge seam.
 - `skills/` — `SkillCatalog`, declarative `SKILL.md` bundles (never executable).
 - `sandbox/` — `LocalSandbox` policy (denies `.git`, `.env`, keys; path-escape

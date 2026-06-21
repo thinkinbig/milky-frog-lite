@@ -2,20 +2,90 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import queue
+import select
 import signal
+import sys
+import threading
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import FrameType, TracebackType
 
 from milky_frog.checkpoint import SqliteCheckpointStore
-from milky_frog.domain import RunCancellation, RunRequest, RunResult
+from milky_frog.domain import RunCancellation, RunRequest, RunResult, SteeringChannel
 from milky_frog.handlers import BaseHandler, HandlerRegistry
-from milky_frog.harness import Harness
+from milky_frog.harness import Harness, ResumeError
 from milky_frog.harness.tools import ToolRegistry, default_tools
 from milky_frog.models import OpenAIModel
 from milky_frog.project import load_project_config
 from milky_frog.settings import Settings
 
 logger = logging.getLogger(__name__)
+
+
+class _StdinSteering:
+    """Thread-backed :class:`SteeringChannel`: a background reader queues stdin
+    lines for the active Run to drain between turns.
+
+    Enabled only on a POSIX TTY, where ``select`` lets the reader wake to check
+    its stop flag and hand stdin back promptly when the Run ends — a blocking
+    ``readline`` would hold stdin until the next Enter, colliding with the
+    between-turn prompt. Elsewhere it is inert and steering is simply off.
+    """
+
+    def __init__(self) -> None:
+        self._queue: queue.Queue[str] = queue.Queue()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._enabled = self._supported()
+
+    @staticmethod
+    def _supported() -> bool:
+        if sys.platform == "win32":
+            return False
+        try:
+            return sys.stdin.isatty()
+        except (OSError, ValueError):
+            return False
+
+    def start(self) -> None:
+        if not self._enabled:
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._read_loop, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+            self._thread = None
+        # Drop any lines that arrived but were not drained before the Run ended,
+        # so they cannot leak into the next prompt.
+        self.drain()
+
+    def drain(self) -> list[str]:
+        lines: list[str] = []
+        while True:
+            try:
+                lines.append(self._queue.get_nowait())
+            except queue.Empty:
+                return lines
+
+    def _read_loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                ready, _, _ = select.select([sys.stdin], [], [], 0.1)
+            except (OSError, ValueError):
+                return
+            if not ready:
+                continue
+            line = sys.stdin.readline()
+            if line == "":  # EOF (Ctrl-D)
+                return
+            text = line.strip()
+            if text:
+                self._queue.put(text)
 
 
 class MissingModelConfiguration(ValueError):
@@ -43,10 +113,11 @@ class MilkyFrog:
         # Handler composition is the caller's (the HandlerFactory's) job; the
         # runtime only owns the bundles' resource lifetime via ``aclose``.
         self._handlers: list[BaseHandler] = list(bundles) if bundles else []
+        self._checkpoints = SqliteCheckpointStore(settings.database_path)
         self._harness = Harness(
             model=OpenAIModel(api_key=api_key, model=model, base_url=settings.base_url),
             tools=ToolRegistry(default_tools()),
-            checkpoints=SqliteCheckpointStore(settings.database_path),
+            checkpoints=self._checkpoints,
             handlers=handlers if handlers is not None else HandlerRegistry(),
         )
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -111,21 +182,57 @@ class MilkyFrog:
             self._cancellation.cancel()
 
     def run(self, prompt: str, workspace: Path) -> RunResult:
-        """Run one goal synchronously.
+        """Start one goal synchronously.
 
         Successive calls reuse a single event loop (and the model's connection
         pool), so this must not be called while another event loop is running.
         """
+        config = load_project_config(workspace)
+        return self._drive(
+            lambda cancellation, steering: self._harness.run(
+                RunRequest(
+                    prompt,
+                    workspace,
+                    max_model_calls=config.max_model_calls,
+                    cancellation=cancellation,
+                    steering=steering,
+                )
+            )
+        )
+
+    def resume(self, run_id: str, prompt: str | None = None) -> RunResult:
+        """Advance an existing Run synchronously.
+
+        Without a prompt, picks up pending work (PAUSED_LIMIT / CANCELLED). With
+        a prompt, appends a new user turn and advances — continuing any terminal
+        Run, including a COMPLETED conversation. Raises ``ResumeError`` if the
+        Run is unknown or cannot be advanced as requested.
+        """
+        stored = self._checkpoints.get_run(run_id)
+        if stored is None:
+            raise ResumeError(f"unknown Run: {run_id}")
+        config = load_project_config(stored.workspace)
+        return self._drive(
+            lambda cancellation, steering: self._harness.resume(
+                run_id,
+                max_model_calls=config.max_model_calls,
+                cancellation=cancellation,
+                prompt=prompt,
+                steering=steering,
+            )
+        )
+
+    def _drive(
+        self,
+        make_awaitable: Callable[[RunCancellation, SteeringChannel], Awaitable[RunResult]],
+    ) -> RunResult:
+        """Run one foreground awaitable on the reused loop, wiring SIGINT to a
+        cooperative cancel and a background stdin reader to mid-Run steering, both
+        for this Run's duration only."""
         if self._loop is None:
             self._loop = asyncio.new_event_loop()
-        config = load_project_config(workspace)
         self._cancellation = RunCancellation()
-        request = RunRequest(
-            prompt,
-            workspace,
-            max_model_calls=config.max_model_calls,
-            cancellation=self._cancellation,
-        )
+        steering = _StdinSteering()
         previous_sigint = signal.getsignal(signal.SIGINT)
 
         def _request_cancel(signum: int, frame: FrameType | None) -> None:
@@ -140,9 +247,12 @@ class MilkyFrog:
                 signal.default_int_handler(signum, frame)
 
         signal.signal(signal.SIGINT, _request_cancel)
+        steering.start()
         try:
-            result = self._loop.run_until_complete(self._harness.run(request))
+            result = self._loop.run_until_complete(make_awaitable(self._cancellation, steering))
         finally:
+            # Stop the reader first so it releases stdin before the next prompt.
+            steering.stop()
             signal.signal(signal.SIGINT, previous_sigint)
             self._cancellation = None
             # Drain async-generator cleanup tasks (athrow GeneratorExit) that
