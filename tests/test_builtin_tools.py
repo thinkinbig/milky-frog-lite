@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from milky_frog.harness.sandbox import LocalSandbox
 from milky_frog.harness.tools import ToolContext
 from milky_frog.harness.tools.builtins import (
     EditFileTool,
@@ -8,7 +9,6 @@ from milky_frog.harness.tools.builtins import (
     WriteFileTool,
     default_tools,
 )
-from milky_frog.sandbox import LocalSandbox
 
 
 def _context(workspace: Path) -> ToolContext:

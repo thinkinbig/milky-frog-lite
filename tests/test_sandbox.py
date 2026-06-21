@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from milky_frog.sandbox import LocalSandbox, SandboxViolation
+from milky_frog.harness.sandbox import LocalSandbox, SandboxViolation
 
 
 def test_sandbox_resolves_workspace_file(tmp_path: Path) -> None:

@@ -42,9 +42,9 @@ from milky_frog.handlers import (
     RunStarted,
 )
 from milky_frog.harness.prompt import system_prompt
+from milky_frog.harness.sandbox import LocalSandbox
 from milky_frog.harness.tools import ToolContext, ToolRegistry
 from milky_frog.models import Model
-from milky_frog.sandbox import LocalSandbox
 
 
 def _usage_payload(usage: TokenUsage) -> dict[str, JsonValue]:
