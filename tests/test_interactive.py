@@ -17,6 +17,7 @@ from stubs import (
 )
 
 from milky_frog.domain import RunResult, RunStatus
+from milky_frog.harness import ResumeError
 
 interactive = import_module("milky_frog.ui.interactive")
 
@@ -170,3 +171,102 @@ def test_interactive_threads_run_id_across_turns_and_clear_resets(
     # Turn 1 starts fresh (None); turn 2 continues the same Run; /clear drops the
     # cursor so turn 3 starts fresh again.
     assert seen == [None, "conv-1", None]
+
+
+def test_parse_resume_command() -> None:
+    assert interactive.parse_resume_command("hello") is None
+    assert interactive.parse_resume_command("/resume run-123") == ("run-123", None)
+    assert interactive.parse_resume_command("/resume run-123 follow up") == (
+        "run-123",
+        "follow up",
+    )
+    assert interactive.parse_resume_command("/RESUME run-123") == ("run-123", None)
+
+
+def test_interactive_resume_attaches_run_and_threads_next_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[str | None] = []
+    printed: list[str] = []
+
+    class PrintingConsole(FakeConsole):
+        def print(self, *args: object, **kwargs: object) -> None:
+            del kwargs
+            if args and hasattr(args[0], "plain"):
+                printed.append(str(args[0].plain))
+
+    monkeypatch.setattr(
+        interactive,
+        "prompt_in_box",
+        ScriptedPrompt(("/resume run-attach", "next turn", "/exit")),
+    )
+    monkeypatch.setattr(interactive, "console", PrintingConsole())
+    monkeypatch.setattr(interactive, "render_interactive_welcome", NoOpKwargs())
+    monkeypatch.setattr(interactive, "render_interactive_statusbar", NoOpKwargs())
+    monkeypatch.setattr(interactive, "render_assistant", NoOpArgsKwargs())
+
+    interactive.run_interactive(
+        ThreadingAdvancer(seen),
+        model="test-model",
+        workspace=Path("/workspace"),
+        printer=interactive.StreamingPrinter(),
+        validate_run=lambda _run_id: None,
+    )
+
+    assert seen == ["run-attach"]
+    assert any("Attached to run run-atta" in line for line in printed)
+
+
+def test_interactive_resume_with_prompt_runs_immediately(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    monkeypatch.setattr(
+        interactive,
+        "prompt_in_box",
+        ScriptedPrompt(("/resume run-attach keep going", "/exit")),
+    )
+    monkeypatch.setattr(interactive, "console", FakeConsole())
+    monkeypatch.setattr(interactive, "render_interactive_welcome", NoOpKwargs())
+    monkeypatch.setattr(interactive, "render_interactive_statusbar", NoOpKwargs())
+    monkeypatch.setattr(interactive, "render_assistant", RecordingAssistant(events))
+
+    interactive.run_interactive(
+        RecordingAdvancer(events, run_id="run-attach"),
+        model="test-model",
+        workspace=Path("/workspace"),
+        printer=interactive.StreamingPrinter(),
+        validate_run=lambda _run_id: None,
+    )
+
+    assert events == ["run:keep going", "answer:done:run-attach"]
+
+
+def test_interactive_resume_rejects_unknown_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    errors: list[str] = []
+
+    monkeypatch.setattr(
+        interactive,
+        "prompt_in_box",
+        ScriptedPrompt(("/resume missing-run", "/exit")),
+    )
+    monkeypatch.setattr(interactive, "console", FakeConsole())
+    monkeypatch.setattr(interactive, "render_interactive_welcome", NoOpKwargs())
+    monkeypatch.setattr(interactive, "render_error", RecordingError(errors))
+
+    def reject_unknown(run_id: str) -> None:
+        if run_id == "missing-run":
+            raise ResumeError(f"unknown Run: {run_id}")
+
+    interactive.run_interactive(
+        ThreadingAdvancer([]),
+        model="test-model",
+        workspace=Path("/workspace"),
+        printer=interactive.StreamingPrinter(),
+        validate_run=reject_unknown,
+    )
+
+    assert errors == ["unknown Run: missing-run"]

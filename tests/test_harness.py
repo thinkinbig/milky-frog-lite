@@ -22,10 +22,12 @@ from milky_frog.domain import (
     ToolCall,
 )
 from milky_frog.handlers import (
+    BeforeTool,
     HandlerRegistry,
     RunCancelled,
     RunFailed,
     RunPaused,
+    RunStarted,
 )
 from milky_frog.harness import Harness, ResumeError
 from milky_frog.harness.state import INTERRUPTED_TOOL_RESULT, fold
@@ -105,6 +107,48 @@ async def test_harness_runs_tool_loop_and_persists_events(tmp_path: Path) -> Non
         "ModelMessageCompleted",
         "RunCompleted",
     ]
+
+
+class InvalidToolArgsThenRecoverModel:
+    """First turn requests a Tool with invalid arguments; second turn sees the error."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        self.calls += 1
+        if self.calls == 1:
+            yield StreamDone(ModelResponse(tool_calls=(ToolCall("call-1", "echo", {}),)))
+            return
+        tool_messages = [
+            message for message in request.messages if message.role is MessageRole.TOOL
+        ]
+        assert tool_messages
+        assert "ValidationError" in tool_messages[-1].content
+        yield StreamDone(ModelResponse(content="recovered"))
+
+
+@pytest.mark.asyncio
+async def test_harness_invalid_tool_arguments_become_tool_errors(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    harness = Harness(
+        model=InvalidToolArgsThenRecoverModel(),
+        tools=ToolRegistry((EchoTool(),)),
+        checkpoints=store,
+        handlers=HandlerRegistry(),
+    )
+
+    result = await harness.run(RunRequest("echo hello", tmp_path))
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.final_message == "recovered"
+    assert result.model_calls == 2
+    events = store.events(result.run_id)
+    assert not any(event.event_type == "RunFailed" for event in events)
+    completed = [event for event in events if event.event_type == "ToolCallCompleted"]
+    assert len(completed) == 1
+    assert completed[0].payload["is_error"] is True
+    assert "ValidationError" in completed[0].payload["content"]
 
 
 class UsageReportingModel:
@@ -581,6 +625,222 @@ async def test_resume_rejects_completed_run(tmp_path: Path) -> None:
 
     with pytest.raises(ResumeError, match="no pending work"):
         await harness.resume(done.run_id, max_model_calls=30)
+
+
+@pytest.mark.asyncio
+async def test_resume_rejects_failed_without_prompt(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    run_id = "run-failed-no-prompt"
+    store.create_run(run_id, tmp_path)
+    store.append(
+        run_id,
+        RunEvent.from_parts("RunStarted", {"prompt": "go", "workspace": str(tmp_path)}),
+    )
+    store.append(
+        run_id,
+        RunEvent.from_parts("RunFailed", {"error_type": "RuntimeError", "message": "boom"}),
+        RunStatus.FAILED,
+    )
+
+    harness = Harness(FakeModel(), ToolRegistry(), store, HandlerRegistry())
+    with pytest.raises(ResumeError, match="no pending work"):
+        await harness.resume(run_id, max_model_calls=30)
+
+
+@pytest.mark.asyncio
+async def test_resume_with_prompt_continues_failed_run(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    run_id = "run-failed"
+    store.create_run(run_id, tmp_path)
+    store.append(
+        run_id,
+        RunEvent.from_parts("RunStarted", {"prompt": "go", "workspace": str(tmp_path)}),
+    )
+    store.append(
+        run_id,
+        RunEvent.from_parts("RunFailed", {"error_type": "RuntimeError", "message": "boom"}),
+        RunStatus.FAILED,
+    )
+
+    harness = Harness(ContinuationModel("try again"), ToolRegistry(), store, HandlerRegistry())
+    result = await harness.resume(run_id, max_model_calls=30, prompt="try again")
+
+    assert result.status is RunStatus.COMPLETED
+    assert store.get_run(run_id) is not None
+    assert store.get_run(run_id).status is RunStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_resume_recovers_orphaned_running_run(tmp_path: Path) -> None:
+    """A crash mid-advance leaves RUNNING with no terminal event; resume folds on."""
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    run_id = "run-orphaned"
+    store.create_run(run_id, tmp_path)
+    store.append(
+        run_id,
+        RunEvent.from_parts("RunStarted", {"prompt": "go", "workspace": str(tmp_path)}),
+    )
+    store.append(
+        run_id,
+        RunEvent.from_parts(
+            "ModelMessageCompleted",
+            {
+                "content": "",
+                "reasoning": "",
+                "tool_calls": [{"id": "call-1", "name": "echo", "arguments": {"text": "hi"}}],
+                "usage": _usage_zero(),
+            },
+        ),
+    )
+    store.append(
+        run_id,
+        RunEvent.from_parts(
+            "ToolCallRequested", {"id": "call-1", "name": "echo", "arguments": {"text": "hi"}}
+        ),
+    )
+    assert store.get_run(run_id) is not None
+    assert store.get_run(run_id).status is RunStatus.RUNNING
+
+    class RecoveryModel:
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            tool_messages = [m for m in request.messages if m.role is MessageRole.TOOL]
+            assert tool_messages and tool_messages[-1].content == INTERRUPTED_TOOL_RESULT
+            yield StreamDone(ModelResponse(content="recovered"))
+
+    harness = Harness(RecoveryModel(), ToolRegistry((EchoTool(),)), store, HandlerRegistry())
+    result = await harness.resume(run_id, max_model_calls=30)
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.final_message == "recovered"
+
+
+@pytest.mark.asyncio
+async def test_resume_rejects_running_run_owned_by_live_process(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    run_id = "run-live"
+    store.create_run(run_id, tmp_path)
+    store.append(
+        run_id,
+        RunEvent.from_parts("RunStarted", {"prompt": "go", "workspace": str(tmp_path)}),
+    )
+    harness = Harness(FakeModel(), ToolRegistry((EchoTool(),)), store, HandlerRegistry())
+
+    with store.claim(run_id), pytest.raises(ResumeError, match="already active"):
+        await harness.resume(run_id, max_model_calls=30)
+
+
+@pytest.mark.asyncio
+async def test_resume_finalizes_persisted_clean_response_without_model_call(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    run_id = "run-final-response"
+    store.create_run(run_id, tmp_path)
+    store.append(
+        run_id,
+        RunEvent.from_parts("RunStarted", {"prompt": "go", "workspace": str(tmp_path)}),
+    )
+    store.append(
+        run_id,
+        RunEvent.from_parts(
+            "ModelMessageCompleted",
+            {
+                "content": "already done",
+                "reasoning": "",
+                "tool_calls": [],
+                "usage": _usage_zero(),
+            },
+        ),
+    )
+
+    class NeverCalledModel:
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            del request
+            if False:
+                yield TextDelta("")
+            raise AssertionError("model must not be called")
+
+    result = await Harness(NeverCalledModel(), ToolRegistry(), store, HandlerRegistry()).resume(
+        run_id, max_model_calls=30
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.final_message == "already done"
+    assert [event.event_type for event in store.events(run_id)][-1] == "RunCompleted"
+
+
+@pytest.mark.asyncio
+async def test_resume_sets_running_projection_before_advance(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    harness = Harness(FakeModel(), ToolRegistry((EchoTool(),)), store, HandlerRegistry())
+    done = await harness.run(RunRequest("echo hello", tmp_path))
+    assert done.status is RunStatus.COMPLETED
+
+    class StatusCapturingModel:
+        def __init__(self) -> None:
+            self.seen_running = False
+
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            del request
+            run = store.get_run(done.run_id)
+            assert run is not None
+            self.seen_running = run.status is RunStatus.RUNNING
+            yield StreamDone(ModelResponse(content="ack"))
+
+    model = StatusCapturingModel()
+    second = Harness(model, ToolRegistry((EchoTool(),)), store, HandlerRegistry())
+    await second.resume(done.run_id, max_model_calls=30, prompt="follow up")
+
+    assert model.seen_running
+
+
+@pytest.mark.asyncio
+async def test_before_tool_handler_cannot_mutate_executed_call(tmp_path: Path) -> None:
+    handlers = HandlerRegistry()
+
+    @handlers.observe(BeforeTool)
+    async def mutate_handler_copy(event: BeforeTool) -> None:
+        event.call.arguments["text"] = "tampered"
+
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    result = await Harness(FakeModel(), ToolRegistry((EchoTool(),)), store, handlers).run(
+        RunRequest("echo hello", tmp_path)
+    )
+
+    completed = [
+        event for event in store.events(result.run_id) if event.event_type == "ToolCallCompleted"
+    ]
+    assert completed[0].payload["content"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_run_started_handler_cannot_control_live_run(tmp_path: Path) -> None:
+    handlers = HandlerRegistry()
+
+    @handlers.observe(RunStarted)
+    async def mutate_handler_snapshot(event: RunStarted) -> None:
+        assert event.request.cancellation is not None
+        assert event.request.steering is not None
+        event.request.cancellation.cancel()
+        event.request.steering.drain()
+
+    class SteeringAwareModel:
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            users = [
+                message.content for message in request.messages if message.role is MessageRole.USER
+            ]
+            assert users == ["go", "steer"]
+            yield StreamDone(ModelResponse(content="done"))
+
+    cancellation = RunCancellation()
+    steering = FakeSteering(["steer"])
+    result = await Harness(
+        SteeringAwareModel(),
+        ToolRegistry(),
+        SqliteCheckpointStore(tmp_path / "state.db"),
+        handlers,
+    ).run(RunRequest("go", tmp_path, cancellation=cancellation, steering=steering))
+
+    assert result.status is RunStatus.COMPLETED
+    assert not cancellation.is_cancelled
 
 
 @pytest.mark.asyncio

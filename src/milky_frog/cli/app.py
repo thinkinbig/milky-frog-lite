@@ -11,6 +11,7 @@ from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.cli.advance import MilkyFrogAdvancer
 from milky_frog.cli.factory import HandlerFactory
 from milky_frog.diagnostics import CheckStatus, Diagnostic
+from milky_frog.domain import RunResult
 from milky_frog.harness import ResumeError
 from milky_frog.project import CONFIG_FILENAME, CONFIG_TEMPLATE, PROJECT_DIRNAME
 from milky_frog.runtime import MilkyFrog, MissingModelConfiguration
@@ -27,6 +28,32 @@ from milky_frog.ui import (
     run_interactive,
 )
 from milky_frog.ui.prompt import configure_history
+
+
+def _render_run_output(printer: StreamingPrinter, result: RunResult) -> None:
+    if printer.finish():
+        render_assistant_footer(result.run_id, usage=result.usage)
+    else:
+        render_assistant(result.final_message, run_id=result.run_id, usage=result.usage)
+
+
+def _resume_run(
+    frog: MilkyFrog,
+    printer: StreamingPrinter,
+    run_id: str,
+    *,
+    prompt: str | None = None,
+) -> RunResult:
+    try:
+        return frog.resume(run_id, prompt)
+    except ResumeError as error:
+        printer.finish()
+        render_error(str(error), hint="List available Runs with: milky-frog runs")
+        raise typer.Exit(code=1) from error
+    except Exception as error:
+        printer.finish()
+        render_error(f"{type(error).__name__}: {error}")
+        raise typer.Exit(code=1) from error
 
 
 def _build_streaming_frog(settings: Settings) -> tuple[MilkyFrog, StreamingPrinter]:
@@ -75,6 +102,12 @@ def interactive() -> None:
         raise typer.Exit(code=2) from None
     workspace = Path.cwd()
     configure_history(settings.home / "prompt_history")
+    store = SqliteCheckpointStore(settings.database_path)
+
+    def validate_run(run_id: str) -> None:
+        if store.get_run(run_id) is None:
+            raise ResumeError(f"unknown Run: {run_id}")
+
     with frog:
         run_interactive(
             MilkyFrogAdvancer(frog, workspace),
@@ -82,6 +115,7 @@ def interactive() -> None:
             workspace=workspace,
             printer=printer,
             cancel=frog.cancel,
+            validate_run=validate_run,
         )
 
 
@@ -203,15 +237,19 @@ def run(task: Annotated[str, typer.Argument()]) -> None:
             printer.finish()
             render_error(f"{type(error).__name__}: {error}")
             raise typer.Exit(code=1) from error
-    if printer.finish():
-        render_assistant_footer(result.run_id, usage=result.usage)
-    else:
-        render_assistant(result.final_message, run_id=result.run_id, usage=result.usage)
+    _render_run_output(printer, result)
 
 
 @app.command()
-def resume(run_id: Annotated[str, typer.Argument()]) -> None:
-    """Resume a stopped Run, advancing its pending work from the Checkpoint."""
+def resume(
+    run_id: Annotated[str, typer.Argument()],
+    task: Annotated[str | None, typer.Argument()] = None,
+) -> None:
+    """Resume a Run from its Checkpoint.
+
+    Without TASK, advances pending work (paused, cancelled, or orphaned). With
+    TASK, appends a new user turn and advances — including terminal Runs.
+    """
     settings = Settings.from_environment()
     try:
         frog, printer = _build_streaming_frog(settings)
@@ -219,17 +257,5 @@ def resume(run_id: Annotated[str, typer.Argument()]) -> None:
         _render_configuration_error()
         raise typer.Exit(code=2) from None
     with frog:
-        try:
-            result = frog.resume(run_id)
-        except ResumeError as error:
-            printer.finish()
-            render_error(str(error), hint="List resumable Runs with: milky-frog runs")
-            raise typer.Exit(code=1) from error
-        except Exception as error:
-            printer.finish()
-            render_error(f"{type(error).__name__}: {error}")
-            raise typer.Exit(code=1) from error
-    if printer.finish():
-        render_assistant_footer(result.run_id, usage=result.usage)
-    else:
-        render_assistant(result.final_message, run_id=result.run_id, usage=result.usage)
+        result = _resume_run(frog, printer, run_id, prompt=task)
+    _render_run_output(printer, result)

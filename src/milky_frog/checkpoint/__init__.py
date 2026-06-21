@@ -1,4 +1,4 @@
-from milky_frog.checkpoint.base import CheckpointStore, StoredRun
+from milky_frog.checkpoint.base import CheckpointStore, RunClaimError, StoredRun
 from milky_frog.checkpoint.events import (
     CheckpointBody,
     ModelMessageCompletedBody,
@@ -19,6 +19,7 @@ __all__ = [
     "CheckpointStore",
     "ModelMessageCompletedBody",
     "RunCancelledBody",
+    "RunClaimError",
     "RunCompletedBody",
     "RunEvent",
     "RunFailedBody",

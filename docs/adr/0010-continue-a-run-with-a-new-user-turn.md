@@ -40,13 +40,14 @@ phase-1 decision flips on its changed premise rather than on taste.
   (ADR-0009). The user turn is appended *after* `seal`, so a follow-up to an
   interrupted Run lands after that Run's repaired Tool result.
 
-- **Validation by status × prompt.** Without a prompt, only `PAUSED_LIMIT` /
+- **Validation by status × prompt.** Without a prompt, `PAUSED_LIMIT` /
   `CANCELLED` (pending work, no error) advance; `COMPLETED` / `FAILED` are
   rejected ("no pending work; provide a prompt"). With a prompt, any *terminal*
   Run advances — `COMPLETED`, `FAILED`, `PAUSED_LIMIT`, `CANCELLED` — since
-  adding the next user message always gives the model something to do. An active
-  Run (`RUNNING` / `WAITING_*`) is rejected either way: only one foreground Run
-  advances at a time.
+  adding the next user message always gives the model something to do. A later
+  crash-recovery refinement also permits `RUNNING` / `WAITING_*` rows only after
+  acquiring their per-Run OS claim; a live foreground process keeps that claim,
+  so concurrent advancement is rejected.
 
 - **The interactive loop owns the conversation cursor.** `run_interactive` now
   takes `advance(task, run_id)` and holds a `run_id: str | None`: the first
@@ -69,12 +70,11 @@ loop in this phase.
 corrective turn, which is the safe way to address a failure (ADR-0009 declined
 to *auto*-advance `FAILED` precisely because a blind re-advance tends to recur).
 
-A resumed Run keeps its prior terminal status in the `runs` projection until
-`_advance` writes a new terminal event, so a crash mid-continuation leaves the
-status reading e.g. `COMPLETED` while new events exist after it. A re-resume
-still folds correctly (the events are the source of truth); only the projection
-lags. Tightening the projection to a `RUNNING` marker on entry is left for when
-mid-run observability matters (phase 2b).
+A resumed Run is projected as `RUNNING` before `_advance`. The status transition,
+Tool-call repairs, and optional follow-up user event are committed in one SQLite
+transaction after the Run's OS claim is acquired. A crash therefore cannot lose
+the follow-up while leaving an active projection, and process exit releases the
+claim so the row can be recovered safely.
 
 Phase 2b — mid-run steering and its concurrent input channel — remains out of
 scope and keeps its own future ADR. Phase 2a adds no between-turn queue poll to
@@ -116,11 +116,12 @@ scope and keeps its own future ADR. Phase 2a adds no between-turn queue poll to
   `reduce` 仍是唯一的转录书写者（ADR-0009）。用户轮次在 `seal` *之后*追加，因此对一
   个被中断的 Run 的后续输入会落在该 Run 已修复的 Tool 结果之后。
 
-- **按状态 × prompt 校验。** 无 prompt 时，仅 `PAUSED_LIMIT` / `CANCELLED`（有待办、
+- **按状态 × prompt 校验。** 无 prompt 时，`PAUSED_LIMIT` / `CANCELLED`（有待办、
   无错误）可推进；`COMPLETED` / `FAILED` 被拒（"无待办工作；请提供 prompt"）。带
   prompt 时，任何*终止态* Run 都可推进——`COMPLETED`、`FAILED`、`PAUSED_LIMIT`、
-  `CANCELLED`——因为追加下一个用户消息总能给模型可做之事。活跃 Run（`RUNNING` /
-  `WAITING_*`）两种情况都被拒：一次只推进一个前台 Run。
+  `CANCELLED`——因为追加下一个用户消息总能给模型可做之事。后续的崩溃恢复收紧允许
+  `RUNNING` / `WAITING_*` 行仅在取得该 Run 的 OS claim 后恢复；仍存活的前台进程会
+  持有 claim，因此并发推进会被拒绝。
 
 - **交互循环持有对话游标。** `run_interactive` 现在接收 `advance(task, run_id)` 并
   持有 `run_id: str | None`：首次输入启动新 Run，后续输入接续它（`result.run_id`
@@ -137,10 +138,9 @@ scope and keeps its own future ADR. Phase 2a adds no between-turn queue poll to
 `FAILED` 变为可带 prompt 接续是有意为之：由人提供纠正性轮次，这是处理失败的安全方式
 （ADR-0009 拒绝*自动*推进 `FAILED`，正因盲目重推往往复现）。
 
-被恢复的 Run 在 `runs` 投影中保留其先前终止状态，直到 `_advance` 写入新的终止事件，
-因此续推中途崩溃会让状态读作如 `COMPLETED`，而其后已有新事件。再次恢复仍能正确折叠
-（事件才是真相来源），仅投影滞后。把投影在入口收紧为 `RUNNING` 标记，留待运行中可观
-测性变得重要时（第二阶段 b）。
+恢复后的 Run 会在 `_advance` 前投影为 `RUNNING`。状态转换、Tool-call 修复与可选的后续
+用户事件会在取得 Run 的 OS claim 后，于同一个 SQLite 事务中提交。因此崩溃不会在留下
+活跃投影的同时丢失 follow-up；进程退出又会释放 claim，使该行可被安全恢复。
 
 第二阶段 b——运行中 steering 及其并发输入通道——仍在范围之外，保留其各自未来的 ADR。
 第二阶段 a 不向 `_advance` 添加任何轮次间队列轮询；没有生产者它就是死代码（ADR-0009）。

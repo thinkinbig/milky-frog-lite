@@ -66,7 +66,7 @@ milky-frog init [WORKSPACE]
 milky-frog runs
 milky-frog show RUN_ID [--json]
 milky-frog run TASK
-milky-frog resume RUN_ID [TASK]   # replay pending work or continue with a new turn
+milky-frog resume RUN_ID          # replay pending work
 ```
 
 ## Project layout

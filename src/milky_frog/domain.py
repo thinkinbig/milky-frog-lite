@@ -17,6 +17,47 @@ class RunStatus(StrEnum):
     FAILED = "failed"
     CANCELLED = "cancelled"
 
+    @property
+    def is_orphaned_active(self) -> bool:
+        """True for non-terminal states that may survive a crash without a
+        terminal Checkpoint event — a ``RUNNING`` row whose process died."""
+        return self in _ORPHANED_ACTIVE
+
+    @property
+    def is_resumable(self) -> bool:
+        """True when the Run has pending work and can advance with no new input.
+
+        Includes paused/cancelled Runs and every orphaned-active state.
+        ``COMPLETED`` has nothing pending and ``FAILED`` usually recurs on a
+        blind re-advance — both need a prompt instead.
+        """
+        return self in (RunStatus.PAUSED_LIMIT, RunStatus.CANCELLED) or self.is_orphaned_active
+
+    @property
+    def is_continuable(self) -> bool:
+        """True when the Run can accept a new user turn to continue.
+
+        Any terminal status (including ``COMPLETED`` and ``FAILED``) plus every
+        orphaned-active state qualifies.
+        """
+        return (
+            self
+            in (
+                RunStatus.COMPLETED,
+                RunStatus.FAILED,
+                RunStatus.PAUSED_LIMIT,
+                RunStatus.CANCELLED,
+            )
+            or self.is_orphaned_active
+        )
+
+
+_ORPHANED_ACTIVE: tuple[RunStatus, ...] = (
+    RunStatus.RUNNING,
+    RunStatus.WAITING_FOR_INPUT,
+    RunStatus.WAITING_FOR_APPROVAL,
+)
+
 
 class MessageRole(StrEnum):
     SYSTEM = "system"

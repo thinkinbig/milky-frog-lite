@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
+from rich.text import Text
+
 from milky_frog.domain import RunStatus
+from milky_frog.harness import ResumeError
 from milky_frog.ui.console import console
 from milky_frog.ui.presenter import (
     render_assistant,
@@ -17,6 +21,17 @@ from milky_frog.ui.protocols import RunAdvancer, RunCanceller
 from milky_frog.ui.streaming import StreamingPrinter
 
 
+def parse_resume_command(task: str) -> tuple[str, str | None] | None:
+    """Return ``(run_id, prompt)`` for ``/resume RUN_ID [prompt]``, else ``None``."""
+    if not task.casefold().startswith("/resume"):
+        return None
+    rest = task[len("/resume") :].strip()
+    if not rest:
+        return ("", None)
+    run_id, _, prompt = rest.partition(" ")
+    return run_id, prompt.strip() or None
+
+
 def run_interactive(
     advance: RunAdvancer,
     *,
@@ -24,6 +39,7 @@ def run_interactive(
     workspace: Path,
     printer: StreamingPrinter,
     cancel: RunCanceller | None = None,
+    validate_run: Callable[[str], None] | None = None,
 ) -> None:
     """Own one foreground Terminal UI interaction loop.
 
@@ -53,6 +69,33 @@ def run_interactive(
             console.clear()
             run_id = None
             continue
+
+        resume_command = parse_resume_command(task)
+        if resume_command is not None:
+            attach_id, resume_prompt = resume_command
+            if not attach_id:
+                render_error(
+                    "Usage: /resume RUN_ID [prompt]",
+                    hint="List available Runs with: milky-frog runs",
+                )
+                continue
+            if validate_run is not None:
+                try:
+                    validate_run(attach_id)
+                except ResumeError as error:
+                    render_error(str(error), hint="List available Runs with: milky-frog runs")
+                    continue
+            if resume_prompt is None:
+                run_id = attach_id
+                console.print(
+                    Text(
+                        f"Attached to run {attach_id[:8]} · next prompt continues it",
+                        style="dim",
+                    )
+                )
+                continue
+            run_id = attach_id
+            task = resume_prompt
 
         render_interactive_statusbar(model=model, workspace=workspace, state="working")
         try:

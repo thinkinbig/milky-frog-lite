@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import Coroutine
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from milky_frog.checkpoint import CheckpointStore
+from milky_frog.checkpoint import CheckpointStore, RunClaimError
 from milky_frog.domain import (
+    MessageRole,
     ModelRequest,
     ModelResponse,
     ReasoningDelta,
@@ -53,21 +55,6 @@ from milky_frog.harness.state import fold, reduce, seal
 from milky_frog.harness.tools import ToolContext, ToolRegistry
 from milky_frog.models import Model
 
-# Runs whose stop is user-initiated and error-free, so advancing the pending
-# work with no new input is safe. COMPLETED has nothing pending; FAILED usually
-# recurs on a blind re-advance — both need new input instead (resume with a prompt).
-_RESUMABLE = (RunStatus.PAUSED_LIMIT, RunStatus.CANCELLED)
-
-# Any terminal Run can take a new user turn; an active Run (RUNNING / WAITING_*)
-# cannot, since only one foreground Run advances at a time. COMPLETED and FAILED
-# have nothing pending, so they are continuable only by supplying a prompt.
-_CONTINUABLE = (
-    RunStatus.COMPLETED,
-    RunStatus.FAILED,
-    RunStatus.PAUSED_LIMIT,
-    RunStatus.CANCELLED,
-)
-
 
 class ResumeError(Exception):
     """A Run cannot be advanced as requested: unknown, has no pending work and
@@ -76,6 +63,13 @@ class ResumeError(Exception):
 
 class _ToolRunCancelled(Exception):
     """Cooperative cancel arrived while a Tool was executing."""
+
+
+class _DetachedSteering:
+    """Inert marker used in observational RunStarted snapshots."""
+
+    def drain(self) -> list[str]:
+        return []
 
 
 class Harness:
@@ -97,18 +91,21 @@ class Harness:
         """Start a fresh Run: seed the transcript from the prompt, then advance."""
         run_id = uuid4().hex
         workspace = run_request.workspace.resolve(strict=True)
-        self._checkpoints.create_run(run_id, workspace)
-        started = run_started(prompt=run_request.prompt, workspace=workspace)
-        self._checkpoints.append(run_id, started)
-        await self._handlers.notify(RunStarted(run_id=run_id, request=run_request))
-        state = reduce(RunState(run_id=run_id, workspace=workspace), started)
-        return await self._advance(
-            state,
-            LocalSandbox(workspace),
-            run_request.cancellation,
-            run_request.max_model_calls,
-            run_request.steering,
-        )
+        with self._checkpoints.claim(run_id):
+            self._checkpoints.create_run(run_id, workspace)
+            started = run_started(prompt=run_request.prompt, workspace=workspace)
+            self._checkpoints.append(run_id, started)
+            await self._handlers.notify(
+                RunStarted(run_id=run_id, request=_copy_run_request(run_request))
+            )
+            state = reduce(RunState(run_id=run_id, workspace=workspace), started)
+            return await self._advance(
+                state,
+                LocalSandbox(workspace),
+                run_request.cancellation,
+                run_request.max_model_calls,
+                run_request.steering,
+            )
 
     async def resume(
         self,
@@ -123,29 +120,42 @@ class Harness:
         interrupted Tool, then either pick up its pending work (no prompt) or
         append a new user turn (with prompt) and advance.
 
-        Without a prompt, only a Run stopped with pending work (PAUSED_LIMIT,
-        CANCELLED) can be advanced. With a prompt, any terminal Run can — a
-        finished conversation is continued by adding the next user message.
+        Without a prompt, only a Run with pending work (PAUSED_LIMIT, CANCELLED,
+        or an orphaned RUNNING / WAITING_*) can be advanced. With a prompt, any
+        terminal Run can — a finished conversation is continued by adding the
+        next user message.
         """
-        stored = self._checkpoints.get_run(run_id)
-        if stored is None:
-            raise ResumeError(f"unknown Run: {run_id}")
-        if prompt is None and stored.status not in _RESUMABLE:
-            raise ResumeError(
-                f"Run {run_id} is {stored.status.value} with no pending work; "
-                "provide a prompt to continue it"
-            )
-        if prompt is not None and stored.status not in _CONTINUABLE:
-            raise ResumeError(f"Run {run_id} is {stored.status.value} and cannot accept new input")
-        state = fold(run_id, stored.workspace, self._checkpoints.events(run_id))
-        state, repairs = seal(state)
-        for event in repairs:
-            self._checkpoints.append(run_id, event)
-        if prompt is not None:
-            state = self._append_user_message(state, prompt)
-        return await self._advance(
-            state, LocalSandbox(stored.workspace), cancellation, max_model_calls, steering
-        )
+        try:
+            with self._checkpoints.claim(run_id):
+                stored = self._checkpoints.get_run(run_id)
+                if stored is None:
+                    raise ResumeError(f"unknown Run: {run_id}")
+                if prompt is None and not stored.status.is_resumable:
+                    raise ResumeError(
+                        f"Run {run_id} is {stored.status.value} with no pending work; "
+                        "provide a prompt to continue it"
+                    )
+                if prompt is not None and not stored.status.is_continuable:
+                    raise ResumeError(
+                        f"Run {run_id} is {stored.status.value} and cannot accept new input"
+                    )
+
+                state = fold(run_id, stored.workspace, self._checkpoints.events(run_id))
+                state, repairs = seal(state)
+                completed_tail = _completed_tail(state)
+                if prompt is None and completed_tail is not None:
+                    return await self._finish_completed(state, completed_tail)
+
+                prompt_event = user_message_added(prompt) if prompt is not None else None
+                seeds = (*repairs, *((prompt_event,) if prompt_event is not None else ()))
+                self._checkpoints.prepare_resume(run_id, stored.updated_at, seeds)
+                if prompt_event is not None:
+                    state = reduce(state, prompt_event)
+                return await self._advance(
+                    state, LocalSandbox(stored.workspace), cancellation, max_model_calls, steering
+                )
+        except RunClaimError as error:
+            raise ResumeError(str(error)) from error
 
     async def _advance(
         self,
@@ -167,11 +177,16 @@ class Harness:
                     return await self._finish_cancelled(state)
                 state = self._absorb_steering(state, steering)
                 request = ModelRequest(state.messages, self._tools.schemas())
-                before_model = BeforeModel(run_id=run_id, request=request)
-                await self._handlers.notify(before_model)
-                response = await self._consume_stream(run_id, cancellation, before_model.request)
                 await self._handlers.notify(
-                    AfterModel(run_id=run_id, request=before_model.request, response=response)
+                    BeforeModel(run_id=run_id, request=_copy_model_request(request))
+                )
+                response = await self._consume_stream(run_id, cancellation, request)
+                await self._handlers.notify(
+                    AfterModel(
+                        run_id=run_id,
+                        request=_copy_model_request(request),
+                        response=_copy_model_response(response),
+                    )
                 )
                 completed = model_message_completed(response)
                 self._checkpoints.append(run_id, completed)
@@ -227,16 +242,25 @@ class Harness:
         loop needs to decide on tool calls and persist a Checkpoint.
         """
         response: ModelResponse | None = None
+        observer_request = _copy_model_request(request)
         async for chunk in self._model.stream(request):
             if _is_cancelled(cancellation):
                 raise asyncio.CancelledError
             if isinstance(chunk, TextDelta):
                 await self._handlers.notify(
-                    OnModelChunk(run_id=run_id, request=request, chunk=chunk)
+                    OnModelChunk(
+                        run_id=run_id,
+                        request=observer_request,
+                        chunk=chunk,
+                    )
                 )
             elif isinstance(chunk, ReasoningDelta):
                 await self._handlers.notify(
-                    OnModelReasoning(run_id=run_id, request=request, chunk=chunk)
+                    OnModelReasoning(
+                        run_id=run_id,
+                        request=observer_request,
+                        chunk=chunk,
+                    )
                 )
             elif isinstance(chunk, StreamDone):
                 response = chunk.response
@@ -253,15 +277,18 @@ class Harness:
         call: ToolCall,
         cancellation: RunCancellation | None,
     ) -> ToolResult:
-        """Run one Tool call and return its (post-``AfterTool``) result. The
-        caller persists and folds the resulting ``ToolCallCompleted`` event, so
-        the event has a single construction point shared by store and reduce."""
-        await self._handlers.notify(BeforeTool(run_id=run_id, call=call))
+        """Run one Tool call and return its result.
+
+        Lifecycle handlers receive defensive snapshots and cannot alter Tool
+        execution or its persisted result. The caller constructs, persists, and
+        folds the resulting ``ToolCallCompleted`` event.
+        """
+        await self._handlers.notify(BeforeTool(run_id=run_id, call=_copy_tool_call(call)))
         self._checkpoints.append(run_id, tool_call_requested(call))
         tool = self._tools.get(call.name)
-        input_model = tool.input_model.model_validate(call.arguments)
         context = ToolContext(run_id, workspace, cancellation, sandbox)
         try:
+            input_model = tool.input_model.model_validate(call.arguments)
             result = await self._run_tool_with_cancellation(
                 tool.execute(context, input_model), cancellation
             )
@@ -269,9 +296,10 @@ class Harness:
             raise
         except Exception as error:
             result = ToolResult(f"{type(error).__name__}: {error}", is_error=True)
-        after_tool = AfterTool(run_id=run_id, call=call, result=result)
-        await self._handlers.notify(after_tool)
-        return after_tool.result
+        await self._handlers.notify(
+            AfterTool(run_id=run_id, call=_copy_tool_call(call), result=result)
+        )
+        return result
 
     async def _run_tool_with_cancellation(
         self,
@@ -367,3 +395,40 @@ class Harness:
 
 def _is_cancelled(cancellation: RunCancellation | None) -> bool:
     return cancellation is not None and cancellation.is_cancelled
+
+
+def _completed_tail(state: RunState) -> str | None:
+    if not state.messages:
+        return None
+    tail = state.messages[-1]
+    if tail.role is MessageRole.ASSISTANT and not tail.tool_calls:
+        return tail.content
+    return None
+
+
+def _copy_tool_call(call: ToolCall) -> ToolCall:
+    return ToolCall(call.id, call.name, deepcopy(call.arguments))
+
+
+def _copy_model_request(request: ModelRequest) -> ModelRequest:
+    return deepcopy(request)
+
+
+def _copy_model_response(response: ModelResponse) -> ModelResponse:
+    return deepcopy(response)
+
+
+def _copy_run_request(request: RunRequest) -> RunRequest:
+    cancellation = None
+    if request.cancellation is not None:
+        cancellation = RunCancellation()
+        if request.cancellation.is_cancelled:
+            cancellation.cancel()
+    steering = _DetachedSteering() if request.steering is not None else None
+    return RunRequest(
+        prompt=request.prompt,
+        workspace=request.workspace,
+        max_model_calls=request.max_model_calls,
+        cancellation=cancellation,
+        steering=steering,
+    )
