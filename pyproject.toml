@@ -22,6 +22,7 @@ dependencies = [
 
 [project.scripts]
 milky-frog = "milky_frog.cli:app"
+mf = "milky_frog.cli:app"
 
 [dependency-groups]
 dev = [
