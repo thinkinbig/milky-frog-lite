@@ -4,17 +4,18 @@ from collections.abc import Iterable
 from dataclasses import replace
 from pathlib import Path
 
-from milky_frog.checkpoint import RunEvent
-from milky_frog.domain import Message, MessageRole, RunState, ToolCall
-from milky_frog.harness.events import (
-    INTERRUPTED_TOOL_RESULT,
-    assistant_message,
-    interrupted_tool_call_completed,
-    seed_messages,
-    tool_message,
-    usage_from_payload,
-    user_message,
+from milky_frog.checkpoint.events import (
+    ModelMessageCompletedBody,
+    RunEvent,
+    RunStartedBody,
+    ToolCallCompletedBody,
+    UserMessageAddedBody,
+    token_usage_from_fields,
+    tool_call_from_fields,
 )
+from milky_frog.domain import Message, MessageRole, RunState, ToolCall
+from milky_frog.harness.events import INTERRUPTED_TOOL_RESULT, interrupted_tool_call_completed
+from milky_frog.harness.prompt import system_prompt
 
 __all__ = ["INTERRUPTED_TOOL_RESULT", "fold", "reduce", "seal"]
 
@@ -27,20 +28,43 @@ def reduce(state: RunState, event: RunEvent) -> RunState:
     that do not change the transcript (``ToolCallRequested``, terminal markers)
     are returned unchanged.
     """
-    if event.event_type == "RunStarted":
-        return replace(state, messages=seed_messages(state.workspace, event.payload))
-    if event.event_type == "UserMessageAdded":
-        return replace(state, messages=(*state.messages, user_message(event.payload)))
-    if event.event_type == "ModelMessageCompleted":
-        return replace(
-            state,
-            messages=(*state.messages, assistant_message(event.payload)),
-            completed_model_calls=state.completed_model_calls + 1,
-            usage=state.usage.record(usage_from_payload(event.payload.get("usage"))),
-        )
-    if event.event_type == "ToolCallCompleted":
-        return replace(state, messages=(*state.messages, tool_message(event.payload)))
-    return state
+    match event.body:
+        case RunStartedBody(prompt=prompt):
+            return replace(
+                state,
+                messages=(
+                    Message(MessageRole.SYSTEM, system_prompt(state.workspace)),
+                    Message(MessageRole.USER, prompt),
+                ),
+            )
+        case UserMessageAddedBody(content=content):
+            return replace(state, messages=(*state.messages, Message(MessageRole.USER, content)))
+        case ModelMessageCompletedBody(content=content, tool_calls=tool_calls, usage=usage):
+            # Reasoning is intentionally dropped from the transcript: reasoning providers
+            # reject their own reasoning_content on input. It survives in the Checkpoint.
+            return replace(
+                state,
+                messages=(
+                    *state.messages,
+                    Message(
+                        MessageRole.ASSISTANT,
+                        content,
+                        tuple(tool_call_from_fields(call) for call in tool_calls),
+                    ),
+                ),
+                completed_model_calls=state.completed_model_calls + 1,
+                usage=state.usage.record(token_usage_from_fields(usage)),
+            )
+        case ToolCallCompletedBody(id=tool_call_id, content=content):
+            return replace(
+                state,
+                messages=(
+                    *state.messages,
+                    Message(MessageRole.TOOL, content, tool_call_id=tool_call_id),
+                ),
+            )
+        case _:
+            return state
 
 
 def fold(run_id: str, workspace: Path, events: Iterable[RunEvent]) -> RunState:

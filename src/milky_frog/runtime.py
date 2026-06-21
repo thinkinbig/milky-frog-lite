@@ -7,12 +7,12 @@ import select
 import signal
 import sys
 import threading
-from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import FrameType, TracebackType
 
 from milky_frog.checkpoint import SqliteCheckpointStore
-from milky_frog.domain import RunCancellation, RunRequest, RunResult, SteeringChannel
+from milky_frog.domain import RunCancellation, RunResult
+from milky_frog.foreground import ForegroundRun, ResumeRun, StartRun
 from milky_frog.handlers import BaseHandler, HandlerRegistry
 from milky_frog.harness import Harness, ResumeError
 from milky_frog.harness.tools import ToolRegistry, default_tools
@@ -189,14 +189,11 @@ class MilkyFrog:
         """
         config = load_project_config(workspace)
         return self._drive(
-            lambda cancellation, steering: self._harness.run(
-                RunRequest(
-                    prompt,
-                    workspace,
-                    max_model_calls=config.max_model_calls,
-                    cancellation=cancellation,
-                    steering=steering,
-                )
+            StartRun(
+                self._harness,
+                prompt=prompt,
+                workspace=workspace,
+                max_model_calls=config.max_model_calls,
             )
         )
 
@@ -213,19 +210,15 @@ class MilkyFrog:
             raise ResumeError(f"unknown Run: {run_id}")
         config = load_project_config(stored.workspace)
         return self._drive(
-            lambda cancellation, steering: self._harness.resume(
-                run_id,
+            ResumeRun(
+                self._harness,
+                run_id=run_id,
                 max_model_calls=config.max_model_calls,
-                cancellation=cancellation,
                 prompt=prompt,
-                steering=steering,
             )
         )
 
-    def _drive(
-        self,
-        make_awaitable: Callable[[RunCancellation, SteeringChannel], Awaitable[RunResult]],
-    ) -> RunResult:
+    def _drive(self, foreground: ForegroundRun) -> RunResult:
         """Run one foreground awaitable on the reused loop, wiring SIGINT to a
         cooperative cancel and a background stdin reader to mid-Run steering, both
         for this Run's duration only."""
@@ -249,7 +242,7 @@ class MilkyFrog:
         signal.signal(signal.SIGINT, _request_cancel)
         steering.start()
         try:
-            result = self._loop.run_until_complete(make_awaitable(self._cancellation, steering))
+            result = self._loop.run_until_complete(foreground(self._cancellation, steering))
         finally:
             # Stop the reader first so it releases stdin before the next prompt.
             steering.stop()

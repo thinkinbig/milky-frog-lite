@@ -123,7 +123,14 @@ def test_render_run_shows_summary_and_events_without_payload() -> None:
     presenter, stdout, _ = _presenter()
     now = datetime(2026, 6, 20, 12, 0, tzinfo=UTC)
     run = StoredRun("run-123", Path("/workspace"), RunStatus.COMPLETED, now, now)
-    events = (RunEvent("RunStarted", {"prompt": "secret"}, sequence=1, created_at=now),)
+    events = (
+        RunEvent.from_parts(
+            "RunStarted",
+            {"prompt": "secret", "workspace": "/tmp"},
+            sequence=1,
+            created_at=now,
+        ),
+    )
 
     presenter.run(run, events)
 

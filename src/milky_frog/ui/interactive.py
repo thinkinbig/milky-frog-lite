@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 
-from milky_frog.domain import RunResult, RunStatus
+from milky_frog.domain import RunStatus
 from milky_frog.ui.console import console
 from milky_frog.ui.presenter import (
     render_assistant,
@@ -14,16 +13,17 @@ from milky_frog.ui.presenter import (
     render_interactive_welcome,
 )
 from milky_frog.ui.prompt import prompt_in_box
+from milky_frog.ui.protocols import RunAdvancer, RunCanceller
 from milky_frog.ui.streaming import StreamingPrinter
 
 
 def run_interactive(
-    advance: Callable[[str, str | None], RunResult],
+    advance: RunAdvancer,
     *,
     model: str,
     workspace: Path,
     printer: StreamingPrinter,
-    cancel: Callable[[], None] | None = None,
+    cancel: RunCanceller | None = None,
 ) -> None:
     """Own one foreground Terminal UI interaction loop.
 

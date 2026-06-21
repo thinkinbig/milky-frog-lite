@@ -25,8 +25,16 @@ A model-invoked Harness operation, such as requesting user input, loading a Skil
 _Avoid_: Business tool
 
 **Handler**:
-A typed callback registered for a Harness lifecycle event. Handlers enforce cross-cutting behavior such as authorization, checkpointing, and observability.
-_Avoid_: Middleware, hook
+A read-only callback registered on the Harness lifecycle-signal bus (`HandlerRegistry.notify`). Handlers observe live Runs for streaming output and observability; they do not persist state or change execution. Durable facts live in Checkpoint events instead.
+_Avoid_: Middleware, hook, intercept
+
+**Lifecycle signal**:
+An ephemeral, in-process notification (for example `OnModelChunk`, `AfterModel`) delivered to Handlers during a Run. Not replayed from the Checkpoint log.
+_Avoid_: Event (unqualified), Checkpoint event
+
+**Checkpoint event**:
+A versioned, append-only record in the Run's event log (typed `CheckpointBody`, stored in SQLite). The source of truth for resume and `fold`. Distinct from lifecycle signals.
+_Avoid_: Handler event, snapshot
 
 **Checkpoint**:
 The durable event history and current state of a Run, used to resume execution without repeating completed Tools.
@@ -77,8 +85,16 @@ _避免使用_：插件、函数
 _避免使用_：业务工具
 
 **Handler（处理器）**：
-注册到 Harness 生命周期事件的类型化回调。Handler 用于实现授权、checkpoint 和可观测性等横切行为。
-_避免使用_：Middleware、Hook
+注册到 Harness 生命周期信号总线的只读回调（`HandlerRegistry.notify`）。Handler 在 Run 进行期间观察流式输出与可观测性；不持久化状态、不改变执行。持久化事实由 Checkpoint 事件单独记录。
+_避免使用_：Middleware、Hook、intercept
+
+**Lifecycle signal（生命周期信号）**：
+Run 进行期间的临时、进程内通知（例如 `OnModelChunk`、`AfterModel`），分发给 Handler。不从 Checkpoint 日志 replay。
+_避免使用_：Event（无前缀）、Checkpoint 事件
+
+**Checkpoint event（Checkpoint 事件）**：
+Run 事件日志中的版本化、仅追加记录（类型化 `CheckpointBody`，存入 SQLite）。resume 与 `fold` 的真相来源。与生命周期信号不同。
+_避免使用_：Handler 事件、快照
 
 **Checkpoint（检查点）**：
 一个 Run 的持久化事件历史和当前状态，用于恢复执行且不重复运行已完成的 Tool。

@@ -175,10 +175,13 @@ def test_milky_frog_resume_advances_stored_run(
     store = SqliteCheckpointStore(settings.database_path)
     run_id = "paused-run"
     store.create_run(run_id, tmp_path)
-    store.append(run_id, RunEvent("RunStarted", {"prompt": "go", "workspace": str(tmp_path)}))
     store.append(
         run_id,
-        RunEvent("RunPaused", {"reason": "limit", "model_calls": 1}),
+        RunEvent.from_parts("RunStarted", {"prompt": "go", "workspace": str(tmp_path)}),
+    )
+    store.append(
+        run_id,
+        RunEvent.from_parts("RunPaused", {"reason": "limit", "model_calls": 1}),
         RunStatus.PAUSED_LIMIT,
     )
 

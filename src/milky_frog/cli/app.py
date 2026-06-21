@@ -8,6 +8,7 @@ import typer
 
 from milky_frog import __version__
 from milky_frog.checkpoint import SqliteCheckpointStore
+from milky_frog.cli.advance import MilkyFrogAdvancer
 from milky_frog.cli.factory import HandlerFactory
 from milky_frog.diagnostics import CheckStatus, Diagnostic
 from milky_frog.harness import ResumeError
@@ -76,9 +77,7 @@ def interactive() -> None:
     configure_history(settings.home / "prompt_history")
     with frog:
         run_interactive(
-            lambda task, run_id: (
-                frog.run(task, workspace) if run_id is None else frog.resume(run_id, task)
-            ),
+            MilkyFrogAdvancer(frog, workspace),
             model=settings.model or "unknown",
             workspace=workspace,
             printer=printer,

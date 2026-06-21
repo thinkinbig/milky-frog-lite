@@ -7,7 +7,8 @@ from pathlib import Path
 
 from pydantic import JsonValue
 
-from milky_frog.checkpoint.base import RunEvent, StoredRun
+from milky_frog.checkpoint.base import StoredRun
+from milky_frog.checkpoint.events import RunEvent, dump_checkpoint_body
 from milky_frog.domain import RunStatus
 
 
@@ -71,6 +72,7 @@ class SqliteCheckpointStore:
             if row is None:
                 raise RuntimeError("failed to allocate event sequence")
             sequence = int(row["next_sequence"])
+            event_type, payload = dump_checkpoint_body(event.body)
             connection.execute(
                 "INSERT INTO run_events("
                 "run_id, sequence, event_type, version, payload, created_at"
@@ -79,9 +81,9 @@ class SqliteCheckpointStore:
                 (
                     run_id,
                     sequence,
-                    event.event_type,
+                    event_type,
                     event.version,
-                    json.dumps(event.payload, ensure_ascii=False),
+                    json.dumps(payload, ensure_ascii=False),
                     now.isoformat(),
                 ),
             )
@@ -89,7 +91,12 @@ class SqliteCheckpointStore:
                 "UPDATE runs SET status = COALESCE(?, status), updated_at = ? WHERE run_id = ?",
                 (status, now.isoformat(), run_id),
             )
-        return RunEvent(event.event_type, event.payload, event.version, sequence, now)
+        return RunEvent(
+            body=event.body,
+            version=event.version,
+            sequence=sequence,
+            created_at=now,
+        )
 
     def events(self, run_id: str) -> tuple[RunEvent, ...]:
         with self._connect() as connection:
@@ -99,7 +106,7 @@ class SqliteCheckpointStore:
                 (run_id,),
             ).fetchall()
         return tuple(
-            RunEvent(
+            RunEvent.from_parts(
                 event_type=str(row["event_type"]),
                 payload=self._load_payload(str(row["payload"])),
                 version=int(row["version"]),

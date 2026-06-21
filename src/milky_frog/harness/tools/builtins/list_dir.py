@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic import BaseModel, Field
 
 from milky_frog.domain import ToolResult
 from milky_frog.harness.sandbox import SandboxViolation
 from milky_frog.harness.tools.base import ToolContext
+
+
+class _DirectoryEntryOrder:
+    def __call__(self, path: Path) -> tuple[bool, str]:
+        return (not path.is_dir(), path.name)
 
 
 class ListDirInput(BaseModel):
@@ -32,7 +39,7 @@ class ListDirTool:
         if not resolved.is_dir():
             return ToolResult(f"not a directory: {params.path}", is_error=True)
         try:
-            entries = sorted(resolved.iterdir(), key=lambda p: (not p.is_dir(), p.name))
+            entries = sorted(resolved.iterdir(), key=_DirectoryEntryOrder())
         except OSError as error:
             return ToolResult(f"{type(error).__name__}: {error}", is_error=True)
         if not entries:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from stubs import LangfuseClientFactory
 
 from milky_frog.cli.factory import HandlerFactory
 from milky_frog.domain import ModelRequest, TextDelta
@@ -33,7 +34,10 @@ def test_factory_builds_ui_only_when_infrastructure_inactive(tmp_path: Path) -> 
 def test_factory_composes_ui_and_active_infrastructure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr("milky_frog.handlers.langfuse.Langfuse", lambda **kwargs: object())
+    monkeypatch.setattr(
+        "milky_frog.handlers.langfuse.Langfuse",
+        LangfuseClientFactory(object()),
+    )
 
     _, bundles = HandlerFactory(_settings(tmp_path, _ACTIVE), StreamingPrinter()).build()
 

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from stubs import LangfuseClientFactory, RecordingLangfuseFactory
 
 from milky_frog.handlers import InfrastructureHandlerAssembly
 from milky_frog.handlers.langfuse import LangfuseHandler
@@ -26,7 +27,10 @@ def test_build_skips_inactive_infrastructure(tmp_path: Path) -> None:
 
 
 def test_build_includes_active_langfuse(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr("milky_frog.handlers.langfuse.Langfuse", lambda **kwargs: object())
+    monkeypatch.setattr(
+        "milky_frog.handlers.langfuse.Langfuse",
+        LangfuseClientFactory(object()),
+    )
 
     bundles = InfrastructureHandlerAssembly(_settings(tmp_path, _ACTIVE)).build()
 
@@ -39,7 +43,8 @@ def test_build_does_not_register(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     # factory owns registration. Building must not touch the client either.
     calls: list[Any] = []
     monkeypatch.setattr(
-        "milky_frog.handlers.langfuse.Langfuse", lambda **kwargs: calls.append(kwargs) or object()
+        "milky_frog.handlers.langfuse.Langfuse",
+        RecordingLangfuseFactory(calls),
     )
 
     InfrastructureHandlerAssembly(_settings(tmp_path, _ACTIVE)).build()

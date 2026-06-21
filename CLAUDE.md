@@ -55,18 +55,42 @@ event at every step and notifying lifecycle Handlers around each model and
 Tool call.
 
 `runtime.py` (`MilkyFrog`) assembles the concrete pieces from `Settings` and
-owns the sync→async boundary (a reused event loop). `cli/app.py` is the Typer
-command surface; `ui/` renders everything via Rich.
+owns the sync→async boundary (a reused event loop). Foreground Runs are started
+through `foreground.py` (`ForegroundRun` protocol; `StartRun` / `ResumeRun`
+classes). `cli/app.py` is the Typer command surface; `cli/advance.py` wires the
+interactive loop via `MilkyFrogAdvancer` (`RunAdvancer` protocol). `ui/` renders
+everything via Rich.
 
-Everything else is a **seam** — a `Protocol` with a default adapter, so
-alternatives can be swapped without touching the Harness:
+### Three event lanes (do not unify)
+
+Milky Frog uses three separate concepts. Never call them all “Event” without a
+qualifier, and never merge them into one base type:
+
+| Lane | Where | Lifetime | Purpose |
+|------|-------|----------|---------|
+| **Checkpoint event** | `checkpoint/events.py`, factories in `harness/events.py` | Durable (SQLite) | Resume / `fold` source of truth |
+| **Lifecycle signal** | `handlers/events.py`, bus in `handlers/registry.py` | Ephemeral (in-process) | UI streaming, Langfuse (`notify`) |
+| **Harness policy** | Explicit `Protocol` deps on `Harness` (future) | Per-call | Authorization, context build, etc. |
+
+Checkpoint bodies are a Pydantic discriminated union (`CheckpointBody`, ADR-0013).
+Lifecycle signals are frozen Pydantic `BaseEvent` subclasses (ADR-0004, ADR-0012).
+`HandlerRegistry` is read-only: `observe` / `on` / `subscribe` and `notify` only —
+no intercept channel, no return values that change execution.
+
+### Seams
+
+Everything else is a **seam** — a `Protocol` with a default adapter, or a small
+named class — so alternatives can be swapped without touching the Harness:
 
 - `models/` — `Model` protocol, `OpenAIModel` adapter.
-- `tools/` — `Tool` protocol + `ToolRegistry` (no built-in Tools yet).
-- `checkpoint/` — `CheckpointStore` protocol, append-only `SqliteCheckpointStore`.
-- `harness/events.py` — Checkpoint event factories and payload parsing (durable).
-- `handlers/` — ephemeral lifecycle signals + read-only `HandlerRegistry` bus
-  (UI streaming, Langfuse observability; ADR-0012).
+- `tools/` — `Tool` protocol + `ToolRegistry` + built-in Tools.
+- `checkpoint/` — `CheckpointStore` protocol, `SqliteCheckpointStore`, typed
+  `CheckpointBody` / `RunEvent` (ADR-0013).
+- `harness/events.py` — Checkpoint event factories (write path into the log).
+- `harness/state.py` — `fold` / `reduce` / `seal` (read path from the log).
+- `handlers/` — lifecycle signals + read-only `HandlerRegistry` (ADR-0012).
+- `foreground.py` — `ForegroundRun`, `StartRun`, `ResumeRun`.
+- `ui/protocols.py` — `RunAdvancer`, `RunCanceller` for the interactive loop.
 - `memory/` — cross-Run project knowledge seam.
 - `skills/` — `SkillCatalog`, declarative `SKILL.md` bundles (never executable).
 - `sandbox/` — `LocalSandbox` policy (denies `.git`, `.env`, keys; path-escape
@@ -74,6 +98,21 @@ alternatives can be swapped without touching the Harness:
 
 `domain.py` holds the shared frozen dataclasses / enums (`RunStatus`, `Message`,
 `ToolCall`, `RunRequest`, `RunResult`, …) — the vocabulary every layer uses.
+
+### Runner emission matrix
+
+The Harness alone decides what gets persisted vs notified (not every step does
+both):
+
+| Step | Checkpoint | Lifecycle `notify` |
+|------|-----------|---------------------|
+| Run start | `run_started` | `RunStarted` |
+| User message (incl. steering) | `user_message_added` | — |
+| Before model | — | `BeforeModel` |
+| Streaming | — | `OnModelChunk`, `OnModelReasoning` |
+| After model | `model_message_completed` | `AfterModel` |
+| Tool requested / completed | `tool_call_*` | `BeforeTool`, `AfterTool` |
+| Run terminal | `run_completed` / `run_paused` / … | matching signal |
 
 ## Conventions
 
@@ -84,9 +123,17 @@ alternatives can be swapped without touching the Harness:
 - Python 3.12+, `from __future__ import annotations` at the top of modules.
 - mypy is **strict** and ruff line length is 100; selected rules: E, F, I, UP,
   B, SIM, RUF.
-- Prefer frozen `@dataclass(frozen=True, slots=True)` for value types; seams are
-  `typing.Protocol`s.
+- Prefer frozen `@dataclass(frozen=True, slots=True)` for domain value types;
+  Pydantic `BaseModel` for Checkpoint bodies and lifecycle signals; seams are
+  `typing.Protocol`s or small named classes — **no bare `lambda`** for callbacks
+  or sort keys in production code.
 - Tool inputs are validated through pydantic `BaseModel`s.
 - Checkpoint events are append-only; never mutate prior events.
+- Tests may use named stub classes in `tests/stubs.py` instead of lambdas.
 - Keep ADR decisions in mind before changing a seam; add a new ADR for
   significant architectural shifts.
+
+## Key ADRs (recent)
+
+- [ADR-0012](docs/adr/0012-shrink-handler-registry-to-a-read-only-lifecycle-bus.md) — Handler bus is notify-only.
+- [ADR-0013](docs/adr/0013-type-checkpoint-events-as-a-pydantic-discriminated-union.md) — typed Checkpoint bodies.

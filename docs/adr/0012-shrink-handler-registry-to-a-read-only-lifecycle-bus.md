@@ -6,7 +6,8 @@ only `observe` / `on` handlers; **zero** `intercept` handlers are wired. The
 intercept channel and its outcomes (`BlockTool`, `TransformContext`,
 `PatchToolResult`) were dead abstraction: they mixed **execution decisions** into
 the same bus as **ephemeral notifications**, while **persistent facts** already
-live in the append-only Checkpoint event log (`harness/events.py`).
+live in the append-only Checkpoint log (`checkpoint/events.py` typed bodies;
+`harness/events.py` factories).
 
 ## Decision
 
@@ -41,7 +42,7 @@ ship.
 
 # 将 HandlerRegistry 收缩为只读生命周期总线
 
-ADR-0004 在共享的 `HandlerRegistry` 上引入了两条通道——`observe` 与 `intercept`。在生产环境中，所有 bundle（UI 流式输出、Langfuse）仅注册 `observe` / `on` handler；**零**个 `intercept` handler 被接入。intercept 通道及其 outcome（`BlockTool`、`TransformContext`、`PatchToolResult`）是死抽象：把**执行决策**与**临时通知**混在同一总线上，而**持久化事实**早已存在于 append-only Checkpoint 事件日志（`harness/events.py`）中。
+ADR-0004 在共享的 `HandlerRegistry` 上引入了两条通道——`observe` 与 `intercept`。在生产环境中，所有 bundle（UI 流式输出、Langfuse）仅注册 `observe` / `on` handler；**零**个 `intercept` handler 被接入。intercept 通道及其 outcome（`BlockTool`、`TransformContext`、`PatchToolResult`）是死抽象：把**执行决策**与**临时通知**混在同一总线上，而**持久化事实**早已存在于 append-only Checkpoint 日志（`checkpoint/events.py` 类型化 body；`harness/events.py` 工厂）中。
 
 ## 决策
 

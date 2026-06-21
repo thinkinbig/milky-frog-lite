@@ -5,18 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
-from pydantic import JsonValue
-
+from milky_frog.checkpoint.events import RunEvent
 from milky_frog.domain import RunStatus
-
-
-@dataclass(frozen=True, slots=True)
-class RunEvent:
-    event_type: str
-    payload: dict[str, JsonValue]
-    version: int = 1
-    sequence: int | None = None
-    created_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)

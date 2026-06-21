@@ -6,16 +6,19 @@
 
 Milky Frog (Chinese: 奶蛙) is a lightweight local coding-agent CLI. It runs one foreground task at a time,
 coordinates model and Tool calls through a linear Harness, and persists an append-only Checkpoint
-so interrupted Runs can eventually be resumed safely.
+so interrupted Runs can be resumed safely.
 
-> The repository currently provides OpenAI-compatible foreground Runs and an interactive task loop.
-> Built-in Tools, multi-turn conversation state, and Checkpoint replay are the next slices.
+> The repository provides OpenAI-compatible foreground Runs, built-in file Tools, Checkpoint-replay
+> resume (`milky-frog resume`), a multi-turn interactive loop, mid-run steering on POSIX TTYs, and
+> optional Langfuse observability. See [CONTEXT.md](CONTEXT.md) and [docs/adr/](docs/adr/) for
+> architecture details.
 
 ## Design goals
 
 - A small, owned agent loop instead of a general workflow engine.
 - Explicit seams for model providers, Tools, and Checkpoint storage.
-- Typed lifecycle Handlers for authorization, persistence, and observability.
+- Read-only lifecycle Handlers for streaming output and observability (ADR-0012).
+- Typed Checkpoint events as a Pydantic discriminated union (ADR-0013).
 - Project Skills as declarative instructions, never executable plugins.
 - An honest Local Sandbox policy without claiming host-level isolation.
 
@@ -63,24 +66,25 @@ milky-frog init [WORKSPACE]
 milky-frog runs
 milky-frog show RUN_ID [--json]
 milky-frog run TASK
-milky-frog resume RUN_ID  # interface present; replay pending
+milky-frog resume RUN_ID [TASK]   # replay pending work or continue with a new turn
 ```
 
 ## Project layout
 
 ```text
 src/milky_frog/
-├── checkpoint/  # append-only event persistence seam and SQLite adapter
-├── cli/         # terminal command composition
-├── handlers/    # typed lifecycle events and Handler registry
-├── harness/     # linear Run coordinator
-├── memory/      # cross-Run project knowledge seam
-├── models/      # model-provider seam
-├── runtime.py   # configured Run startup and execution
-├── sandbox/     # Local Sandbox policy
-├── skills/      # progressive Skill discovery and loading
-├── tools/       # Tool interface and registry
-└── ui/          # Rich terminal output
+├── checkpoint/   # CheckpointStore seam, typed CheckpointBody (Pydantic), SQLite adapter
+├── cli/          # Typer commands, HandlerFactory, MilkyFrogAdvancer
+├── handlers/     # lifecycle signals, read-only HandlerRegistry (notify)
+├── harness/      # Harness loop, state fold, checkpoint event factories
+├── foreground.py # ForegroundRun protocol (StartRun / ResumeRun)
+├── memory/       # cross-Run project knowledge seam
+├── models/       # model-provider seam
+├── runtime.py    # MilkyFrog: sync boundary, stdin steering
+├── sandbox/      # Local Sandbox policy
+├── skills/       # progressive Skill discovery and loading
+├── tools/        # Tool interface, registry, built-ins
+└── ui/           # Rich terminal output, RunAdvancer protocols
 ```
 
 ## Development checks
@@ -107,16 +111,18 @@ MIT
 # 奶蛙（Milky Frog）
 
 奶蛙是一个轻量级本地代码 Agent CLI。它每次以前台方式执行一个任务，通过线性
-Harness 协调模型与 Tool 调用，并将 Checkpoint 保存为仅追加事件，使中断的 Run 最终可以安全恢复。
+Harness 协调模型与 Tool 调用，并将 Checkpoint 保存为仅追加事件，使中断的 Run 可以安全恢复。
 
-> 当前仓库已支持兼容 OpenAI 的前台 Run 与交互式任务循环。内置 Tool、多轮上下文和
-> Checkpoint 恢复将在后续纵切中实现。
+> 当前仓库已支持兼容 OpenAI 的前台 Run、内置文件 Tool、Checkpoint 恢复（`milky-frog resume`）、
+> 多轮交互循环、POSIX TTY 上的 mid-run steering，以及可选的 Langfuse 可观测性。架构细节见
+> [CONTEXT.md](CONTEXT.md) 与 [docs/adr/](docs/adr/)。
 
 ## 设计目标
 
 - 自主维护小型 Agent 循环，不引入通用工作流引擎。
 - 为模型提供方、Tool 和 Checkpoint 存储建立明确 seam。
-- 使用类型化生命周期 Handler 实现授权、持久化与可观测性。
+- 只读生命周期 Handler，用于流式输出与可观测性（ADR-0012）。
+- 类型化 Checkpoint 事件（Pydantic discriminated union，ADR-0013）。
 - 项目 Skill 仅包含声明式指令，不作为可执行插件。
 - 如实定义 Local Sandbox 策略，不宣称提供宿主机级隔离。
 

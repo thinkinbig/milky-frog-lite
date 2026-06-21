@@ -5,6 +5,7 @@ from importlib import import_module
 from pathlib import Path
 
 import pytest
+from stubs import RecordingLangfuseFactory
 from typer.testing import CliRunner
 
 from milky_frog.checkpoint import RunEvent, SqliteCheckpointStore
@@ -65,7 +66,7 @@ def test_build_streaming_frog_does_not_leak_handlers_on_missing_config(
     constructed: list[object] = []
     monkeypatch.setattr(
         "milky_frog.handlers.langfuse.Langfuse",
-        lambda **kwargs: constructed.append(kwargs) or object(),
+        RecordingLangfuseFactory(constructed),
     )
     langfuse = LangfuseSettings(
         enabled=True, public_key="public", secret_key="secret", host="https://langfuse.test"
@@ -173,7 +174,7 @@ def test_show_json_is_clean_machine_output(tmp_path: Path) -> None:
     store.create_run("run-123", workspace)
     store.append(
         "run-123",
-        RunEvent("RunCompleted", {"final_message": "done"}),
+        RunEvent.from_parts("RunCompleted", {"final_message": "done"}),
         RunStatus.COMPLETED,
     )
 

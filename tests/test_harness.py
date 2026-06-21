@@ -523,10 +523,13 @@ async def test_resume_repairs_interrupted_tool_call(tmp_path: Path) -> None:
     # A log interrupted between ToolCallRequested and ToolCallCompleted: the
     # trailing assistant message has a tool call with no result.
     store.create_run(run_id, tmp_path)
-    store.append(run_id, RunEvent("RunStarted", {"prompt": "go", "workspace": str(tmp_path)}))
     store.append(
         run_id,
-        RunEvent(
+        RunEvent.from_parts("RunStarted", {"prompt": "go", "workspace": str(tmp_path)}),
+    )
+    store.append(
+        run_id,
+        RunEvent.from_parts(
             "ModelMessageCompleted",
             {
                 "content": "",
@@ -538,13 +541,13 @@ async def test_resume_repairs_interrupted_tool_call(tmp_path: Path) -> None:
     )
     store.append(
         run_id,
-        RunEvent(
+        RunEvent.from_parts(
             "ToolCallRequested", {"id": "call-1", "name": "echo", "arguments": {"text": "hi"}}
         ),
     )
     store.append(
         run_id,
-        RunEvent("RunCancelled", {"reason": "cancelled", "model_calls": 1}),
+        RunEvent.from_parts("RunCancelled", {"reason": "cancelled", "model_calls": 1}),
         RunStatus.CANCELLED,
     )
 

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from stubs import LangfuseClientFactory
 
 from milky_frog.domain import RunRequest, RunResult, RunStatus
 from milky_frog.handlers.events import (
@@ -56,7 +57,10 @@ class FakeLangfuseClient:
 @pytest.fixture
 def langfuse_handler(monkeypatch: pytest.MonkeyPatch) -> tuple[LangfuseHandler, FakeLangfuseClient]:
     client = FakeLangfuseClient()
-    monkeypatch.setattr("milky_frog.handlers.langfuse.Langfuse", lambda **kwargs: client)
+    monkeypatch.setattr(
+        "milky_frog.handlers.langfuse.Langfuse",
+        LangfuseClientFactory(client),
+    )
     settings = LangfuseSettings(
         enabled=True,
         public_key="public",

@@ -20,6 +20,11 @@ class _Registration:
     handler: Handler
 
 
+class _RegistrationSortKey:
+    def __call__(self, registration: _Registration) -> tuple[int, int]:
+        return (-registration.priority, registration.order)
+
+
 class HandlerRegistry:
     """Instance-owned read-only notification bus for Harness lifecycle signals.
 
@@ -71,7 +76,7 @@ class HandlerRegistry:
 
     @staticmethod
     def _sorted(registrations: list[_Registration]) -> list[_Registration]:
-        return sorted(registrations, key=lambda item: (-item.priority, item.order))
+        return sorted(registrations, key=_RegistrationSortKey())
 
 
 class BaseHandler(ABC):
