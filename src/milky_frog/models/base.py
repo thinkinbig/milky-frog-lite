@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Protocol
 
 from milky_frog.domain import ModelChunk, ModelRequest
@@ -12,4 +12,4 @@ class Model(Protocol):
     assembled ``ModelResponse`` (content, tool calls, usage).
     """
 
-    def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]: ...
+    def stream(self, request: ModelRequest) -> AsyncGenerator[ModelChunk, None]: ...

@@ -178,9 +178,12 @@ async def test_stream_closes_underlying_response_when_consumer_breaks_early() ->
     client = _FakeClient(chunks)
     model = OpenAIModel(api_key="k", model="m", client=client)  # type: ignore[arg-type]
 
-    async for chunk in model.stream(ModelRequest((Message(MessageRole.USER, "hi"),), ())):
-        if isinstance(chunk, StreamDone):
-            break
+    async with contextlib.aclosing(
+        model.stream(ModelRequest((Message(MessageRole.USER, "hi"),), ()))
+    ) as model_stream:
+        async for chunk in model_stream:
+            if isinstance(chunk, StreamDone):
+                break
 
     assert client.last_stream is not None
     assert client.last_stream.closed is True
