@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from collections.abc import AsyncIterator
 from types import SimpleNamespace
 from typing import Any
@@ -42,6 +43,7 @@ def _tool_delta(index: int, *, id: str | None = None, name: str | None = None, a
 class _FakeStream:
     def __init__(self, chunks: list[Any]) -> None:
         self._chunks = chunks
+        self.closed = False
 
     def __aiter__(self) -> AsyncIterator[Any]:
         return self._iter()
@@ -50,6 +52,9 @@ class _FakeStream:
         for chunk in self._chunks:
             yield chunk
 
+    async def close(self) -> None:
+        self.closed = True
+
 
 class _FakeClient:
     def __init__(self, chunks: list[Any]) -> None:
@@ -57,10 +62,12 @@ class _FakeClient:
         completions = SimpleNamespace(create=self._create)
         self.chat = SimpleNamespace(completions=completions)
         self._chunks = chunks
+        self.last_stream: _FakeStream | None = None
 
     async def _create(self, **kwargs: Any) -> _FakeStream:
         self.captured = kwargs
-        return _FakeStream(self._chunks)
+        self.last_stream = _FakeStream(self._chunks)
+        return self.last_stream
 
 
 @pytest.mark.asyncio
@@ -160,6 +167,23 @@ async def test_stream_captures_cached_and_reasoning_subtotals() -> None:
     assert done.response.usage == TokenUsage(
         input_tokens=100, output_tokens=40, cached_tokens=64, reasoning_tokens=30
     )
+
+
+@pytest.mark.asyncio
+async def test_stream_closes_underlying_response_when_consumer_breaks_early() -> None:
+    chunks = [
+        _chunk(content="partial"),
+        _chunk(usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2)),
+    ]
+    client = _FakeClient(chunks)
+    model = OpenAIModel(api_key="k", model="m", client=client)  # type: ignore[arg-type]
+
+    async for chunk in model.stream(ModelRequest((Message(MessageRole.USER, "hi"),), ())):
+        if isinstance(chunk, StreamDone):
+            break
+
+    assert client.last_stream is not None
+    assert client.last_stream.closed is True
 
 
 @pytest.mark.asyncio
