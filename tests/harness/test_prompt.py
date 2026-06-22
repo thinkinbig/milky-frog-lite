@@ -18,12 +18,10 @@ def _write_skill(directory: Path, name: str, description: str, instructions: str
 
 
 def test_system_prompt_includes_base_identity(tmp_path: Path) -> None:
-    home = tmp_path / "home"
-    home.mkdir()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
 
-    prompt = system_prompt(workspace, home=home)
+    prompt = system_prompt(workspace)
 
     assert "Milky Frog" in prompt
     assert "grep first" not in prompt
@@ -37,7 +35,13 @@ def test_system_prompt_injects_workspace_agents_md(tmp_path: Path) -> None:
     workspace.mkdir()
     (workspace / "AGENTS.md").write_text("Always run pytest before committing.\n", encoding="utf-8")
 
-    prompt = system_prompt(workspace, home=home)
+    prompt = build_system_prompt(
+        BuildSystemPromptOptions(
+            workspace=workspace,
+            home=home,
+            context_files=load_context_files(workspace, home),
+        )
+    )
 
     assert "<project_context>" in prompt
     assert "Always run pytest before committing." in prompt
@@ -77,7 +81,15 @@ def test_system_prompt_injects_skills_and_append_rules(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
 
-    prompt = system_prompt(workspace, home=home)
+    catalog = SkillCatalog(home / "skills", project_skills)
+    prompt = build_system_prompt(
+        BuildSystemPromptOptions(
+            workspace=workspace,
+            home=home,
+            append_system="Prefer small diffs.",
+            skill_locations=catalog.prompt_locations(),
+        )
+    )
 
     assert "Prefer small diffs." in prompt
     assert "<available_skills>" in prompt

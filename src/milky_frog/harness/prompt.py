@@ -13,8 +13,6 @@ from milky_frog.harness.prompt_context import (
 from milky_frog.harness.skills import SkillCatalog
 from milky_frog.project import project_root
 
-_DEFAULT_HOME = Path.home() / ".milky-frog"
-
 
 @dataclass(frozen=True, slots=True)
 class BuildSystemPromptOptions:
@@ -36,18 +34,10 @@ def build_system_prompt(options: BuildSystemPromptOptions) -> str:
         prompt += f"\n\n{options.append_system.strip()}"
 
     if options.context_files:
-        prompt += "\n\n<project_context>\n\n"
-        prompt += "Project-specific instructions and guidelines:\n\n"
-        for context in options.context_files:
-            prompt += (
-                f'<project_instructions path="{_escape_attr(context.path.as_posix())}">\n'
-                f"{context.content.strip()}\n"
-                "</project_instructions>\n\n"
-            )
-        prompt += "</project_context>\n"
+        prompt += format_project_context(options.context_files)
 
     if options.skill_locations:
-        prompt += _format_skills_for_prompt(options.skill_locations)
+        prompt += format_skills_for_prompt(options.skill_locations)
 
     if options.extra_sections:
         prompt += "\n\n" + "\n\n".join(section.strip() for section in options.extra_sections)
@@ -57,29 +47,42 @@ def build_system_prompt(options: BuildSystemPromptOptions) -> str:
     return prompt
 
 
-def system_prompt(
-    workspace: Path,
-    *,
-    home: Path | None = None,
-    extra_sections: tuple[str, ...] = (),
-) -> str:
-    """Build the system prompt for a Run from workspace-local and global sources.
+def system_prompt(workspace: Path, extra_sections: tuple[str, ...] = ()) -> str:
+    """Build the stable system prompt for a Run.
 
-    ``extra_sections`` (injected by Handlers via ``RunBeforeStart``) are appended
-    verbatim after skill metadata, each separated by a blank line.
+    Agent-home context (instructions, append rules, skill catalog) is injected
+    by ``AgentContextHandler`` via ``RunBeforeStart`` → ``extra_sections``.
     """
-    resolved_home = (home or _DEFAULT_HOME).expanduser()
+    workspace = workspace.expanduser().resolve()
+    prompt = _BASE_PROMPT
+    if extra_sections:
+        prompt += "\n\n" + "\n\n".join(section.strip() for section in extra_sections)
+    prompt += f"\nCurrent date: {date.today().isoformat()}"
+    prompt += f"\nCurrent working directory: {workspace.as_posix()}"
+    return prompt
+
+
+def agent_context_section(workspace: Path, home: Path) -> str | None:
+    """Build injectable context from agent home and workspace (for handlers)."""
+    resolved_home = home.expanduser()
+    parts: list[str] = []
+
+    append = load_append_system_prompt(workspace, resolved_home)
+    if append:
+        parts.append(append.strip())
+
+    context_files = load_context_files(workspace, resolved_home)
+    if context_files:
+        parts.append(format_project_context(context_files).strip())
+
     catalog = SkillCatalog(resolved_home / "skills", project_root(workspace) / "skills")
-    return build_system_prompt(
-        BuildSystemPromptOptions(
-            workspace=workspace,
-            home=resolved_home,
-            context_files=load_context_files(workspace, resolved_home),
-            append_system=load_append_system_prompt(workspace, resolved_home),
-            skill_locations=catalog.prompt_locations(),
-            extra_sections=extra_sections,
-        )
-    )
+    skill_locations = catalog.prompt_locations()
+    if skill_locations:
+        parts.append(format_skills_for_prompt(skill_locations).strip())
+
+    if not parts:
+        return None
+    return "\n\n".join(parts)
 
 
 _BASE_PROMPT = """You are Milky Frog (奶蛙), a lightweight local coding agent.
@@ -93,7 +96,24 @@ Be direct and technically precise. Use only the Tools supplied in the request. N
 you inspected, changed, or executed something unless the available Tools allowed you to do so."""
 
 
-def _format_skills_for_prompt(
+def format_project_context(context_files: tuple[ContextFile, ...]) -> str:
+    lines = [
+        "\n\n<project_context>\n",
+        "Project-specific instructions and guidelines:\n",
+    ]
+    for context in context_files:
+        lines.extend(
+            (
+                f'<project_instructions path="{escape_attr(context.path.as_posix())}">\n',
+                f"{context.content.strip()}\n",
+                "</project_instructions>\n",
+            )
+        )
+    lines.append("</project_context>\n")
+    return "\n".join(lines)
+
+
+def format_skills_for_prompt(
     skills: tuple[tuple[str, str, Path], ...],
 ) -> str:
     lines = [
@@ -117,5 +137,5 @@ def _format_skills_for_prompt(
     return "\n".join(lines)
 
 
-def _escape_attr(value: str) -> str:
+def escape_attr(value: str) -> str:
     return value.replace("&", "&amp;").replace('"', "&quot;")

@@ -73,7 +73,6 @@ class Harness:
         checkpoints: CheckpointStore,
         handlers: EventDispatcher,
         sandbox_factory: SandboxFactory = LocalSandbox,
-        agent_home: Path | None = None,
     ) -> None:
         self._model = model
         self._tools = tools
@@ -81,7 +80,6 @@ class Harness:
         self._sandbox_factory = sandbox_factory
         self._handlers = handlers
         self._emitter = RunEmitter(handlers)
-        self._agent_home = agent_home
 
     async def run(self, run_request: RunRequest) -> RunResult:
         """Start a fresh Run: seed the transcript from the prompt, then advance."""
@@ -94,7 +92,6 @@ class Harness:
                 RunState(run_id=run_id, workspace=workspace),
                 run_request.prompt,
                 extra_sections,
-                agent_home=self._agent_home,
             )
             await self._emitter.run_started(run_id, run_request, state)
             return await self._advance(

@@ -12,8 +12,9 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from evals.read_collector import ReadCollector
 from milky_frog.gates import PermissivePolicy
+
+from evals.read_collector import ReadCollector
 from milky_frog.handlers import LifecycleBus
 from milky_frog.project import PROJECT_DIRNAME
 from milky_frog.runtime import MilkyFrog

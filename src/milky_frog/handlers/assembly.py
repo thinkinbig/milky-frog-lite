@@ -6,7 +6,7 @@ from milky_frog.checkpoint import CheckpointStore
 from milky_frog.handlers.checkpoint import CheckpointHandler
 from milky_frog.handlers.dispatcher import BaseHandler
 from milky_frog.handlers.policy import PolicyHandler
-from milky_frog.handlers.skills import SkillCatalogHandler
+from milky_frog.handlers.skills import AgentContextHandler
 from milky_frog.harness.tools.tool_policy import ToolPolicy
 from milky_frog.infra.observability.langfuse import LangfuseHandler
 from milky_frog.settings import Settings
@@ -30,7 +30,7 @@ def default_handlers(
     bundles: list[BaseHandler] = [
         CheckpointHandler(checkpoints),
         PolicyHandler(tool_policy),
-        SkillCatalogHandler(settings.home / "skills"),
+        AgentContextHandler(settings.home),
     ]
     bundles.extend(extra)
     langfuse = LangfuseHandler.from_settings(settings)

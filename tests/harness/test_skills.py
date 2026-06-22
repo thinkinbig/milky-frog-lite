@@ -6,7 +6,7 @@ import pytest
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import ModelChunk, ModelRequest, ModelResponse, RunRequest, StreamDone
 from milky_frog.handlers import EventDispatcher, RunBeforeStart, SystemPromptSection
-from milky_frog.handlers.skills import SkillCatalogHandler
+from milky_frog.handlers.skills import AgentContextHandler
 from milky_frog.harness.skills import SkillCatalog
 from milky_frog.harness.tools import ToolRegistry
 from tests.stubs import make_harness
@@ -33,7 +33,7 @@ def test_project_skill_overrides_user_skill(tmp_path: Path) -> None:
     assert catalog.load("review").instructions == "project instructions"
 
 
-# ── SkillCatalogHandler ────────────────────────────────────────────────────
+# ── AgentContextHandler ────────────────────────────────────────────────────
 
 
 def _make_event(workspace: Path) -> RunBeforeStart:
@@ -45,31 +45,33 @@ def _make_event(workspace: Path) -> RunBeforeStart:
 
 
 @pytest.mark.asyncio
-async def test_handler_injects_skill_into_system_prompt(tmp_path: Path) -> None:
+async def test_handler_injects_skill_catalog_metadata(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    user_skills = tmp_path / "user_skills"
-    _write_skill(user_skills, "review", "Code review skill", "Always check for typos.")
+    home = tmp_path / "home"
+    _write_skill(home / "skills", "review", "Code review skill", "Always check for typos.")
 
     bus = EventDispatcher()
-    SkillCatalogHandler(user_skills).register(bus)
+    AgentContextHandler(home).register(bus)
 
     results = await bus.notify(_make_event(workspace))
     injected = [r for r in results if isinstance(r, SystemPromptSection)]
 
     assert len(injected) == 1
-    assert "review" in injected[0].content
-    assert "Always check for typos." in injected[0].content
+    assert "<name>review</name>" in injected[0].content
+    assert "Code review skill" in injected[0].content
+    assert "Always check for typos." not in injected[0].content
 
 
 @pytest.mark.asyncio
-async def test_handler_returns_none_when_no_skills(tmp_path: Path) -> None:
+async def test_handler_returns_none_when_no_context(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    user_skills = tmp_path / "user_skills"
+    home = tmp_path / "home"
+    home.mkdir()
 
     bus = EventDispatcher()
-    SkillCatalogHandler(user_skills).register(bus)
+    AgentContextHandler(home).register(bus)
 
     results = await bus.notify(_make_event(workspace))
     injected = [r for r in results if isinstance(r, SystemPromptSection)]
@@ -82,52 +84,52 @@ async def test_project_skills_override_user_skills_in_handler(tmp_path: Path) ->
     workspace = tmp_path / "workspace"
     project_skills = workspace / ".milky-frog" / "skills"
     workspace.mkdir()
-    user_skills = tmp_path / "user_skills"
-    _write_skill(user_skills, "review", "user", "user instructions")
+    home = tmp_path / "home"
+    _write_skill(home / "skills", "review", "user", "user instructions")
     _write_skill(project_skills, "review", "project", "project instructions")
 
     bus = EventDispatcher()
-    SkillCatalogHandler(user_skills).register(bus)
+    AgentContextHandler(home).register(bus)
 
     results = await bus.notify(_make_event(workspace))
     injected = [r for r in results if isinstance(r, SystemPromptSection)]
 
     assert len(injected) == 1
-    assert "project instructions" in injected[0].content
-    assert "user instructions" not in injected[0].content
+    assert "<description>project</description>" in injected[0].content
+    assert "<description>user</description>" not in injected[0].content
 
 
 @pytest.mark.asyncio
 async def test_handler_skips_malformed_skill(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    user_skills = tmp_path / "user_skills"
-    # Write a valid skill
-    _write_skill(user_skills, "good", "Good skill", "Good instructions.")
-    # Write a malformed skill (no frontmatter)
-    bad = user_skills / "bad"
+    home = tmp_path / "home"
+    _write_skill(home / "skills", "good", "Good skill", "Good instructions.")
+    bad = home / "skills" / "bad"
     bad.mkdir()
     (bad / "SKILL.md").write_text("no frontmatter here", encoding="utf-8")
 
     bus = EventDispatcher()
-    SkillCatalogHandler(user_skills).register(bus)
+    AgentContextHandler(home).register(bus)
 
     results = await bus.notify(_make_event(workspace))
     injected = [r for r in results if isinstance(r, SystemPromptSection)]
 
     assert len(injected) == 1
-    assert "Good instructions." in injected[0].content
+    assert "<name>good</name>" in injected[0].content
+    assert "<name>bad</name>" not in injected[0].content
 
 
-# ── Integration: skill content reaches the system message ─────────────────
+# ── Integration: skill catalog reaches the system message ─────────────────
 
 
 @pytest.mark.asyncio
-async def test_skill_instructions_appear_in_system_message(tmp_path: Path) -> None:
-    """Skill content injected via RunBeforeStart must be visible in the first
+async def test_skill_catalog_appears_in_system_message(tmp_path: Path) -> None:
+    """Skill metadata injected via RunBeforeStart must be visible in the first
     system message of the persisted transcript — the one the model actually sees."""
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    home = tmp_path / "home"
     project_skills = workspace / ".milky-frog" / "skills"
     _write_skill(project_skills, "style", "Style guide", "Always use Oxford commas.")
 
@@ -137,7 +139,7 @@ async def test_skill_instructions_appear_in_system_message(tmp_path: Path) -> No
 
     store = SqliteCheckpointStore(tmp_path / "state.db")
     bus = EventDispatcher()
-    SkillCatalogHandler(tmp_path / "no_user_skills").register(bus)
+    AgentContextHandler(home).register(bus)
 
     harness = make_harness(
         model=ImmediateModel(),
@@ -149,4 +151,5 @@ async def test_skill_instructions_appear_in_system_message(tmp_path: Path) -> No
 
     state = store.load_state(result.run_id)
     system_message = state.messages[0]
-    assert "Always use Oxford commas." in system_message.content
+    assert "<name>style</name>" in system_message.content
+    assert "Style guide" in system_message.content
