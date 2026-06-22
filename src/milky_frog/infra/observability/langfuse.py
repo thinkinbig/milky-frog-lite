@@ -7,8 +7,8 @@ from typing import Any, Literal
 from langfuse import Langfuse
 from langfuse.types import TraceContext
 
-from milky_frog.handlers.dispatcher import BaseHandler, EventDispatcher
 from milky_frog.handlers.context import HandlerContext
+from milky_frog.handlers.dispatcher import BaseHandler, EventDispatcher
 from milky_frog.handlers.events import (
     BaseEvent,
     NoticeLevel,

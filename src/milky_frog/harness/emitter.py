@@ -16,8 +16,8 @@ from milky_frog.domain import (
     ToolResult,
 )
 from milky_frog.handlers import (
-    HandlerResult,
     EventDispatcher,
+    HandlerResult,
     RunAfterModel,
     RunAfterTool,
     RunBeforeModel,

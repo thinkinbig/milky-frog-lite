@@ -18,7 +18,7 @@ from milky_frog.domain import (
     StreamDone,
     TextDelta,
 )
-from milky_frog.handlers import BaseHandler, HandlerContext, EventDispatcher, RunCancelled
+from milky_frog.handlers import BaseHandler, EventDispatcher, HandlerContext, RunCancelled
 from milky_frog.models import OpenAIModel
 from milky_frog.runtime import MilkyFrog, MissingModelConfiguration
 from milky_frog.settings import LangfuseSettings, Settings

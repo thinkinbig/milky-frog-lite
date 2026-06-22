@@ -348,9 +348,7 @@ async def test_langfuse_run_notice_records_event(
     handler.register(registry)
     await registry.notify(RunStarted(run_id="run-1", request=_run_request(), state=_run_state()))
 
-    await registry.notify(
-        RunNotice(run_id="run-1", message="retrying connection", level="warning")
-    )
+    await registry.notify(RunNotice(run_id="run-1", message="retrying connection", level="warning"))
 
     notice = client.observations[-1]
     assert notice.start_kwargs["name"] == "run_notice"

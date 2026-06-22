@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from milky_frog.handlers.dispatcher import BaseHandler, EventDispatcher
 from milky_frog.handlers.context import HandlerContext, SystemPromptSection
+from milky_frog.handlers.dispatcher import BaseHandler, EventDispatcher
 from milky_frog.handlers.events import RunBeforeStart
 from milky_frog.harness.skills.catalog import SkillCatalog
 

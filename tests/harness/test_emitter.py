@@ -8,8 +8,8 @@ from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import RunState, RunStatus
 from milky_frog.handlers import (
     CheckpointHandler,
-    HandlerContext,
     EventDispatcher,
+    HandlerContext,
     RunCancelled,
     RunFailed,
     RunNotice,

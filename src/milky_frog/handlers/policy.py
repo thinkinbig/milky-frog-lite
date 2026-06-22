@@ -7,8 +7,8 @@ this module (and ``ToolPolicy``) can be removed.
 from __future__ import annotations
 
 from milky_frog.domain import ToolDecision
-from milky_frog.handlers.dispatcher import BaseHandler, EventDispatcher
 from milky_frog.handlers.context import ApprovalResult, BlockResult, HandlerContext, HandlerResult
+from milky_frog.handlers.dispatcher import BaseHandler, EventDispatcher
 from milky_frog.handlers.events import RunBeforeTool
 from milky_frog.harness.tools.tool_policy import DefaultToolPolicy, ToolPolicy
 

@@ -1,5 +1,4 @@
 from milky_frog.handlers.assembly import default_handlers
-from milky_frog.handlers.dispatcher import BaseHandler, EventDispatcher
 from milky_frog.handlers.checkpoint import CheckpointHandler
 from milky_frog.handlers.context import (
     ApprovalResult,
@@ -8,6 +7,7 @@ from milky_frog.handlers.context import (
     HandlerResult,
     SystemPromptSection,
 )
+from milky_frog.handlers.dispatcher import BaseHandler, EventDispatcher
 from milky_frog.handlers.events import (
     BaseEvent,
     NoticeLevel,
@@ -37,10 +37,10 @@ __all__ = [
     "BaseHandler",
     "BlockResult",
     "CheckpointHandler",
+    "EventDispatcher",
     "HandlerContext",
     "HandlerResult",
     "LangfuseHandler",
-    "EventDispatcher",
     "NoticeLevel",
     "RunAfterModel",
     "RunAfterTool",

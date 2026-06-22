@@ -3,8 +3,8 @@ from dataclasses import dataclass
 import pytest
 
 from milky_frog.domain import ToolCall
-from milky_frog.handlers.dispatcher import EventDispatcher
 from milky_frog.handlers.context import HandlerContext
+from milky_frog.handlers.dispatcher import EventDispatcher
 from milky_frog.handlers.events import BaseEvent, RunBeforeTool
 
 

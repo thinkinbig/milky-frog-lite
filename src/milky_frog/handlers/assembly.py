@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from milky_frog.checkpoint import CheckpointStore
-from milky_frog.handlers.dispatcher import BaseHandler
 from milky_frog.handlers.checkpoint import CheckpointHandler
+from milky_frog.handlers.dispatcher import BaseHandler
 from milky_frog.handlers.policy import PolicyHandler
 from milky_frog.handlers.skills import SkillCatalogHandler
 from milky_frog.harness.tools.tool_policy import ToolPolicy
