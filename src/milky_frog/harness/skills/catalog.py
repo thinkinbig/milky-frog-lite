@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 
 class InvalidSkillError(ValueError):
@@ -45,7 +48,11 @@ class SkillCatalog:
             return {}
         discovered: dict[str, Path] = {}
         for path in directory.glob("*/SKILL.md"):
-            skill = self._load(path)
+            try:
+                skill = self._load(path)
+            except InvalidSkillError as exc:
+                logger.warning("skipping malformed skill file %s: %s", path, exc)
+                continue
             discovered[skill.summary.name] = path
         return discovered
 

@@ -70,9 +70,11 @@ qualifier, and never merge them into one base type:
 | **Harness policy** | Explicit `Protocol` deps on `Harness` (future) | Per-call | Authorization, context build, etc. |
 
 RunState snapshots are serialized via Pydantic models in `checkpoint/snapshot.py` (ADR-0014).
-Lifecycle signals are frozen Pydantic `BaseEvent` subclasses (ADR-0004, ADR-0012).
-`LifecycleBus` is read-only: `observe` / `on` / `subscribe` and `notify` only —
-no intercept channel, no return values that change execution.
+Lifecycle signals are frozen dataclass subclasses in `handlers/events.py`.
+Only `RunEmitter` publishes lifecycle signals. Handlers subscribe via
+`observe` / `on` / `subscribe`; most return `None`. `RunBeforeTool` and
+`RunBeforeStart` may return `HandlerResult` values that influence the next
+Harness step. Handlers do not publish signals themselves.
 
 ### Seams
 
@@ -83,7 +85,7 @@ named class — so alternatives can be swapped without touching the Harness:
 - `tools/` — `Tool` protocol + `ToolRegistry` + built-in Tools.
 - `checkpoint/` — `CheckpointStore` protocol, `SqliteCheckpointStore`, `RunSnapshot` serialization (ADR-0014).
 - `harness/state.py` — transcript mutators and `repair_transcript` (interrupted-tool repair).
-- `handlers/` — lifecycle signals + read-only `LifecycleBus` (ADR-0012).
+- `handlers/` — lifecycle signals + `LifecycleBus` (ADR-0012); only `RunEmitter` publishes.
 - `ui/protocols.py` — `RunAdvancer`, `RunCanceller` for the interactive loop.
 - `skills/` — `SkillCatalog`, declarative `SKILL.md` bundles (never executable).
 - `sandbox/` — `LocalSandbox` policy (denies `.git`, `.env`, keys; path-escape
@@ -99,11 +101,12 @@ both):
 
 | Step | Checkpoint | Lifecycle `notify` |
 |------|-----------|---------------------|
-| Run start | `save_state` (seeded transcript) | `RunStarted` |
+| Run start | `save_state` (seeded transcript) | `RunBeforeStart`, `RunStarted` |
 | User message | `save_state` | — |
-| After model | `save_state` | `AfterModel` |
-| Streaming | — | `OnModelChunk`, `OnModelReasoning` |
-| After tool | `save_state` | `AfterTool` |
+| In-run notice | — | `RunNotification` |
+| After model | `save_state` | `RunAfterModel` |
+| Streaming | — | `RunModelChunk`, `RunModelReasoning` |
+| After tool | `save_state` | `RunAfterTool` |
 | Run terminal | `save_state` + status | matching signal |
 
 ## Conventions

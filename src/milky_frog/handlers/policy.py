@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from milky_frog.domain import ToolDecision
 from milky_frog.handlers.bus import BaseHandler, LifecycleBus
-from milky_frog.handlers.context import ApprovalResult, BlockResult, HandlerContext
+from milky_frog.handlers.context import ApprovalResult, BlockResult, HandlerContext, HandlerResult
 from milky_frog.handlers.events import RunBeforeTool
 from milky_frog.harness.tools.tool_policy import DefaultToolPolicy, ToolPolicy
 
@@ -28,7 +28,7 @@ class PolicyHandler(BaseHandler):
 
     async def _on_before_tool(
         self, event: RunBeforeTool, ctx: HandlerContext
-    ) -> BlockResult | ApprovalResult | None:
+    ) -> HandlerResult | None:
         del ctx
         decision = self._policy.decide(event.call)
         if decision is ToolDecision.DENY:

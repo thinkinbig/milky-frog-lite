@@ -9,7 +9,7 @@ from types import FrameType, TracebackType
 
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import ResumeError, RunCancellation, RunRequest, RunResult
-from milky_frog.handlers import BaseHandler, LangfuseHandler, LifecycleBus
+from milky_frog.handlers import BaseHandler, LangfuseHandler, LifecycleBus, SkillCatalogHandler
 from milky_frog.handlers.policy import PolicyHandler
 from milky_frog.harness.runner import Harness
 from milky_frog.harness.tools import ToolRegistry, default_tools
@@ -52,6 +52,9 @@ class MilkyFrog:
 
         # Register built-in tool policy on RunBeforeTool.
         PolicyHandler(tool_policy).register(self._bus)
+
+        # Inject Skills into the system prompt on RunBeforeStart.
+        SkillCatalogHandler(settings.home / "skills").register(self._bus)
 
         # Register lifecycle handlers (observability, policy, …) on the bus
         # so they receive lifecycle events alongside the built-in harness.

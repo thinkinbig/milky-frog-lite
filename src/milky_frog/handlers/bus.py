@@ -10,8 +10,8 @@ from milky_frog.handlers.context import HandlerContext, HandlerResult
 from milky_frog.handlers.events import BaseEvent
 
 EventT = TypeVar("EventT", bound=BaseEvent)
-NotifyHandler = Callable[[EventT, HandlerContext], Awaitable[HandlerResult]]
-Handler = Callable[[Any, HandlerContext], Awaitable[HandlerResult]]
+NotifyHandler = Callable[[EventT, HandlerContext], Awaitable[HandlerResult | None]]
+Handler = Callable[[Any, HandlerContext], Awaitable[HandlerResult | None]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,15 +22,16 @@ class _Registration:
 
 
 class LifecycleBus:
-    """Instance-owned read-only notification bus for Harness lifecycle signals.
+    """Instance-owned notification bus for Harness lifecycle signals.
 
-    Handlers registered via ``observe`` (or ``on`` / ``subscribe``) may inspect
-    signals only; they cannot change Harness execution. Checkpoint events are
-    separate — see ``milky_frog.harness.state``.
+    Only ``RunEmitter`` publishes signals. Handlers register via ``observe``,
+    ``on``, or ``subscribe``; most return ``None`` (pure observation). A few
+    signals accept control returns — see ``RunBeforeTool`` and
+    ``RunBeforeStart``.
 
     A ``HandlerContext`` may be set on the bus (via ``set_context``) so that
-    every handler receives shared framework-managed resources — UI, workspace,
-    etc. — without wiring them through constructors.
+    every handler receives shared framework-managed resources without wiring
+    them through constructors.
     """
 
     def __init__(self) -> None:
@@ -42,7 +43,7 @@ class LifecycleBus:
     def observe(
         self, event_type: type[EventT], *, priority: int = 0
     ) -> Callable[[NotifyHandler[EventT]], NotifyHandler[EventT]]:
-        """Register a read-only Handler for one lifecycle signal type."""
+        """Register a Handler for one lifecycle signal type."""
 
         def register(handler: NotifyHandler[EventT]) -> NotifyHandler[EventT]:
             self._observe[event_type].append(self._registration(priority, handler))

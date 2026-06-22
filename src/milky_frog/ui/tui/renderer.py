@@ -5,8 +5,10 @@ from milky_frog.handlers import (
     RunAfterModel,
     RunAfterTool,
     RunBeforeTool,
+    RunFailed,
     RunModelChunk,
     RunModelReasoning,
+    RunNotification,
     RunPaused,
     RunStarted,
 )
@@ -15,6 +17,8 @@ from milky_frog.ui.tui.messages import (
     AddText,
     AddThinking,
     ApprovalRequired,
+    RunError,
+    RunNotificationMsg,
     ToolCallMsg,
     ToolResultMsg,
     UpdateUsage,
@@ -61,3 +65,7 @@ class TextualStreamRenderer:
                 )
             case RunPaused(run_id=run_id, status=RunStatus.WAITING_FOR_APPROVAL, reason=reason):
                 self._queue.post_message(ApprovalRequired(run_id, reason))
+            case RunNotification(message=message, level=level):
+                self._queue.post_message(RunNotificationMsg(message, level=level))
+            case RunFailed(error=error):
+                self._queue.post_message(RunError(f"{type(error).__name__}: {error}"))

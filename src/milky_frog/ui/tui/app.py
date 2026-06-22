@@ -26,6 +26,7 @@ from milky_frog.ui.tui.messages import (
     ApprovalRequired,
     RunError,
     RunFinished,
+    RunNotificationMsg,
     ToolCallMsg,
     ToolResultMsg,
     UpdateUsage,
@@ -369,6 +370,11 @@ class MilkyFrogApp(App[None]):
         if hint:
             self._append(Text(f"Hint: {hint}", style="bold cyan"))
 
+    def _render_notification(self, message: str, level: str) -> None:
+        prefix = {"info": "· ", "warning": "⚠ ", "error": "✗ "}.get(level, "")
+        style = {"info": "dim", "warning": "yellow", "error": "bold red"}.get(level, "dim")
+        self._append(_row(Text(prefix, style=style), Text(message, style=style)), spaced=False)
+
     def _render_help(self) -> None:
         commands = Table.grid(padding=(0, 2))
         commands.add_column(style="yellow", no_wrap=True)
@@ -466,6 +472,9 @@ class MilkyFrogApp(App[None]):
         self.query_one(RunStatusBar).set_ready()
         self.query_one("#prompt-input", Input).disabled = False
         self.query_one("#prompt-input", Input).focus()
+
+    def on_run_notification_msg(self, event: RunNotificationMsg) -> None:
+        self._render_notification(event.message, event.level)
 
     def on_approval_required(self, event: ApprovalRequired) -> None:
         """A tool call needs the user's verdict: render an inline y/n prompt."""

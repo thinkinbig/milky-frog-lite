@@ -16,7 +16,7 @@ Checkpoint snapshot so interrupted Runs can be resumed safely.
 
 - A small, owned agent loop instead of a general workflow engine.
 - Explicit seams for model providers, Tools, and Checkpoint storage.
-- Read-only lifecycle Handlers for streaming output and observability (ADR-0012).
+- Lifecycle Handlers for streaming output, user notices, and observability (ADR-0012).
 - Typed Checkpoint snapshots as versioned JSON (ADR-0014).
 - Project Skills as declarative instructions, never executable plugins.
 - An honest Local Sandbox policy without claiming host-level isolation.
@@ -74,7 +74,7 @@ milky-frog resume RUN_ID          # replay pending work
 src/milky_frog/
 ├── checkpoint/   # CheckpointStore seam, RunSnapshot JSON, SQLite adapter
 ├── cli/          # Typer commands, HandlerFactory, MilkyFrogAdvancer
-├── handlers/     # lifecycle signals, read-only LifecycleBus (notify)
+├── handlers/     # lifecycle signals, LifecycleBus (RunEmitter publishes)
 ├── harness/      # Harness loop, state mutators, repair_transcript
 ├── models/       # model-provider seam
 ├── runtime.py    # MilkyFrog: sync boundary, assembly
@@ -118,7 +118,7 @@ Harness 协调模型与 Tool 调用，并将 Checkpoint 保存为仅追加事件
 
 - 自主维护小型 Agent 循环，不引入通用工作流引擎。
 - 为模型提供方、Tool 和 Checkpoint 存储建立明确 seam。
-- 只读生命周期 Handler，用于流式输出与可观测性（ADR-0012）。
+- 生命周期 Handler，用于流式输出、用户通知与可观测性（ADR-0012）。
 - 类型化 Checkpoint 快照（版本化 JSON，ADR-0014）。
 - 项目 Skill 仅包含声明式指令，不作为可执行插件。
 - 如实定义 Local Sandbox 策略，不宣称提供宿主机级隔离。

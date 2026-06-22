@@ -25,11 +25,11 @@ A model-invoked Harness operation, such as requesting user input, loading a Skil
 _Avoid_: Business tool
 
 **Handler**:
-A read-only callback registered on the Harness lifecycle-signal bus (`LifecycleBus.notify`). Handlers observe live Runs for streaming output and observability; they do not persist state or change execution. Durable facts live in the Checkpoint snapshot instead.
+A callback registered on the Harness lifecycle-signal bus (`LifecycleBus`). Only `RunEmitter` publishes signals; Handlers subscribe and react. Most Handlers observe only (streaming UI, Langfuse). `RunBeforeTool` and `RunBeforeStart` may return control results that influence the next Harness step. `CheckpointHandler` persists RunState at durable boundaries in response to lifecycle signals — persistence is not embedded in the Harness loop itself.
 _Avoid_: Middleware, hook, intercept
 
 **Lifecycle signal**:
-An ephemeral, in-process notification (for example `OnModelChunk`, `AfterModel`) delivered to Handlers during a Run. Not replayed from the Checkpoint snapshot.
+An ephemeral, in-process notification (for example `RunModelChunk`, `RunAfterModel`, `RunNotification`) published by `RunEmitter` during a Run and delivered to Handlers. Not replayed from the Checkpoint snapshot.
 _Avoid_: Event (unqualified), Checkpoint
 
 **Checkpoint snapshot**:
@@ -85,11 +85,11 @@ _避免使用_：插件、函数
 _避免使用_：业务工具
 
 **Handler（处理器）**：
-注册到 Harness 生命周期信号总线的只读回调（`LifecycleBus.notify`）。Handler 在 Run 进行期间观察流式输出与可观测性；不持久化状态、不改变执行。持久化事实由 Checkpoint 快照单独记录。
+注册到 Harness 生命周期信号总线（`LifecycleBus`）的回调。仅 `RunEmitter` 发布信号；Handler 订阅并响应。多数 Handler 只做观察（流式 UI、Langfuse）。`RunBeforeTool` 与 `RunBeforeStart` 可返回控制结果以影响 Harness 下一步。`CheckpointHandler` 在持久化边界根据生命周期信号写入 RunState——持久化不在 Harness 循环内硬编码。
 _避免使用_：Middleware、Hook、intercept
 
 **Lifecycle signal（生命周期信号）**：
-Run 进行期间的临时、进程内通知（例如 `OnModelChunk`、`AfterModel`），分发给 Handler。不从 Checkpoint 快照 replay。
+Run 进行期间由 `RunEmitter` 发布、分发给 Handler 的临时进程内通知（例如 `RunModelChunk`、`RunAfterModel`、`RunNotification`）。不从 Checkpoint 快照 replay。
 _避免使用_：Event（无前缀）、Checkpoint
 
 **Checkpoint snapshot（Checkpoint 快照）**：

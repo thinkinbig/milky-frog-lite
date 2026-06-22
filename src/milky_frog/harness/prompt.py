@@ -3,9 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def system_prompt(workspace: Path) -> str:
-    """Build the stable product identity and operating context for a Run."""
-    return f"""You are Milky Frog (奶蛙), a lightweight local coding agent.
+def system_prompt(workspace: Path, extra_sections: tuple[str, ...] = ()) -> str:
+    """Build the stable product identity and operating context for a Run.
+
+    ``extra_sections`` (injected by Skills via ``RunBeforeStart`` handlers) are
+    appended verbatim after the base prompt, each separated by a blank line.
+    """
+    base = f"""You are Milky Frog (奶蛙), a lightweight local coding agent.
 
 Your identity is Milky Frog. When asked who or what you are, identify yourself as Milky Frog,
 not as the underlying model or API provider. The provider is an implementation detail.
@@ -22,3 +26,6 @@ unrelated parts of the codebase.
 
 Be direct and technically precise. Use only the Tools supplied in the request. Never claim that
 you inspected, changed, or executed something unless the available Tools allowed you to do so."""
+    if not extra_sections:
+        return base
+    return base + "\n\n" + "\n\n".join(extra_sections)

@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from milky_frog.domain import RunRequest, RunResult, RunStatus
+from milky_frog.domain import RunRequest, RunResult, RunState, RunStatus
 from milky_frog.handlers.bus import LifecycleBus
 from milky_frog.handlers.events import (
     RunCancelled,
@@ -76,6 +76,10 @@ def _run_request() -> RunRequest:
     return RunRequest("hello", Path("/workspace"))
 
 
+def _run_state(run_id: str = "run-1") -> RunState:
+    return RunState(run_id=run_id, workspace=Path("/workspace"))
+
+
 @pytest.mark.asyncio
 async def test_langfuse_run_started_registers_trace(
     langfuse_handler: tuple[LangfuseHandler, FakeLangfuseClient],
@@ -84,7 +88,7 @@ async def test_langfuse_run_started_registers_trace(
     registry = LifecycleBus()
     handler.register(registry)
 
-    await registry.notify(RunStarted(run_id="run-1", request=_run_request()))
+    await registry.notify(RunStarted(run_id="run-1", request=_run_request(), state=_run_state()))
 
     assert handler._trace_ids["run-1"] == "trace-0"
     assert client.trace_ids == ["trace-0"]
@@ -97,10 +101,10 @@ async def test_langfuse_run_completed_records_span_and_cleans_up(
     handler, client = langfuse_handler
     registry = LifecycleBus()
     handler.register(registry)
-    await registry.notify(RunStarted(run_id="run-1", request=_run_request()))
+    await registry.notify(RunStarted(run_id="run-1", request=_run_request(), state=_run_state()))
 
     result = RunResult("run-1", RunStatus.COMPLETED, "done", 1)
-    await registry.notify(RunCompleted(run_id="run-1", result=result))
+    await registry.notify(RunCompleted(run_id="run-1", result=result, state=_run_state()))
 
     completed = client.observations[-1]
     assert completed.start_kwargs["name"] == "run_completed"
@@ -115,9 +119,11 @@ async def test_langfuse_run_cancelled_records_warning_span_and_cleans_up(
     handler, client = langfuse_handler
     registry = LifecycleBus()
     handler.register(registry)
-    await registry.notify(RunStarted(run_id="run-1", request=_run_request()))
+    await registry.notify(RunStarted(run_id="run-1", request=_run_request(), state=_run_state()))
 
-    await registry.notify(RunCancelled(run_id="run-1", reason="cancelled", model_calls=0))
+    await registry.notify(
+        RunCancelled(run_id="run-1", reason="cancelled", model_calls=0, state=_run_state())
+    )
 
     cancelled = client.observations[-1]
     assert cancelled.start_kwargs["name"] == "run_cancelled"
@@ -133,7 +139,7 @@ async def test_langfuse_run_paused_records_warning_span_and_cleans_up(
     handler, client = langfuse_handler
     registry = LifecycleBus()
     handler.register(registry)
-    await registry.notify(RunStarted(run_id="run-1", request=_run_request()))
+    await registry.notify(RunStarted(run_id="run-1", request=_run_request(), state=_run_state()))
 
     await registry.notify(
         RunPaused(
@@ -141,6 +147,7 @@ async def test_langfuse_run_paused_records_warning_span_and_cleans_up(
             status=RunStatus.PAUSED_LIMIT,
             reason="limit",
             model_calls=1,
+            state=_run_state(),
         )
     )
 
@@ -157,9 +164,9 @@ async def test_langfuse_run_failed_records_error_span_and_cleans_up(
     handler, client = langfuse_handler
     registry = LifecycleBus()
     handler.register(registry)
-    await registry.notify(RunStarted(run_id="run-1", request=_run_request()))
+    await registry.notify(RunStarted(run_id="run-1", request=_run_request(), state=_run_state()))
 
-    await registry.notify(RunFailed(run_id="run-1", error=RuntimeError("boom")))
+    await registry.notify(RunFailed(run_id="run-1", error=RuntimeError("boom"), state=_run_state()))
 
     failed = client.observations[-1]
     assert failed.start_kwargs["name"] == "run_failed"
@@ -175,10 +182,10 @@ async def test_langfuse_terminal_event_flushes_and_cleans_up(
     handler, client = langfuse_handler
     registry = LifecycleBus()
     handler.register(registry)
-    await registry.notify(RunStarted(run_id="run-1", request=_run_request()))
+    await registry.notify(RunStarted(run_id="run-1", request=_run_request(), state=_run_state()))
 
     result = RunResult("run-1", RunStatus.COMPLETED, "done", 1)
-    await registry.notify(RunCompleted(run_id="run-1", result=result))
+    await registry.notify(RunCompleted(run_id="run-1", result=result, state=_run_state()))
 
     assert client.flushed == 1
     assert "run-1" not in handler._trace_ids
@@ -202,7 +209,7 @@ async def test_langfuse_turn_events_create_and_end_span(
     handler, client = langfuse_handler
     registry = LifecycleBus()
     handler.register(registry)
-    await registry.notify(RunStarted(run_id="run-1", request=_run_request()))
+    await registry.notify(RunStarted(run_id="run-1", request=_run_request(), state=_run_state()))
 
     await registry.notify(RunTurnStart(run_id="run-1", model_call=1))
     await registry.notify(RunTurnEnd(run_id="run-1", model_call=1))
@@ -221,7 +228,7 @@ async def test_langfuse_turn_span_nests_model_and_tool(
     handler, client = langfuse_handler
     registry = LifecycleBus()
     handler.register(registry)
-    await registry.notify(RunStarted(run_id="run-1", request=_run_request()))
+    await registry.notify(RunStarted(run_id="run-1", request=_run_request(), state=_run_state()))
 
     await registry.notify(RunTurnStart(run_id="run-1", model_call=1))
     turn_span = client.observations[-1]

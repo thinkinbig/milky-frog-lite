@@ -8,6 +8,7 @@ from textual.message import Message
 
 from milky_frog.domain import (
     ApprovalDecision,
+    ResumeError,
     RunCancellation,
     RunRequest,
     RunResult,
@@ -29,6 +30,8 @@ class RunAdvancer:
 
     Holds ``run_id``, busy flag, cancellation token, and pending-approval run_id.
     Posts ``RunFinished`` / ``RunError`` messages to the ``WidgetChannel``.
+    Harness failures are surfaced by ``TextualStreamRenderer`` on ``RunFailed``;
+    this advancer only posts ``RunError`` for ``ResumeError`` and pre-harness checks.
     ``MilkyFrogApp`` ``@work`` workers delegate their coroutine bodies to
     ``do_run`` / ``do_approve`` so the App stays a pure widget layer.
     """
@@ -91,8 +94,11 @@ class RunAdvancer:
             self._finish(result)
         except asyncio.CancelledError:
             self._cancelled(run_id)
-        except Exception as error:
-            self._queue.post_message(RunError(f"{type(error).__name__}: {error}"))
+        except ResumeError as error:
+            self._queue.post_message(RunError(str(error)))
+        except Exception:
+            # Harness failures emit RunFailed first; the stream renderer posts RunError.
+            pass
         finally:
             self.busy = False
             self.cancellation = None
@@ -116,8 +122,11 @@ class RunAdvancer:
             self._finish(result)
         except asyncio.CancelledError:
             self._cancelled(run_id)
-        except Exception as error:
-            self._queue.post_message(RunError(f"{type(error).__name__}: {error}"))
+        except ResumeError as error:
+            self._queue.post_message(RunError(str(error)))
+        except Exception:
+            # Harness failures emit RunFailed first; the stream renderer posts RunError.
+            pass
         finally:
             self.busy = False
             self.cancellation = None

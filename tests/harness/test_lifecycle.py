@@ -58,7 +58,8 @@ async def test_dispatches_run_lifecycle_events(tmp_path: Path) -> None:
     result = await harness.run(RunRequest("echo hello", tmp_path))
 
     assert result.status is RunStatus.COMPLETED
-    assert seen[0] == "RunStarted"
+    assert seen[0] == "RunBeforeStart"
+    assert seen[1] == "RunStarted"
     assert seen[-1] == "RunCompleted"
     assert "RunPaused" not in seen
     assert "RunCancelled" not in seen
@@ -410,6 +411,7 @@ async def test_turn_events_fire_before_complete(tmp_path: Path) -> None:
     await harness.run(RunRequest("go", tmp_path))
 
     assert order == [
+        "RunBeforeStart",
         "RunStarted",
         "RunTurnStart",
         "RunBeforeModel",

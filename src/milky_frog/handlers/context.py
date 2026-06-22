@@ -1,18 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
-
-
-class HandlerResult(Protocol):
-    """Marker for values returned by handlers that affect execution flow.
-
-    A handler that returns ``None`` (the default) is pure observation.
-    Returning a ``HandlerResult`` signals intent to control the Harness.
-    Each event type defines which result types it accepts.
-    """
-
-    ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,54 +17,28 @@ class ApprovalResult:
     reason: str = "needs approval"
 
 
-class UIService(Protocol):
-    """Abstract interface for UI operations available to all handlers.
+@dataclass(frozen=True, slots=True)
+class SystemPromptSection:
+    """Return from a ``RunBeforeStart`` handler to inject content into the system prompt.
 
-    Concrete implementations wrap a UI framework (Textual, CLI, …).
-    Handlers that receive an ``UIService`` via ``HandlerContext`` can
-    interact with the frontend without depending on a specific toolkit.
+    Sections are appended after the base system prompt in registration order.
     """
 
-    def notify(self, message: str, level: str = "info") -> None:
-        """Show a non-blocking notification to the user (info / warning / error)."""
-        ...
-
-    def set_status(self, key: str, text: str | None) -> None:
-        """Set (or clear, when *text* is ``None``) a named status indicator."""
-        ...
-
-    def set_widget(self, key: str, lines: list[str] | None) -> None:
-        """Set (or clear) a named widget display shown in the UI."""
-        ...
+    content: str
 
 
-class ConsoleUIService:
-    """A no-op ``UIService`` that prints to stderr.
+type HandlerResult = BlockResult | ApprovalResult | SystemPromptSection
+"""Union of all result types a handler may return to control Harness execution.
 
-    Useful as a default when no TUI is active (CLI mode, tests).
-    """
-
-    def notify(self, message: str, level: str = "info") -> None:
-        import sys
-
-        tag = {"info": "", "warning": "⚠ ", "error": "✗ "}.get(level, "")
-        print(f"{tag}{message}", file=sys.stderr)
-
-    def set_status(self, key: str, text: str | None) -> None:
-        pass  # no persistent status bar in CLI mode
-
-    def set_widget(self, key: str, lines: list[str] | None) -> None:
-        pass  # no widget area in CLI mode
+A handler that returns ``None`` is pure observation; returning a
+``HandlerResult`` signals intent to block, pause, or extend the current step.
+"""
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class HandlerContext:
-    """Shared framework-managed resources injected into every handler at notify time.
+    """Framework-managed resources passed to every handler at notify time.
 
-    Handlers receive this alongside the event so they can access
-    framework services without wiring them through constructors.
-    Fields that are ``None`` are unavailable in the current mode
-    (for example ``ui`` in headless CLI mode).
+    Handlers receive this alongside the event. Empty today; reserved for
+    shared read-only services injected via ``LifecycleBus.set_context``.
     """
-
-    ui: UIService | None = None

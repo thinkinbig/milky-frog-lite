@@ -29,6 +29,7 @@ from milky_frog.domain import (
     is_cancelled,
 )
 from milky_frog.handlers import ApprovalResult, BlockResult, LifecycleBus
+from milky_frog.handlers.checkpoint import CheckpointHandler
 from milky_frog.harness.emitter import RunEmitter
 from milky_frog.harness.sandbox import LocalSandbox, Sandbox, SandboxFactory
 from milky_frog.harness.state import (
@@ -67,7 +68,8 @@ class Harness:
         self._checkpoints = checkpoints
         self._sandbox_factory = sandbox_factory
         self._handlers = handlers
-        self._emitter = RunEmitter(checkpoints, handlers)
+        CheckpointHandler(checkpoints).register(handlers)
+        self._emitter = RunEmitter(handlers)
 
     async def run(self, run_request: RunRequest) -> RunResult:
         """Start a fresh Run: seed the transcript from the prompt, then advance."""
@@ -75,7 +77,12 @@ class Harness:
         workspace = run_request.workspace.resolve(strict=True)
         with self._checkpoints.claim(run_id):
             self._checkpoints.create_run(run_id, workspace)
-            state = start_run(RunState(run_id=run_id, workspace=workspace), run_request.prompt)
+            extra_sections = await self._emitter.run_before_start(run_id, run_request, workspace)
+            state = start_run(
+                RunState(run_id=run_id, workspace=workspace),
+                run_request.prompt,
+                extra_sections,
+            )
             await self._emitter.run_started(run_id, run_request, state)
             return await self._advance(
                 state,
@@ -114,7 +121,7 @@ class Harness:
                 # Load snapshot, seal interrupted tools, optionally append prompt.
                 state = self._checkpoints.load_state(run_id)
                 if stored.status is not RunStatus.WAITING_FOR_APPROVAL:
-                    state, _repaired = seal(state)
+                    state, _ = seal(state)
                 if prompt is not None:
                     state = append_user_message(state, prompt)
                 self._checkpoints.prepare_resume(run_id, stored.updated_at, state)
@@ -157,9 +164,8 @@ class Harness:
                     )
                 except ToolRunCancelled:
                     return await self._emitter.finish_cancelled(state)
-                await self._emitter.after_model(run_id, request, response)
                 state = append_model_response(state, response)
-                self._emitter.persist(state)
+                await self._emitter.after_model(run_id, request, response, state)
                 calls += 1
 
                 if not response.tool_calls:
@@ -187,7 +193,7 @@ class Harness:
                         except ToolRunCancelled:
                             return await self._emitter.finish_cancelled(state)
                     state = append_tool_result(state, call, result)
-                    self._emitter.persist(state)
+                    await self._emitter.after_tool(run_id, call, result, state)
 
                 await self._emitter.turn_ended(run_id, model_call=calls)
 
@@ -234,7 +240,7 @@ class Harness:
                 state=append_tool_result(plan.state, call, resolved),
                 sandbox=plan.sandbox,
             )
-            self._emitter.persist(plan.state)
+            await self._emitter.after_tool(run_id, call, resolved, plan.state)
         return plan
 
     async def _resolve_pending_call(
@@ -301,8 +307,7 @@ class Harness:
         call: ToolCall,
         cancellation: RunCancellation | None,
     ) -> ToolResult:
-        """Run one Tool call with lifecycle signals and cancellation polling."""
-        await self._emitter.before_tool(run_id, call)
+        """Run one Tool call with cancellation polling."""
         tool = self._tools.get(call.name)
         context = ToolContext(run_id, workspace, cancellation, sandbox)
         try:
@@ -314,7 +319,6 @@ class Harness:
             raise
         except Exception as error:
             result = ToolResult(f"{type(error).__name__}: {error}", is_error=True)
-        await self._emitter.after_tool(run_id, call, result)
         return result
 
     @staticmethod
