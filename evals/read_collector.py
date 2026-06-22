@@ -1,6 +1,6 @@
 """In-process collector for the files a Run reads and edits.
 
-Subscribes to the read-only ``LifecycleBus`` (``RunAfterTool``) and records,
+Subscribes to the read-only ``EventDispatcher`` (``RunAfterTool``) and records,
 per ``run_id``, every ``read_file`` / ``edit_file`` path the agent touches —
 the raw signal for read-noise scoring. It changes nothing about execution,
 so it honours the notify-only handler contract (ADR-0012) and never touches
@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 
-from milky_frog.handlers import BaseHandler, LifecycleBus, RunAfterTool
+from milky_frog.handlers import BaseHandler, EventDispatcher, RunAfterTool
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,7 +35,7 @@ class ReadCollector(BaseHandler):
         self.reads: dict[str, list[ReadRecord]] = defaultdict(list)
         self.edits: dict[str, list[str]] = defaultdict(list)
 
-    def register(self, registry: LifecycleBus) -> None:
+    def register(self, registry: EventDispatcher) -> None:
         registry.on(RunAfterTool)(self._record)
 
     async def _record(self, event: RunAfterTool) -> None:

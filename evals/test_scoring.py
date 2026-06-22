@@ -23,8 +23,13 @@ def test_in_scope_reads_score_clean() -> None:
         ReadRecord("src/milky_frog/cli/factory.py", False),  # sibling in cli/ -> in scope
         ReadRecord("src/milky_frog/ui/interactive.py", False),  # changed file
     ]
-    score = score_run("t", reads, edits=["src/milky_frog/cli/app.py"], changed_files=CHANGED,
-                      relevant_files=RELEVANT)
+    score = score_run(
+        "t",
+        reads,
+        edits=["src/milky_frog/cli/app.py"],
+        changed_files=CHANGED,
+        relevant_files=RELEVANT,
+    )
     assert score.scope_precision == 1.0
     assert score.noise_rate == 0.0
     assert score.out_of_scope == 0

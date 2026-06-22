@@ -80,9 +80,7 @@ def _slug(subject: str) -> str:
 
 def _prompt_from(subject: str) -> str:
     """Turn a commit subject into a task instruction (strip the conventional prefix)."""
-    return re.sub(
-        r"^(feat|fix|refactor|perf)(\([^)]*\))?:\s*", "", subject
-    ).strip()
+    return re.sub(r"^(feat|fix|refactor|perf)(\([^)]*\))?:\s*", "", subject).strip()
 
 
 def mine(max_candidates: int) -> list[ChangeTask]:
@@ -132,17 +130,13 @@ def main() -> None:
 
     tasks = mine(args.max)
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    OUT_PATH.write_text(
-        json.dumps([asdict(t) for t in tasks], ensure_ascii=False, indent=2) + "\n"
-    )
+    OUT_PATH.write_text(json.dumps([asdict(t) for t in tasks], ensure_ascii=False, indent=2) + "\n")
 
     print(f"wrote {len(tasks)} change tasks -> {OUT_PATH.relative_to(REPO_ROOT)}\n")
     print(f"{'task_id':40} {'relevant':>8} {'added':>5}  prompt")
     print("-" * 100)
     for t in tasks:
-        print(
-            f"{t.task_id:40} {len(t.relevant_files):>8} {len(t.added_files):>5}  {t.prompt[:50]}"
-        )
+        print(f"{t.task_id:40} {len(t.relevant_files):>8} {len(t.added_files):>5}  {t.prompt[:50]}")
 
 
 if __name__ == "__main__":

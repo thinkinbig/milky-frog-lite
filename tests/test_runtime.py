@@ -18,7 +18,7 @@ from milky_frog.domain import (
     StreamDone,
     TextDelta,
 )
-from milky_frog.handlers import BaseHandler, LifecycleBus, RunCancelled
+from milky_frog.handlers import BaseHandler, EventDispatcher, HandlerContext, RunCancelled
 from milky_frog.models import OpenAIModel
 from milky_frog.runtime import MilkyFrog, MissingModelConfiguration
 from milky_frog.settings import LangfuseSettings, Settings
@@ -62,11 +62,12 @@ def test_milky_frog_cancel_stops_foreground_run(
 
     monkeypatch.setattr(OpenAIModel, "stream", slow_stream)
     settings = Settings(tmp_path, "test-key", "https://example.test", "test-model", _NO_LANGFUSE)
-    registry = LifecycleBus()
+    registry = EventDispatcher()
     cancelled: list[RunCancelled] = []
 
     @registry.on(RunCancelled)
-    async def record(event: RunCancelled) -> None:
+    async def record(event: RunCancelled, ctx: HandlerContext) -> None:
+        del ctx
         cancelled.append(event)
 
     frog = MilkyFrog.from_settings(settings, handlers=registry)
@@ -91,7 +92,7 @@ def test_milky_frog_context_manager_closes_its_bundles(tmp_path: Path) -> None:
         def __init__(self) -> None:
             self.closed = 0
 
-        def register(self, registry: LifecycleBus) -> None:
+        def register(self, registry: EventDispatcher) -> None:
             del registry
 
         async def aclose(self) -> None:
@@ -108,7 +109,7 @@ def test_milky_frog_context_manager_closes_its_bundles(tmp_path: Path) -> None:
 
 def test_milky_frog_close_isolates_failing_bundle(tmp_path: Path) -> None:
     class FailingHandler(BaseHandler):
-        def register(self, registry: LifecycleBus) -> None:
+        def register(self, registry: EventDispatcher) -> None:
             del registry
 
         async def aclose(self) -> None:
@@ -118,7 +119,7 @@ def test_milky_frog_close_isolates_failing_bundle(tmp_path: Path) -> None:
         def __init__(self) -> None:
             self.closed = 0
 
-        def register(self, registry: LifecycleBus) -> None:
+        def register(self, registry: EventDispatcher) -> None:
             del registry
 
         async def aclose(self) -> None:

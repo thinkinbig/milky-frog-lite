@@ -10,7 +10,30 @@ from milky_frog.harness.tools.base import ToolContext
 
 _GIT_TIMEOUT_SECONDS = 30.0
 _MAX_OUTPUT_BYTES = 128 * 1024
-_GIT_READ_ONLY_SUBCOMMANDS = frozenset({"status", "diff", "log", "show", "blame", "rev-parse"})
+# Subcommands that only inspect repo state — they never mutate the working
+# tree, index, refs, or history regardless of their arguments.
+_GIT_READ_ONLY_SUBCOMMANDS = frozenset(
+    {
+        "status",
+        "diff",
+        "log",
+        "show",
+        "blame",
+        "rev-parse",
+        "grep",
+        "ls-files",
+        "ls-tree",
+        "cat-file",
+        "show-ref",
+        "rev-list",
+        "describe",
+        "shortlog",
+        "name-rev",
+        "merge-base",
+        "whatchanged",
+        "ls-remote",
+    }
+)
 
 
 class GitInput(BaseModel):
@@ -83,8 +106,9 @@ class GitTool:
     requires_approval = True
     description = (
         "Run a git subcommand in the workspace repository and return its stdout. "
-        "Read-only commands (status, diff, log, show, blame, rev-parse, listing branch/tag/"
-        "remote, config --list) run immediately. Commands that modify the working tree or "
+        "Read-only commands (status, diff, log, show, blame, rev-parse, grep, ls-files, "
+        "cat-file, rev-list, listing branch/tag/remote, config --list) run immediately. "
+        "Commands that modify the working tree or "
         "history (add, reset, commit, stash, branch creation, tag creation, etc.) pause the "
         "Run until the user approves. The command is executed with a clean, allow-listed "
         "environment."

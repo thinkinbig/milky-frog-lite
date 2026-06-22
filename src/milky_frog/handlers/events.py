@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal
 
 from milky_frog.domain import (
     ModelRequest,
@@ -8,6 +10,7 @@ from milky_frog.domain import (
     ReasoningDelta,
     RunRequest,
     RunResult,
+    RunState,
     RunStatus,
     TextDelta,
     ToolCall,
@@ -27,8 +30,36 @@ class BaseEvent:
 
 
 @dataclass(frozen=True)
+class RunBeforeStart(BaseEvent):
+    """Dispatched before the transcript is seeded and the Run is stored.
+
+    Handlers may return ``SystemPromptSection`` to inject content into the
+    system prompt that ``start_run`` assembles.  Pure-observation handlers
+    return ``None``.  The event carries the resolved workspace path so
+    handlers (e.g. Skills) can read skill files from disk.
+    """
+
+    request: RunRequest
+    workspace: Path
+
+
+@dataclass(frozen=True)
+class RunBeforeResume(BaseEvent):
+    """Dispatched before a Run is prepared for resumption.
+
+    Pure observation — handlers can inspect / log the stored Run data
+    before the Harness loads state, seals interrupted tools, and
+    optionally appends a new user turn.
+    """
+
+    prompt: str | None
+    stored_status: RunStatus
+
+
+@dataclass(frozen=True)
 class RunStarted(BaseEvent):
     request: RunRequest
+    state: RunState
 
 
 @dataclass(frozen=True)
@@ -52,10 +83,20 @@ class RunModelChunk(BaseEvent):
 class RunAfterModel(BaseEvent):
     request: ModelRequest
     response: ModelResponse
+    state: RunState
 
 
 @dataclass(frozen=True)
 class RunBeforeTool(BaseEvent):
+    """Dispatched before a tool call — handlers may observe OR control.
+
+    **Observation**: return ``None`` (the default).  The call proceeds.
+    **Control**: return ``BlockResult(reason=…)`` or ``ApprovalResult()``.
+
+    Control is purely through return values — the event itself stays
+    frozen and immutable.
+    """
+
     call: ToolCall
 
 
@@ -63,6 +104,7 @@ class RunBeforeTool(BaseEvent):
 class RunAfterTool(BaseEvent):
     call: ToolCall
     result: ToolResult
+    state: RunState
 
 
 @dataclass(frozen=True)
@@ -83,6 +125,7 @@ class RunTurnEnd(BaseEvent):
 @dataclass(frozen=True)
 class RunCompleted(BaseEvent):
     result: RunResult
+    state: RunState
 
 
 @dataclass(frozen=True)
@@ -90,14 +133,33 @@ class RunPaused(BaseEvent):
     status: RunStatus
     reason: str
     model_calls: int
+    state: RunState
 
 
 @dataclass(frozen=True)
 class RunCancelled(BaseEvent):
     reason: str
     model_calls: int
+    state: RunState
 
 
 @dataclass(frozen=True)
 class RunFailed(BaseEvent):
     error: Exception
+    state: RunState
+
+
+NoticeLevel = Literal["info", "warning", "error"]
+
+
+@dataclass(frozen=True)
+class RunNotice(BaseEvent):
+    """Ephemeral user-facing message during a Run.
+
+    Not a lifecycle phase — examples: model connection retries, rate-limit
+    warnings. Published by ``RunEmitter``; UI Handlers subscribe and render.
+    Not checkpointed.
+    """
+
+    message: str
+    level: NoticeLevel = "info"

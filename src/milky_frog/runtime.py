@@ -9,10 +9,10 @@ from types import FrameType, TracebackType
 
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import ResumeError, RunCancellation, RunRequest, RunResult
-from milky_frog.gates import ToolGate, ToolPolicy
-from milky_frog.handlers import BaseHandler, LifecycleBus
+from milky_frog.handlers import BaseHandler, EventDispatcher, default_handlers
 from milky_frog.harness.runner import Harness
 from milky_frog.harness.tools import ToolRegistry, default_tools
+from milky_frog.harness.tools.tool_policy import ToolPolicy
 from milky_frog.models import OpenAIModel
 from milky_frog.project import load_project_config
 from milky_frog.settings import Settings
@@ -38,20 +38,33 @@ class MilkyFrog:
     def __init__(
         self,
         settings: Settings,
-        handlers: LifecycleBus | None = None,
+        handlers: EventDispatcher | None = None,
         bundles: list[BaseHandler] | None = None,
         tool_policy: ToolPolicy | None = None,
     ) -> None:
         api_key, model = self.require_model_configuration(settings)
-        self._handlers: list[BaseHandler] = list(bundles) if bundles else []
         self._checkpoints = SqliteCheckpointStore(settings.database_path)
-        self._tool_gate = ToolGate(tool_policy)
+
+        self._model_name = model
+        self._dispatcher = handlers if handlers is not None else EventDispatcher()
+
+        # Assemble every lifecycle handler bundle in one place (checkpointing,
+        # tool policy, Skills, caller-supplied bundles, Langfuse), then register
+        # each on the dispatcher and track it so close() releases every one uniformly.
+        self._handlers: list[BaseHandler] = default_handlers(
+            settings,
+            self._checkpoints,
+            tool_policy=tool_policy,
+            extra=bundles or (),
+        )
+        for bundle in self._handlers:
+            bundle.register(self._dispatcher)
+
         self._harness = Harness(
             model=OpenAIModel(api_key=api_key, model=model, base_url=settings.base_url),
             tools=ToolRegistry(default_tools()),
             checkpoints=self._checkpoints,
-            handlers=handlers if handlers is not None else LifecycleBus(),
-            tool_gate=self._tool_gate,
+            handlers=self._dispatcher,
         )
         self._loop: asyncio.AbstractEventLoop | None = None
         self._cancellation: RunCancellation | None = None
@@ -68,7 +81,7 @@ class MilkyFrog:
     def from_settings(
         cls,
         settings: Settings,
-        handlers: LifecycleBus | None = None,
+        handlers: EventDispatcher | None = None,
         bundles: list[BaseHandler] | None = None,
         tool_policy: ToolPolicy | None = None,
     ) -> MilkyFrog:
@@ -101,9 +114,26 @@ class MilkyFrog:
             self._loop = None
 
     @property
-    def tool_gate(self) -> ToolGate:
-        """Shared ToolGate for CLI to approve/deny before resume."""
-        return self._tool_gate
+    def model_name(self) -> str:
+        """The configured model identifier (for display in the TUI)."""
+        return self._model_name
+
+    @property
+    def dispatcher(self) -> EventDispatcher:
+        """The shared EventDispatcher — TUI subscribes its renderer here."""
+        return self._dispatcher
+
+    @property
+    def checkpoints(self) -> SqliteCheckpointStore:
+        """The shared checkpoint store — TUI resolves run IDs here."""
+        return self._checkpoints
+
+    @property
+    def harness(self) -> Harness:
+        """The async Harness — TUI uses this to drive Runs inside Textual's
+        event loop instead of going through the sync ``run()`` / ``resume()``
+        wrappers that create their own loop."""
+        return self._harness
 
     def cancel(self) -> None:
         """Request cooperative cancellation of the foreground Run."""
