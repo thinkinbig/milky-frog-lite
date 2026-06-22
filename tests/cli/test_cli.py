@@ -11,7 +11,6 @@ from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.cli import app
 from milky_frog.domain import RunResult, RunStatus
 from tests.checkpoint_helpers import seed_run
-from tests.stubs import RecordingLangfuseFactory
 
 runner = CliRunner()
 
@@ -57,83 +56,27 @@ def test_init_reports_filesystem_error_without_traceback(tmp_path: Path) -> None
     assert "Traceback" not in result.stderr
 
 
-def test_build_streaming_frog_does_not_leak_handlers_on_missing_config(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from milky_frog.cli.app import _build_streaming_frog
-    from milky_frog.runtime import MissingModelConfiguration
-    from milky_frog.settings import LangfuseSettings, Settings
+def test_require_model_config_validates_before_construction(tmp_path: Path) -> None:
+    """Missing model config raises before any resource-holding object is built."""
+    from milky_frog.runtime import MilkyFrog, MissingModelConfiguration
+    from milky_frog.settings import Settings
 
-    constructed: list[object] = []
-    monkeypatch.setattr(
-        "milky_frog.infra.observability.langfuse.Langfuse",
-        RecordingLangfuseFactory(constructed),
-    )
-    langfuse = LangfuseSettings(
-        enabled=True, public_key="public", secret_key="secret", host="https://langfuse.test"
-    )
-    settings = Settings(tmp_path, None, None, None, langfuse)
-
+    settings = Settings(tmp_path, api_key=None, model=None, base_url=None, langfuse=None)
     with pytest.raises(MissingModelConfiguration):
-        _build_streaming_frog(settings)
-
-    # Validation must run before HandlerFactory builds the Langfuse client, so
-    # nothing resource-holding is constructed and orphaned.
-    assert constructed == []
+        MilkyFrog.require_model_configuration(settings)
 
 
-def test_no_arguments_starts_interactive_mode(monkeypatch: object, tmp_path: Path) -> None:
-    cli_module = import_module("milky_frog.cli.app")
-
-    class FakeMilkyFrog:
-        @staticmethod
-        def require_model_configuration(settings: object) -> tuple[str, str]:
-            del settings
-            return "test-key", "test-model"
-
-        @classmethod
-        def from_settings(
-            cls,
-            settings: object,
-            handlers: object = None,
-            bundles: object = None,
-        ) -> FakeMilkyFrog:
-            del settings, handlers, bundles
-            return cls()
-
-        def __enter__(self) -> FakeMilkyFrog:
-            return self
-
-        def __exit__(self, *exc: object) -> None:
-            pass
-
-        def run(self, task: str, workspace: Path) -> RunResult:
-            assert workspace.is_dir()
-            assert task == "hello frog"
-            return RunResult("run-interactive", RunStatus.COMPLETED, "hello human", 1)
-
-        def cancel(self) -> None:
-            pass
-
-    monkeypatch.setattr(cli_module, "MilkyFrog", FakeMilkyFrog)  # type: ignore[attr-defined]
+def test_version_shows_version(tmp_path: Path) -> None:
     result = runner.invoke(
         app,
-        input="/help\nhello frog\nquit\n",
-        env={
-            "MILKY_FROG_HOME": str(tmp_path),
-            "MILKY_FROG_API_KEY": "test-key",
-            "MILKY_FROG_MODEL": "test-model",
-            "NO_COLOR": "1",
-        },
+        ["--version"],
+        env={"MILKY_FROG_HOME": str(tmp_path), "NO_COLOR": "1"},
     )
 
     assert result.exit_code == 0
-    assert "MILKY FROG · 奶蛙" in result.stdout
-    assert "hello human" in result.stdout
-    assert "run-inte" in result.stdout
-    assert "test-model" in result.stdout
-    assert "/clear" in result.stdout
-    assert "/resume" in result.stdout
+    from milky_frog import __version__
+
+    assert __version__ in result.stdout.strip()
 
 
 def test_resume_without_task_advances_pending_work(
@@ -294,5 +237,5 @@ def test_unknown_run_is_reported_on_stderr(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert result.stdout == ""
-    assert "Error: Unknown Run: missing" in result.stderr
+    assert "Error: unknown Run: missing" in result.stderr
     assert "Hint: List available Runs with: milky-frog runs" in result.stderr

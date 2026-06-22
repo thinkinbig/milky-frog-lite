@@ -2,21 +2,24 @@ from __future__ import annotations
 
 from rich.text import Text
 
+# Truecolor palette sampled to match the project mascot (assets/milky-frog.png):
+# a laughing Trump-frog — blonde comb-over, golden-amber skin, green eye
+# patches, a wide open mouth with a pink tongue, white collar, red tie, navy
+# suit, and light-blue laughing-to-tears droplets. Rich downsamples the hex
+# colors automatically on terminals without truecolor support.
 _PALETTE = {
-    "Y": ("██", "bright_yellow"),  # signature blonde comb-over
-    "S": ("██", "yellow"),  # golden frog skin
-    "G": ("▒▒", "bright_green"),  # green eye patches
-    "K": ("██", "black"),  # pupils / open-mouth rim
-    "M": ("▓▓", "red"),  # open mouth interior
-    "W": ("▓▓", "bright_white"),  # shirt collar
-    "R": ("██", "bright_red"),  # the long red tie
-    "N": ("██", "blue"),  # navy suit
-    "T": ("░░", "bright_cyan"),  # laughing-to-tears droplets
+    "Y": ("██", "#e6c84b"),  # blonde swept-over hair
+    "S": ("██", "#e8a23c"),  # golden-amber frog skin
+    "G": ("██", "#6fa83c"),  # green eye patches
+    "K": ("██", "#1a1a1a"),  # pupils / open-mouth rim
+    "M": ("██", "#4a1e12"),  # open mouth interior
+    "P": ("██", "#e8497f"),  # pink tongue
+    "W": ("██", "#f4f2ec"),  # white shirt collar
+    "R": ("██", "#ce382e"),  # the long red tie
+    "N": ("██", "#2b3a6b"),  # navy suit
+    "T": ("░░", "#5fb0e2"),  # laughing-to-tears droplets
 }
 
-# A Trump-frog: blonde swept hair up top, golden-yellow skin with green eyes,
-# laughing-to-tears droplets, a wide open mouth, white collar, long red tie
-# and a navy suit below.
 _FROG = (
     "   YYYYYYYY   ",
     "  YYYYYYYYYY  ",
@@ -26,7 +29,7 @@ _FROG = (
     "T SSSSSSSSSS T",
     "  SKKKKKKKKS  ",
     "  SKMMMMMMKS  ",
-    "  SKMMMMMMKS  ",
+    "  SKMMPPMMKS  ",
     "  SSKKKKKKSS  ",
     "  SWWWRRWWWS  ",
     " NNWWWRRWWWNN ",
@@ -38,7 +41,7 @@ _FROG = (
 
 
 def pixel_frog_logo() -> Text:
-    """Return a compact ANSI-safe pixel interpretation of the project mascot."""
+    """Return a compact truecolor pixel interpretation of the project mascot."""
     logo = Text()
     for row_index, row in enumerate(_FROG):
         for pixel in row:

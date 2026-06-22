@@ -163,9 +163,7 @@ async def test_grep_finds_matches(tmp_path: Path) -> None:
     )
     (tmp_path / "b.py").write_text("class Foo:\n    pass\n", encoding="utf-8")
 
-    result = await GrepTool().execute(
-        _context(tmp_path), GrepTool.input_model(pattern="def")
-    )
+    result = await GrepTool().execute(_context(tmp_path), GrepTool.input_model(pattern="def"))
 
     assert not result.is_error
     assert "a.py" in result.content
@@ -184,9 +182,7 @@ async def test_grep_no_matches(tmp_path: Path) -> None:
 
 
 async def test_grep_empty_pattern_is_error(tmp_path: Path) -> None:
-    result = await GrepTool().execute(
-        _context(tmp_path), GrepTool.input_model(pattern="  ")
-    )
+    result = await GrepTool().execute(_context(tmp_path), GrepTool.input_model(pattern="  "))
 
     assert result.is_error
     assert "empty" in result.content
@@ -211,9 +207,7 @@ async def test_grep_count_is_noise_pattern(tmp_path: Path) -> None:
     (tmp_path / "a.py").write_text("class A:\n    pass\n", encoding="utf-8")
     (tmp_path / "b.py").write_text("class B(A):\n    pass\n", encoding="utf-8")
 
-    result = await GrepTool().execute(
-        _context(tmp_path), GrepTool.input_model(pattern="class")
-    )
+    result = await GrepTool().execute(_context(tmp_path), GrepTool.input_model(pattern="class"))
 
     assert not result.is_error
     assert "a.py" in result.content

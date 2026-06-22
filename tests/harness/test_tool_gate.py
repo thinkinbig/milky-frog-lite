@@ -40,17 +40,13 @@ def test_default_policy_allows_read_only_git_commands() -> None:
     assert policy.decide(ToolCall("c1", "git", {"command": "status"})) is ToolDecision.ALLOW
     assert policy.decide(ToolCall("c2", "git", {"command": "diff --staged"})) is ToolDecision.ALLOW
     assert (
-        policy.decide(ToolCall("c3", "git", {"command": "log --oneline -5"}))
-        is ToolDecision.ALLOW
+        policy.decide(ToolCall("c3", "git", {"command": "log --oneline -5"})) is ToolDecision.ALLOW
     )
 
 
 def test_default_policy_needs_approval_for_mutating_git_and_file_tools() -> None:
     policy = DefaultToolPolicy()
-    assert (
-        policy.decide(ToolCall("c1", "git", {"command": "add ."}))
-        is ToolDecision.NEEDS_APPROVAL
-    )
+    assert policy.decide(ToolCall("c1", "git", {"command": "add ."})) is ToolDecision.NEEDS_APPROVAL
     assert (
         policy.decide(ToolCall("c2", "git", {"command": "commit -m msg"}))
         is ToolDecision.NEEDS_APPROVAL
