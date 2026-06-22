@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any, cast
 
@@ -40,7 +40,7 @@ class OpenAIModel:
             include_stream_usage if include_stream_usage is not None else base_url is None
         )
 
-    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+    async def stream(self, request: ModelRequest) -> AsyncGenerator[ModelChunk, None]:
         messages = [_message_payload(message) for message in request.messages]
         arguments: dict[str, Any] = {
             "model": self._model,
@@ -61,46 +61,49 @@ class OpenAIModel:
         tool_fragments: dict[int, _ToolFragment] = {}
         usage = TokenUsage()
 
-        async for chunk in stream:
-            if chunk.usage is not None:
-                usage = _token_usage(chunk.usage)
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
-            # Non-standard field carried by reasoning providers (deepseek-reasoner, …).
-            reasoning = getattr(delta, "reasoning_content", None)
-            if reasoning:
-                reasoning_parts.append(reasoning)
-                yield ReasoningDelta(reasoning)
-            if delta.content:
-                content_parts.append(delta.content)
-                yield TextDelta(delta.content)
-            for call in delta.tool_calls or ():
-                fragment = tool_fragments.setdefault(call.index, _ToolFragment())
-                if call.id:
-                    fragment.id = call.id
-                if call.function and call.function.name:
-                    fragment.name = call.function.name
-                if call.function and call.function.arguments:
-                    fragment.arguments += call.function.arguments
+        try:
+            async for chunk in stream:
+                if chunk.usage is not None:
+                    usage = _token_usage(chunk.usage)
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                # Non-standard field carried by reasoning providers (deepseek-reasoner, …).
+                reasoning = getattr(delta, "reasoning_content", None)
+                if reasoning:
+                    reasoning_parts.append(reasoning)
+                    yield ReasoningDelta(reasoning)
+                if delta.content:
+                    content_parts.append(delta.content)
+                    yield TextDelta(delta.content)
+                for call in delta.tool_calls or ():
+                    fragment = tool_fragments.setdefault(call.index, _ToolFragment())
+                    if call.id:
+                        fragment.id = call.id
+                    if call.function and call.function.name:
+                        fragment.name = call.function.name
+                    if call.function and call.function.arguments:
+                        fragment.arguments += call.function.arguments
 
-        tool_calls = tuple(
-            ToolCall(
-                id=fragment.id,
-                name=fragment.name,
-                arguments=_parse_arguments(fragment.arguments),
+            tool_calls = tuple(
+                ToolCall(
+                    id=fragment.id,
+                    name=fragment.name,
+                    arguments=_parse_arguments(fragment.arguments),
+                )
+                for _, fragment in sorted(tool_fragments.items())
             )
-            for _, fragment in sorted(tool_fragments.items())
-        )
-        yield StreamDone(
-            ModelResponse(
-                content="".join(content_parts),
-                tool_calls=tool_calls,
-                usage=usage,
-                model=self._model,
-                reasoning="".join(reasoning_parts),
+            yield StreamDone(
+                ModelResponse(
+                    content="".join(content_parts),
+                    tool_calls=tool_calls,
+                    usage=usage,
+                    model=self._model,
+                    reasoning="".join(reasoning_parts),
+                )
             )
-        )
+        finally:
+            await stream.close()
 
 
 def _token_usage(usage: Any) -> TokenUsage:

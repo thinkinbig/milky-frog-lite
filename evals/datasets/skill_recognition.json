@@ -1,0 +1,8 @@
+[
+  {
+    "task_id": "skill-tdd-recognition",
+    "prompt": "I want to add a small pure function that formats RunUsage for display. Use test-driven development: load the tdd skill first, follow it, and tell me which skill you used before writing any code.",
+    "expect_skill_read": ".milky-frog/skills/tdd/SKILL.md",
+    "expect_skill_name": "tdd"
+  }
+]
