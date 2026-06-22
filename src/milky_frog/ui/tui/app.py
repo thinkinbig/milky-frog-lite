@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 from typing import ClassVar
 
+from rich.console import RenderableType
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
@@ -11,9 +12,9 @@ from rich.text import Text
 from textual import events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
-from textual.containers import Vertical
+from textual.containers import Vertical, VerticalScroll
 from textual.reactive import reactive
-from textual.widgets import Footer, Header, Input, RichLog, Static
+from textual.widgets import Footer, Header, Input, Static
 from textual.worker import Worker
 
 from milky_frog.checkpoint import SqliteCheckpointStore
@@ -42,6 +43,20 @@ from milky_frog.ui.tui.rendering import (
     summarize_tool_result,
 )
 from milky_frog.ui.usage import format_run_usage
+
+
+def _row(marker: Text, body: RenderableType) -> Table:
+    """A hanging-indent grid: a fixed marker column beside a wrapping body.
+
+    Rendered inside a ``Static``, the ratio body column re-wraps to the widget's
+    width, so the conversation reflows when the terminal is resized.
+    """
+    row = Table.grid(padding=(0, 1))
+    row.add_column(no_wrap=True, vertical="top")
+    row.add_column(ratio=1)
+    row.add_row(marker, body)
+    return row
+
 
 # ── Status Widget ──────────────────────────────────────────────────────
 
@@ -99,32 +114,6 @@ def _short_workspace(workspace: Path) -> str:
     except ValueError:
         return resolved.as_posix()
     return f"~/{relative.as_posix()}" if relative.parts else "~"
-
-
-# ── In-progress message widget ────────────────────────────────────────
-
-
-class _InProgress(RichLog):
-    """A single-line RichLog that displays the in-progress assistant response.
-
-    Updated incrementally via ``set_text`` during a model stream.
-    Replaced by the final assistant message when the Run completes.
-    """
-
-    def set_text(self, text: str) -> None:
-        self.clear()
-        self.display = bool(text)
-        if not text:
-            return
-        row = Table.grid(padding=(0, 1))
-        row.add_column(no_wrap=True, vertical="top")
-        row.add_column(ratio=1)
-        row.add_row(Text("●", style="bold yellow"), Markdown(text))
-        self.write(row)
-
-    def hide(self) -> None:
-        self.clear()
-        self.display = False
 
 
 # ── Prompt input (history + command completion) ───────────────────────
@@ -195,13 +184,13 @@ class MilkyFrogApp(App[None]):
 
     Layout (top to bottom)::
 
-        Header       — model, workspace, clock
-        RichLog      — conversation (user messages, assistant responses, tool calls, errors)
-        _InProgress  — live-streaming assistant text (hidden when idle)
+        Header        — model, workspace, clock
+        VerticalScroll — conversation: one widget per message, so text reflows
+                         to the terminal width on resize (unlike an append-only log)
         command hints — slash-command completions (hidden unless typing a command)
-        PromptInput  — text prompt with Tab completion and Up/Down history
-        RunStatusBar — model, workspace, run_id, token usage, status
-        Footer       — keybindings
+        PromptInput   — text prompt with Tab completion and Up/Down history
+        RunStatusBar  — model, workspace, run_id, token usage, status
+        Footer        — keybindings
     """
 
     CSS = """
@@ -211,12 +200,8 @@ class MilkyFrogApp(App[None]):
         margin: 0 1;
     }
 
-    #in-progress {
-        display: none;
-        border: none;
-        height: auto;
-        max-height: 5;
-        margin: 0 1;
+    #conversation > .spaced {
+        margin-bottom: 1;
     }
 
     #command-hints {
@@ -252,16 +237,17 @@ class MilkyFrogApp(App[None]):
         self._checkpoints: SqliteCheckpointStore | None = None
         self._worker: Worker[None] | None = None
 
-        # Streaming accumulators
+        # Streaming state: buffers plus the live widget being updated in place.
         self._thinking_buf: list[str] = []
         self._answer_buf: list[str] = []
         self._phase: str | None = None  # None | "thinking" | "answer"
+        self._thinking_widget: Static | None = None
+        self._answer_widget: Static | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield Vertical(
-            RichLog(id="conversation", markup=True, highlight=True, wrap=True, max_lines=None),
-            _InProgress(id="in-progress", markup=True, highlight=True, wrap=True, max_lines=10),
+            VerticalScroll(id="conversation"),
             Static(id="command-hints"),
             PromptInput(id="prompt-input", placeholder="Type a task and press Enter..."),
             RunStatusBar(
@@ -295,10 +281,26 @@ class MilkyFrogApp(App[None]):
         self._render_welcome()
         self.query_one("#prompt-input", Input).focus()
 
+    # ── Conversation plumbing ─────────────────────────────────────────
+
+    def _conversation(self) -> VerticalScroll:
+        return self.query_one("#conversation", VerticalScroll)
+
+    def _append(self, renderable: RenderableType, *, spaced: bool = True) -> Static:
+        """Mount a message widget at the bottom of the conversation and scroll to it."""
+        widget = Static(renderable)
+        if spaced:
+            widget.add_class("spaced")
+        self._conversation().mount(widget)
+        self._scroll_end()
+        return widget
+
+    def _scroll_end(self) -> None:
+        self.call_after_refresh(self._conversation().scroll_end, animate=False)
+
     # ── Rendering helpers ─────────────────────────────────────────────
 
     def _render_welcome(self) -> None:
-        log = self.query_one("#conversation", RichLog)
         welcome = Table.grid(padding=(0, 3))
         welcome.add_column(no_wrap=True)
         welcome.add_column(overflow="fold")
@@ -306,69 +308,53 @@ class MilkyFrogApp(App[None]):
             pixel_frog_logo(),
             Text("✻ Welcome to MILKY FROG · 奶蛙", style="bold yellow"),
         )
-        log.write(Panel(welcome, border_style="yellow"))
-        log.write("")
-        log.write(Text("Describe what to build, fix, or explain — be specific", style="dim"))
-        log.write(Text("/help lists commands · /clear resets · /exit leaves", style="dim"))
-        log.write("")
+        self._append(Panel(welcome, border_style="yellow"))
+        self._append(
+            Text.assemble(
+                ("Describe what to build, fix, or explain — be specific\n", "dim"),
+                ("/help lists commands · /clear resets · /exit leaves", "dim"),
+            )
+        )
 
     def _render_user_message(self, text: str) -> None:
-        log = self.query_one("#conversation", RichLog)
-        row = Table.grid(padding=(0, 1))
-        row.add_column(no_wrap=True, vertical="top")
-        row.add_column(ratio=1)
-        row.add_row(Text("▸", style="bold cyan"), Text(text))
-        log.write(row)
-        log.write("")
+        self._append(_row(Text("▸", style="bold cyan"), Text(text)))
 
     def _flush_thinking(self) -> None:
-        """Commit accumulated thinking under the already-written header, and reset.
-
-        The ``✻ thinking`` header is written once when reasoning begins (see
-        :meth:`on_add_thinking`); here we append only the reasoning body.
-        """
-        if not self._thinking_buf:
-            return
-        log = self.query_one("#conversation", RichLog)
+        """Fill in the reasoning body under its already-mounted ``✻ thinking`` header."""
+        widget = self._thinking_widget
+        self._thinking_widget = None
         text = "".join(self._thinking_buf).strip()
-        if text:
-            log.write(Text(text, style="dim italic"))
         self._thinking_buf.clear()
+        if widget is None:
+            return
+        if not text:
+            widget.remove()  # no reasoning was produced; drop the bare header
+            return
+        widget.update(Text.assemble(("✻ thinking\n", "dim italic"), (text, "dim italic")))
+        self._scroll_end()
 
     def _commit_answer(self) -> None:
-        """Commit accumulated answer to the conversation log and reset."""
-        if not self._answer_buf:
-            return
-        log = self.query_one("#conversation", RichLog)
-        text = "".join(self._answer_buf)
-        body = Markdown(text) if text else Text("No response content.", style="dim")
-        row = Table.grid(padding=(0, 1))
-        row.add_column(no_wrap=True, vertical="top")
-        row.add_column(ratio=1)
-        row.add_row(Text("●", style="bold yellow"), body)
-        log.write(row)
+        """Finalize the live answer widget (it already holds the streamed markdown)."""
+        widget = self._answer_widget
+        self._answer_widget = None
+        if widget is not None and not self._answer_buf:
+            widget.remove()  # nothing streamed; drop the empty bullet
         self._answer_buf.clear()
-        # Hide the live preview now that the final answer is committed.
-        self.query_one("#in-progress", _InProgress).hide()
 
     def _render_assistant_footer(self, run_id: str, *, usage: RunUsage | None = None) -> None:
-        log = self.query_one("#conversation", RichLog)
         footer = f"  ⎿ run {run_id[:8]}"
         summary = format_run_usage(usage) if usage is not None else None
         if summary is not None:
             footer = f"{footer} · {summary}"
-        log.write(Text(footer, style="bright_black"))
+        self._append(Text(footer, style="bright_black"))
 
     def _render_error(self, message: str, *, hint: str | None = None) -> None:
         self._close_phase()
-        log = self.query_one("#conversation", RichLog)
-        error = Text(f"Error: {message}", style="bold red")
-        log.write(error)
+        self._append(Text(f"Error: {message}", style="bold red"), spaced=hint is None)
         if hint:
-            log.write(Text(f"Hint: {hint}", style="bold cyan"))
+            self._append(Text(f"Hint: {hint}", style="bold cyan"))
 
     def _render_help(self) -> None:
-        log = self.query_one("#conversation", RichLog)
         commands = Table.grid(padding=(0, 2))
         commands.add_column(style="yellow", no_wrap=True)
         commands.add_column(style="dim")
@@ -378,7 +364,7 @@ class MilkyFrogApp(App[None]):
         commands.add_row("Tab", "Complete a slash command")
         commands.add_row("↑ / ↓", "Recall previous prompts")
         commands.add_row("Esc", "Interrupt the running task")
-        log.write(Panel(commands, title="Commands", border_style="bright_black"))
+        self._append(Panel(commands, title="Commands", border_style="bright_black"))
 
     def _close_phase(self) -> None:
         """Close the current streaming phase, committing any buffered content."""
@@ -391,40 +377,39 @@ class MilkyFrogApp(App[None]):
     # ── Message handlers (lifecycle streaming) ────────────────────────
 
     def on_add_thinking(self, event: AddThinking) -> None:
-        """Accumulate reasoning chunks; show live preview."""
+        """Accumulate reasoning chunks; show the header immediately."""
         if self._phase != "thinking":
             self._close_phase()
             self._phase = "thinking"
-            # Show the thinking header immediately
-            log = self.query_one("#conversation", RichLog)
-            log.write(Text("✻ thinking", style="dim italic"))
+            self._thinking_widget = self._append(Text("✻ thinking", style="dim italic"))
         self._thinking_buf.append(event.text)
 
     def on_add_text(self, event: AddText) -> None:
-        """Accumulate answer chunks; update the live-preview widget."""
-        if self._phase == "thinking":
-            self._flush_thinking()
+        """Accumulate answer chunks; update the live answer widget in place."""
         if self._phase != "answer":
             self._close_phase()
             self._phase = "answer"
+            self._answer_widget = self._append(_row(Text("●", style="bold yellow"), Text("")))
         self._answer_buf.append(event.text)
-        # Live preview: show accumulated text in the in-progress widget
-        preview = self.query_one("#in-progress", _InProgress)
-        preview.set_text("".join(self._answer_buf))
+        if self._answer_widget is not None:
+            body = Markdown("".join(self._answer_buf))
+            self._answer_widget.update(_row(Text("●", style="bold yellow"), body))
+        self._scroll_end()
 
     def on_tool_call_msg(self, event: ToolCallMsg) -> None:
         """Close the open assistant block, then write the tool call signature."""
         self._close_phase()
-        log = self.query_one("#conversation", RichLog)
         signature = format_tool_call(event.name, event.arguments)
-        log.write(Text.assemble(("  ⏺ ", "bold cyan"), (signature, "cyan")))
+        self._append(
+            Text.assemble(("  ⏺ ", "bold cyan"), (signature, "cyan")),
+            spaced=False,
+        )
 
     def on_tool_result_msg(self, event: ToolResultMsg) -> None:
         """Write the tool result as an indented summary line under its call."""
-        log = self.query_one("#conversation", RichLog)
         summary = summarize_tool_result(event.content, is_error=event.is_error)
         mark, style = ("✗", "red") if event.is_error else ("⎿", "bright_black")
-        log.write(Text.assemble((f"    {mark} ", style), (summary, "dim")))
+        self._append(Text.assemble((f"    {mark} ", style), (summary, "dim")))
 
     def on_update_usage(self, event: UpdateUsage) -> None:
         status_bar = self.query_one(RunStatusBar)
@@ -516,7 +501,7 @@ class MilkyFrogApp(App[None]):
             self._render_help()
             return
         if command == "/clear":
-            self.query_one("#conversation", RichLog).clear()
+            self._conversation().remove_children()
             self._run_id = None
             return
 
@@ -550,8 +535,9 @@ class MilkyFrogApp(App[None]):
             self._run_id = run_id
             status_bar = self.query_one(RunStatusBar)
             status_bar.set_run_id(run_id)
-            log = self.query_one("#conversation", RichLog)
-            log.write(Text(f"Attached to run {run_id[:8]} · next prompt continues it", style="dim"))
+            self._append(
+                Text(f"Attached to run {run_id[:8]} · next prompt continues it", style="dim")
+            )
             return
 
         self._run_id = run_id
@@ -563,6 +549,8 @@ class MilkyFrogApp(App[None]):
         self._phase = None
         self._thinking_buf.clear()
         self._answer_buf.clear()
+        self._thinking_widget = None
+        self._answer_widget = None
 
         self._render_user_message(task)
 
