@@ -52,6 +52,7 @@ class MilkyFrog:
             checkpoints=self._checkpoints,
             handlers=handlers if handlers is not None else LifecycleBus(),
             tool_gate=self._tool_gate,
+            agent_home=settings.home,
         )
         self._loop: asyncio.AbstractEventLoop | None = None
         self._cancellation: RunCancellation | None = None

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 from milky_frog.domain import Message, MessageRole, ModelResponse, RunState, ToolCall, ToolResult
 from milky_frog.harness.prompt import system_prompt
@@ -23,11 +24,14 @@ __all__ = [
 ]
 
 
-def start_run(state: RunState, prompt: str) -> RunState:
+def start_run(state: RunState, prompt: str, *, agent_home: Path | None = None) -> RunState:
     return replace(
         state,
         messages=(
-            Message(MessageRole.SYSTEM, system_prompt(state.workspace)),
+            Message(
+                MessageRole.SYSTEM,
+                system_prompt(state.workspace, home=agent_home),
+            ),
             Message(MessageRole.USER, prompt),
         ),
     )
