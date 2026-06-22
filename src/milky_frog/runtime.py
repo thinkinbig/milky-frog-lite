@@ -65,6 +65,7 @@ class MilkyFrog:
             tools=ToolRegistry(default_tools()),
             checkpoints=self._checkpoints,
             handlers=self._dispatcher,
+            agent_home=settings.home,
         )
         self._loop: asyncio.AbstractEventLoop | None = None
         self._cancellation: RunCancellation | None = None
