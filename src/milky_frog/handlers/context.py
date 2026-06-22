@@ -74,10 +74,9 @@ class HandlerContext:
     """Shared framework-managed resources injected into every handler at notify time.
 
     Handlers receive this alongside the event so they can access
-    framework services (UI, workspace, …) without wiring them through
-    constructors.  Fields that are ``None`` are unavailable in the
-    current mode (for example ``ui`` in headless CLI mode).
+    framework services without wiring them through constructors.
+    Fields that are ``None`` are unavailable in the current mode
+    (for example ``ui`` in headless CLI mode).
     """
 
     ui: UIService | None = None
-    workspace: str | None = None
