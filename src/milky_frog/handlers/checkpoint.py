@@ -12,6 +12,7 @@ from milky_frog.handlers.events import (
     RunFailed,
     RunPaused,
     RunStarted,
+    TerminalRunEvent,
 )
 
 _PRIORITY = 100
@@ -31,10 +32,10 @@ class CheckpointHandler(BaseHandler):
         registry.on(RunStarted, priority=_PRIORITY)(self._on_run_started)
         registry.on(RunAfterModel, priority=_PRIORITY)(self._on_after_model)
         registry.on(RunAfterTool, priority=_PRIORITY)(self._on_after_tool)
-        registry.on(RunCompleted, priority=_PRIORITY)(self._on_completed)
-        registry.on(RunPaused, priority=_PRIORITY)(self._on_paused)
-        registry.on(RunCancelled, priority=_PRIORITY)(self._on_cancelled)
-        registry.on(RunFailed, priority=_PRIORITY)(self._on_failed)
+        registry.on(RunCompleted, priority=_PRIORITY)(self._on_terminal)
+        registry.on(RunPaused, priority=_PRIORITY)(self._on_terminal)
+        registry.on(RunCancelled, priority=_PRIORITY)(self._on_terminal)
+        registry.on(RunFailed, priority=_PRIORITY)(self._on_terminal)
 
     async def _on_run_started(self, event: RunStarted, ctx: HandlerContext) -> None:
         del ctx
@@ -48,38 +49,11 @@ class CheckpointHandler(BaseHandler):
         del ctx
         self._store.save_state(event.run_id, event.state)
 
-    async def _on_completed(self, event: RunCompleted, ctx: HandlerContext) -> None:
+    async def _on_terminal(self, event: TerminalRunEvent, ctx: HandlerContext) -> None:
         del ctx
         self._store.save_state(
             event.run_id,
             event.state,
-            status=RunStatus.COMPLETED,
+            status=event.result.status,
             final_message=event.result.final_message,
-        )
-
-    async def _on_paused(self, event: RunPaused, ctx: HandlerContext) -> None:
-        del ctx
-        self._store.save_state(
-            event.run_id,
-            event.state,
-            status=event.status,
-            final_message=event.reason,
-        )
-
-    async def _on_cancelled(self, event: RunCancelled, ctx: HandlerContext) -> None:
-        del ctx
-        self._store.save_state(
-            event.run_id,
-            event.state,
-            status=RunStatus.CANCELLED,
-            final_message=event.reason,
-        )
-
-    async def _on_failed(self, event: RunFailed, ctx: HandlerContext) -> None:
-        del ctx
-        self._store.save_state(
-            event.run_id,
-            event.state,
-            status=RunStatus.FAILED,
-            final_message=str(event.error),
         )

@@ -120,7 +120,7 @@ class MilkyFrog:
 
     @property
     def dispatcher(self) -> EventDispatcher:
-        """The shared EventDispatcher — TUI subscribes its renderer here."""
+        """The shared EventDispatcher — presentation bundles register here via ``bundles=``."""
         return self._dispatcher
 
     @property

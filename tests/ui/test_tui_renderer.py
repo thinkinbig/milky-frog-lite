@@ -5,110 +5,90 @@ from pathlib import Path
 from milky_frog.domain import (
     ModelRequest,
     ModelResponse,
+    RunResult,
     RunState,
     RunStatus,
     TextDelta,
     TokenUsage,
 )
-from milky_frog.handlers import (
+from milky_frog.handlers import EventDispatcher
+from milky_frog.handlers.events import (
     RunAfterModel,
-    RunFailed,
     RunModelChunk,
     RunNotice,
     RunPaused,
 )
-from milky_frog.handlers.context import HandlerContext
 from milky_frog.ui.tui.messages import (
     AddText,
     ApprovalRequired,
-    RunError,
     RunNoticeMsg,
     UpdateUsage,
 )
-from milky_frog.ui.tui.renderer import TextualStreamRenderer
+from milky_frog.ui.tui.presentation import TuiPresentationHandler
 
 _WORKSPACE = Path("/tmp")
 
 
-class _MessageQueue:
+class _MessageSink:
     def __init__(self) -> None:
         self.messages: list[object] = []
 
-    def post_message(self, message: object) -> bool:
+    def __call__(self, message: object) -> None:
         self.messages.append(message)
-        return True
 
 
-async def test_renderer_maps_run_notice() -> None:
-    queue = _MessageQueue()
-    renderer = TextualStreamRenderer(queue)
+async def test_presentation_maps_run_notice() -> None:
+    sink = _MessageSink()
+    bus = EventDispatcher()
+    TuiPresentationHandler(sink).register(bus)
 
-    await renderer.on_event(
-        RunNotice(run_id="run-1", message="retrying connection", level="warning"),
-        HandlerContext(),
-    )
+    await bus.notify(RunNotice(run_id="run-1", message="retrying connection", level="warning"))
 
-    assert len(queue.messages) == 1
-    message = queue.messages[0]
+    assert len(sink.messages) == 1
+    message = sink.messages[0]
     assert isinstance(message, RunNoticeMsg)
     assert message.message == "retrying connection"
     assert message.level == "warning"
 
 
-async def test_renderer_maps_run_failed_to_run_error() -> None:
-    queue = _MessageQueue()
-    renderer = TextualStreamRenderer(queue)
+async def test_presentation_maps_model_chunk_and_approval_pause() -> None:
+    sink = _MessageSink()
+    bus = EventDispatcher()
+    TuiPresentationHandler(sink).register(bus)
 
-    await renderer.on_event(
-        RunFailed(
-            run_id="run-1",
-            error=ConnectionError("offline"),
-            state=RunState("run-1", _WORKSPACE),
-        ),
-        HandlerContext(),
-    )
-
-    assert len(queue.messages) == 1
-    message = queue.messages[0]
-    assert isinstance(message, RunError)
-    assert message.error == "ConnectionError: offline"
-
-
-async def test_renderer_maps_model_chunk_and_approval_pause() -> None:
-    queue = _MessageQueue()
-    renderer = TextualStreamRenderer(queue)
-
-    await renderer.on_event(
+    await bus.notify(
         RunModelChunk(
             run_id="run-1",
             request=ModelRequest((), ()),
             chunk=TextDelta("hi"),
-        ),
-        HandlerContext(),
+        )
     )
-    await renderer.on_event(
+    await bus.notify(
         RunPaused(
             run_id="run-1",
-            status=RunStatus.WAITING_FOR_APPROVAL,
-            reason="approval needed for: bash",
-            model_calls=1,
+            result=RunResult(
+                "run-1",
+                RunStatus.WAITING_FOR_APPROVAL,
+                "approval needed for: bash",
+                1,
+            ),
             state=RunState("run-1", _WORKSPACE),
-        ),
-        HandlerContext(),
+        )
     )
 
-    assert isinstance(queue.messages[0], AddText)
-    assert queue.messages[0].text == "hi"
-    assert isinstance(queue.messages[1], ApprovalRequired)
-    assert queue.messages[1].reason == "approval needed for: bash"
+    assert isinstance(sink.messages[0], AddText)
+    assert sink.messages[0].text == "hi"
+    assert isinstance(sink.messages[1], ApprovalRequired)
+    assert sink.messages[1].reason == "approval needed for: bash"
 
 
-async def test_renderer_accumulates_usage_on_after_model() -> None:
-    queue = _MessageQueue()
-    renderer = TextualStreamRenderer(queue)
+async def test_presentation_accumulates_usage_on_after_model() -> None:
+    sink = _MessageSink()
+    bus = EventDispatcher()
+    TuiPresentationHandler(sink).register(bus)
     request = ModelRequest((), ())
 
-    await renderer.on_event(
+    await bus.notify(
         RunAfterModel(
             run_id="run-1",
             request=request,
@@ -119,12 +99,11 @@ async def test_renderer_accumulates_usage_on_after_model() -> None:
                 model="test",
             ),
             state=RunState("run-1", _WORKSPACE),
-        ),
-        HandlerContext(),
+        )
     )
 
-    assert len(queue.messages) == 1
-    update = queue.messages[0]
+    assert len(sink.messages) == 1
+    update = sink.messages[0]
     assert isinstance(update, UpdateUsage)
     assert update.usage.cumulative.input_tokens == 3
     assert update.usage.cumulative.output_tokens == 5

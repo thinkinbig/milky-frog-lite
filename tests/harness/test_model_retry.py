@@ -78,12 +78,12 @@ async def test_exhausted_retries_emit_run_failed(tmp_path: Path) -> None:
         handlers=bus,
     )
 
-    with pytest.raises(ConnectionError, match="offline"):
-        await harness.run(RunRequest("hi", tmp_path))
+    result = await harness.run(RunRequest("hi", tmp_path))
 
+    assert result.status is RunStatus.FAILED
     assert model.calls == 3
     assert len(failed) == 1
-    assert isinstance(failed[0].error, ConnectionError)
+    assert "ConnectionError" in failed[0].result.final_message
 
 
 @pytest.mark.asyncio
@@ -103,8 +103,8 @@ async def test_non_retriable_model_errors_do_not_retry(tmp_path: Path) -> None:
         handlers=bus,
     )
 
-    with pytest.raises(ValueError, match="bad request"):
-        await harness.run(RunRequest("hi", tmp_path))
+    result = await harness.run(RunRequest("hi", tmp_path))
 
+    assert result.status is RunStatus.FAILED
     assert model.calls == 1
     assert notices == []

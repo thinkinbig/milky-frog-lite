@@ -1,4 +1,5 @@
 from milky_frog.ui.tui.app import MilkyFrogApp
+from milky_frog.ui.tui.assembly import tui_presentation_bundle
 from milky_frog.ui.tui.messages import (
     AddText,
     AddThinking,
@@ -9,7 +10,7 @@ from milky_frog.ui.tui.messages import (
     ToolResultMsg,
     UpdateUsage,
 )
-from milky_frog.ui.tui.renderer import TextualStreamRenderer
+from milky_frog.ui.tui.presentation import TuiPresentationHandler
 
 __all__ = [
     "AddText",
@@ -18,8 +19,9 @@ __all__ = [
     "RunError",
     "RunFinished",
     "RunNoticeMsg",
-    "TextualStreamRenderer",
     "ToolCallMsg",
     "ToolResultMsg",
+    "TuiPresentationHandler",
     "UpdateUsage",
+    "tui_presentation_bundle",
 ]

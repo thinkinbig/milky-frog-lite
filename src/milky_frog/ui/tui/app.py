@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import ClassVar
 
@@ -16,10 +17,12 @@ from textual.reactive import reactive
 from textual.widgets import Footer, Header, Input, Static
 from textual.worker import Worker
 
-from milky_frog.domain import ApprovalDecision, RunStatus, RunUsage
+from milky_frog.domain import ApprovalDecision, ResumeError, RunStatus, RunUsage
 from milky_frog.runtime import MilkyFrog
+from milky_frog.settings import Settings
 from milky_frog.ui.logo import pixel_frog_logo
-from milky_frog.ui.tui.advancer import RunAdvancer
+from milky_frog.ui.tui.advancer import PreRunError, RunAdvancer
+from milky_frog.ui.tui.assembly import tui_presentation_bundle
 from milky_frog.ui.tui.messages import (
     AddText,
     AddThinking,
@@ -31,7 +34,6 @@ from milky_frog.ui.tui.messages import (
     ToolResultMsg,
     UpdateUsage,
 )
-from milky_frog.ui.tui.renderer import TextualStreamRenderer
 from milky_frog.ui.tui.rendering import (
     COMMANDS,
     DiffKind,
@@ -266,9 +268,11 @@ class MilkyFrogApp(App[None]):
         Binding("escape", "cancel_run", "Interrupt"),
     ]
 
-    def __init__(self, frog: MilkyFrog) -> None:
+    def __init__(self, settings: Settings) -> None:
         super().__init__()
-        self._session = RunAdvancer(frog, self)
+        self._presentation = tui_presentation_bundle(self.post_message)
+        self._frog = MilkyFrog.from_settings(settings, bundles=[self._presentation])
+        self._session = RunAdvancer(self._frog)
         self._worker: Worker[None] | None = None
 
         # Streaming render state: buffers plus the live widget updated in place.
@@ -294,11 +298,7 @@ class MilkyFrogApp(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
-        """App started: render welcome and wire up the stream renderer."""
-        # Stream renderer subscribes to the shared EventDispatcher alongside
-        # cross-cutting handlers (PolicyHandler, LangfuseHandler, …).
-        self._session.frog.dispatcher.subscribe(TextualStreamRenderer(self).on_event)
-
+        """App started: render welcome."""
         self._render_welcome()
         self.query_one("#prompt-input", Input).focus()
 
@@ -604,8 +604,21 @@ class MilkyFrogApp(App[None]):
 
     @work(thread=False, exit_on_error=False)
     async def _do_run(self, task: str, run_id: str | None) -> None:
-        """Thin worker: delegate to RunAdvancer and let it post the result messages."""
-        await self._session.do_run(task, run_id)
+        """Thin worker: delegate to RunAdvancer; UI via TuiPresentationHandler."""
+        try:
+            await self._session.do_run(task, run_id)
+        except (PreRunError, ResumeError) as error:
+            self.post_message(RunError(str(error)))
+        except asyncio.CancelledError:
+            result = RunAdvancer.cancelled_result(self._session.run_id)
+            self.post_message(
+                RunFinished(
+                    result=result,
+                    status=RunStatus.CANCELLED,
+                    message="Cancelled the current task.",
+                )
+            )
+            raise
 
     def _start_approval(self, run_id: str, decision: ApprovalDecision) -> None:
         """Resume a paused Run with the user's approval verdict."""
@@ -625,8 +638,21 @@ class MilkyFrogApp(App[None]):
 
     @work(thread=False, exit_on_error=False)
     async def _do_approve(self, run_id: str, decision: ApprovalDecision) -> None:
-        """Thin worker: delegate to RunAdvancer and let it post the result messages."""
-        await self._session.do_approve(run_id, decision)
+        """Thin worker: delegate to RunAdvancer; UI via TuiPresentationHandler."""
+        try:
+            await self._session.do_approve(run_id, decision)
+        except (PreRunError, ResumeError) as error:
+            self.post_message(RunError(str(error)))
+        except asyncio.CancelledError:
+            result = RunAdvancer.cancelled_result(run_id)
+            self.post_message(
+                RunFinished(
+                    result=result,
+                    status=RunStatus.CANCELLED,
+                    message="Cancelled the current task.",
+                )
+            )
+            raise
 
     def _resolve_approval(self, answer: str) -> None:
         """Interpret the user's y/n reply to a pending approval prompt."""

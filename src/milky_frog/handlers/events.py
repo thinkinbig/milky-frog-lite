@@ -130,23 +130,23 @@ class RunCompleted(BaseEvent):
 
 @dataclass(frozen=True)
 class RunPaused(BaseEvent):
-    status: RunStatus
-    reason: str
-    model_calls: int
+    result: RunResult
     state: RunState
 
 
 @dataclass(frozen=True)
 class RunCancelled(BaseEvent):
-    reason: str
-    model_calls: int
+    result: RunResult
     state: RunState
 
 
 @dataclass(frozen=True)
 class RunFailed(BaseEvent):
-    error: Exception
+    result: RunResult
     state: RunState
+
+
+TerminalRunEvent = RunCompleted | RunFailed | RunPaused | RunCancelled
 
 
 NoticeLevel = Literal["info", "warning", "error"]

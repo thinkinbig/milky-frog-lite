@@ -10,7 +10,7 @@ from milky_frog import __version__
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.checkpoint.snapshot import dump_run_state
 from milky_frog.diagnostics import CheckStatus, Diagnostic
-from milky_frog.domain import ResumeError, RunResult
+from milky_frog.domain import ResumeError, RunResult, RunStatus
 from milky_frog.project import CONFIG_FILENAME, CONFIG_TEMPLATE, PROJECT_DIRNAME
 from milky_frog.runtime import MilkyFrog, MissingModelConfiguration
 from milky_frog.settings import Settings
@@ -35,6 +35,8 @@ def _find_last_run(store: SqliteCheckpointStore, workspace: Path) -> str | None:
 def _render_result(result: RunResult) -> None:
     """Render a one-shot RunResult to the terminal."""
     render_result(result)
+    if result.status is RunStatus.FAILED:
+        raise typer.Exit(code=1)
 
 
 def _resume_run(
@@ -47,9 +49,6 @@ def _resume_run(
         result = frog.resume(run_id, prompt)
     except ResumeError as error:
         render_error(str(error), hint="List available Runs with: milky-frog runs")
-        raise typer.Exit(code=1) from error
-    except Exception as error:
-        render_error(f"{type(error).__name__}: {error}")
         raise typer.Exit(code=1) from error
     _render_result(result)
     return result
@@ -89,8 +88,7 @@ def interactive() -> None:
     except MissingModelConfiguration:
         _render_configuration_error()
         raise typer.Exit(code=2) from None
-    frog = MilkyFrog.from_settings(settings)
-    MilkyFrogApp(frog).run()
+    MilkyFrogApp(settings).run()
 
 
 def _render_configuration_error(*, run_doctor_again: bool = False) -> None:
@@ -198,11 +196,7 @@ def run(task: Annotated[str, typer.Argument()]) -> None:
         _render_configuration_error()
         raise typer.Exit(code=2) from None
     frog = MilkyFrog.from_settings(settings)
-    try:
-        result = frog.run(task, Path.cwd())
-    except Exception as error:
-        render_error(f"{type(error).__name__}: {error}")
-        raise typer.Exit(code=1) from error
+    result = frog.run(task, Path.cwd())
     _render_result(result)
 
 

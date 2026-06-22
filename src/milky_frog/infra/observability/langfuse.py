@@ -156,7 +156,7 @@ class LangfuseHandler(BaseHandler):
                 name="run_failed",
                 as_type="span",
                 level="ERROR",
-                status_message=f"{type(event.error).__name__}: {event.error}",
+                status_message=event.result.final_message,
             ).end()
         elif isinstance(event, RunCancelled):
             self._client.start_observation(
@@ -164,7 +164,7 @@ class LangfuseHandler(BaseHandler):
                 name="run_cancelled",
                 as_type="span",
                 level="WARNING",
-                status_message=event.reason,
+                status_message=event.result.final_message,
             ).end()
         elif isinstance(event, RunPaused):
             self._client.start_observation(
@@ -172,7 +172,7 @@ class LangfuseHandler(BaseHandler):
                 name="run_paused",
                 as_type="span",
                 level="WARNING",
-                status_message=event.reason,
+                status_message=event.result.final_message,
             ).end()
 
     # ── Turn lifecycle ─────────────────────────────────────────────

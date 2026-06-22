@@ -136,12 +136,17 @@ async def test_langfuse_run_cancelled_records_warning_span_and_cleans_up(
     await registry.notify(RunStarted(run_id="run-1", request=_run_request(), state=_run_state()))
 
     await registry.notify(
-        RunCancelled(run_id="run-1", reason="cancelled", model_calls=0, state=_run_state())
+        RunCancelled(
+            run_id="run-1",
+            result=RunResult("run-1", RunStatus.CANCELLED, "cancelled", 0),
+            state=_run_state(),
+        )
     )
 
     cancelled = client.observations[-1]
     assert cancelled.start_kwargs["name"] == "run_cancelled"
     assert cancelled.start_kwargs["level"] == "WARNING"
+    assert cancelled.start_kwargs["status_message"] == "cancelled"
     assert cancelled.ended is True
     assert "run-1" not in handler._trace_ids
 
@@ -158,15 +163,14 @@ async def test_langfuse_run_paused_records_warning_span_and_cleans_up(
     await registry.notify(
         RunPaused(
             run_id="run-1",
-            status=RunStatus.PAUSED_LIMIT,
-            reason="limit",
-            model_calls=1,
+            result=RunResult("run-1", RunStatus.PAUSED_LIMIT, "limit", 1),
             state=_run_state(),
         )
     )
 
     paused = client.observations[-1]
     assert paused.start_kwargs["name"] == "run_paused"
+    assert paused.start_kwargs["status_message"] == "limit"
     assert paused.ended is True
     assert "run-1" not in handler._trace_ids
 
@@ -180,11 +184,15 @@ async def test_langfuse_run_failed_records_error_span_and_cleans_up(
     handler.register(registry)
     await registry.notify(RunStarted(run_id="run-1", request=_run_request(), state=_run_state()))
 
-    await registry.notify(RunFailed(run_id="run-1", error=RuntimeError("boom"), state=_run_state()))
+    failed_result = RunResult("run-1", RunStatus.FAILED, "RuntimeError: boom", 0)
+    await registry.notify(
+        RunFailed(run_id="run-1", result=failed_result, state=_run_state())
+    )
 
     failed = client.observations[-1]
     assert failed.start_kwargs["name"] == "run_failed"
     assert failed.start_kwargs["level"] == "ERROR"
+    assert failed.start_kwargs["status_message"] == "RuntimeError: boom"
     assert failed.ended is True
     assert "run-1" not in handler._trace_ids
 

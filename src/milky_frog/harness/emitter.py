@@ -156,29 +156,31 @@ class RunEmitter:
             RunCompleted(run_id=state.run_id, result=result, state=state)
         )
 
-    async def run_paused(self, state: RunState, message: str) -> list[HandlerResult]:
+    async def run_paused(self, state: RunState, result: RunResult) -> list[HandlerResult]:
         return await self._handlers.notify(
-            RunPaused(
-                run_id=state.run_id,
-                status=RunStatus.PAUSED_LIMIT,
-                reason=message,
-                model_calls=state.completed_model_calls,
-                state=state,
-            )
+            RunPaused(run_id=state.run_id, result=result, state=state)
         )
 
-    async def run_cancelled(self, state: RunState, reason: str) -> list[HandlerResult]:
+    async def run_cancelled(self, state: RunState, result: RunResult) -> list[HandlerResult]:
         return await self._handlers.notify(
-            RunCancelled(
-                run_id=state.run_id,
-                reason=reason,
-                model_calls=state.completed_model_calls,
-                state=state,
-            )
+            RunCancelled(run_id=state.run_id, result=result, state=state)
         )
 
-    async def run_failed(self, state: RunState, error: Exception) -> list[HandlerResult]:
-        return await self._handlers.notify(RunFailed(run_id=state.run_id, error=error, state=state))
+    async def run_failed(self, state: RunState, result: RunResult) -> list[HandlerResult]:
+        return await self._handlers.notify(
+            RunFailed(run_id=state.run_id, result=result, state=state)
+        )
+
+    async def finish_failed(self, state: RunState, error: Exception) -> RunResult:
+        result = RunResult(
+            state.run_id,
+            RunStatus.FAILED,
+            f"{type(error).__name__}: {error}",
+            state.completed_model_calls,
+            state.usage,
+        )
+        await self.run_failed(state, result)
+        return result
 
     async def finish_completed(self, state: RunState, final_message: str) -> RunResult:
         result = RunResult(
@@ -200,7 +202,7 @@ class RunEmitter:
             state.completed_model_calls,
             state.usage,
         )
-        await self.run_paused(state, message)
+        await self.run_paused(state, result)
         return result
 
     async def finish_cancelled(self, state: RunState, reason: str = "cancelled") -> RunResult:
@@ -211,7 +213,7 @@ class RunEmitter:
             state.completed_model_calls,
             state.usage,
         )
-        await self.run_cancelled(state, reason)
+        await self.run_cancelled(state, result)
         return result
 
     async def finish_approval_needed(self, state: RunState, tool_names: list[str]) -> RunResult:
@@ -223,13 +225,5 @@ class RunEmitter:
             state.completed_model_calls,
             state.usage,
         )
-        await self._handlers.notify(
-            RunPaused(
-                run_id=state.run_id,
-                status=RunStatus.WAITING_FOR_APPROVAL,
-                reason=message,
-                model_calls=state.completed_model_calls,
-                state=state,
-            )
-        )
+        await self.run_paused(state, result)
         return result

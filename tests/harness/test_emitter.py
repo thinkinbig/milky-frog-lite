@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from milky_frog.checkpoint import SqliteCheckpointStore
-from milky_frog.domain import RunState, RunStatus
+from milky_frog.domain import RunResult, RunState, RunStatus
 from milky_frog.handlers import (
     CheckpointHandler,
     EventDispatcher,
@@ -40,7 +40,10 @@ async def test_run_cancelled_persists_checkpoint_before_handler(tmp_path: Path) 
     state = RunState(run_id="run-1", workspace=tmp_path)
     store.create_run(state.run_id, tmp_path)
 
-    await emitter.run_cancelled(state, "cancelled")
+    await emitter.run_cancelled(
+        state,
+        RunResult(state.run_id, RunStatus.CANCELLED, "cancelled", 0),
+    )
 
     assert checkpoint_seen is True
 
@@ -61,9 +64,34 @@ async def test_run_failed_persists_checkpoint_before_handler(tmp_path: Path) -> 
     state = RunState(run_id="run-2", workspace=tmp_path)
     store.create_run(state.run_id, tmp_path)
 
-    await emitter.run_failed(state, RuntimeError("boom"))
+    await emitter.run_failed(
+        state,
+        RunResult(state.run_id, RunStatus.FAILED, "RuntimeError: boom", 0),
+    )
 
     assert checkpoint_seen is True
+
+
+@pytest.mark.asyncio
+async def test_finish_failed_returns_result_and_notifies(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    registry = EventDispatcher()
+    failed: list[RunFailed] = []
+
+    @registry.on(RunFailed)
+    async def record(event: RunFailed, _ctx: HandlerContext) -> None:
+        failed.append(event)
+
+    emitter = _make_emitter(store, registry)
+    state = RunState(run_id="run-3", workspace=tmp_path)
+    store.create_run(state.run_id, tmp_path)
+
+    result = await emitter.finish_failed(state, RuntimeError("boom"))
+
+    assert result.status is RunStatus.FAILED
+    assert result.final_message == "RuntimeError: boom"
+    assert len(failed) == 1
+    assert failed[0].result is result
 
 
 @pytest.mark.asyncio

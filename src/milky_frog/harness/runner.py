@@ -211,8 +211,7 @@ class Harness:
                 return await self._emitter.finish_cancelled(state)
             raise
         except Exception as error:
-            await self._emitter.run_failed(state, error)
-            raise
+            return await self._emitter.finish_failed(state, error)
 
     # ── private helpers (absorbed from ModelStreamer / ToolRunner) ──────────
 

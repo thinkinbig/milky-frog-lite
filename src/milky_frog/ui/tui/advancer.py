@@ -1,14 +1,9 @@
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
-from typing import Protocol
-
-from textual.message import Message
 
 from milky_frog.domain import (
     ApprovalDecision,
-    ResumeError,
     RunCancellation,
     RunRequest,
     RunResult,
@@ -16,29 +11,22 @@ from milky_frog.domain import (
 )
 from milky_frog.project import load_project_config
 from milky_frog.runtime import MilkyFrog
-from milky_frog.ui.tui.messages import RunError, RunFinished
 
 
-class WidgetChannel(Protocol):
-    """Post a Textual message to the owning widget or app."""
-
-    def post_message(self, message: Message) -> bool: ...
+class PreRunError(Exception):
+    """The Harness was not started (for example an unknown Run id)."""
 
 
 class RunAdvancer:
     """Orchestration state for one interactive TUI conversation.
 
     Holds ``run_id``, busy flag, cancellation token, and pending-approval run_id.
-    Posts ``RunFinished`` / ``RunError`` messages to the ``WidgetChannel``.
-    Harness failures are surfaced by ``TextualStreamRenderer`` on ``RunFailed``;
-    this advancer only posts ``RunError`` for ``ResumeError`` and pre-harness checks.
-    ``MilkyFrogApp`` ``@work`` workers delegate their coroutine bodies to
-    ``do_run`` / ``do_approve`` so the App stays a pure widget layer.
+    Drives ``frog.harness`` only — UI updates travel through ``TuiPresentationHandler``
+    on the lifecycle bus (or ``RunError`` for pre-harness failures in the App worker).
     """
 
-    def __init__(self, frog: MilkyFrog, queue: WidgetChannel) -> None:
+    def __init__(self, frog: MilkyFrog) -> None:
         self.frog = frog
-        self._queue = queue
         self.run_id: str | None = None
         self.busy: bool = False
         self.cancellation: RunCancellation | None = None
@@ -64,8 +52,8 @@ class RunAdvancer:
             return ApprovalDecision.DENY
         return None
 
-    async def do_run(self, task: str, run_id: str | None) -> None:
-        """Advance the harness (new Run or resume with a prompt), then post result."""
+    async def do_run(self, task: str, run_id: str | None) -> RunResult:
+        """Advance the harness (new Run or resume with a prompt)."""
         cancellation = self.cancellation
         frog = self.frog
         try:
@@ -82,8 +70,7 @@ class RunAdvancer:
             else:
                 stored = frog.checkpoints.get_run(run_id)
                 if stored is None:
-                    self._queue.post_message(RunError(f"unknown Run: {run_id}"))
-                    return
+                    raise PreRunError(f"unknown Run: {run_id}")
                 config = load_project_config(stored.workspace)
                 result = await frog.harness.resume(
                     run_id,
@@ -91,27 +78,20 @@ class RunAdvancer:
                     prompt=task,
                     cancellation=cancellation,
                 )
-            self._finish(result)
-        except asyncio.CancelledError:
-            self._cancelled(run_id)
-        except ResumeError as error:
-            self._queue.post_message(RunError(str(error)))
-        except Exception:
-            # Harness failures emit RunFailed first; the stream renderer posts RunError.
-            pass
+            self.run_id = result.run_id
+            return result
         finally:
             self.busy = False
             self.cancellation = None
 
-    async def do_approve(self, run_id: str, decision: ApprovalDecision) -> None:
+    async def do_approve(self, run_id: str, decision: ApprovalDecision) -> RunResult:
         """Resume a paused Run with the user's approval verdict."""
         cancellation = self.cancellation
         frog = self.frog
         try:
             stored = frog.checkpoints.get_run(run_id)
             if stored is None:
-                self._queue.post_message(RunError(f"unknown Run: {run_id}"))
-                return
+                raise PreRunError(f"unknown Run: {run_id}")
             config = load_project_config(stored.workspace)
             result = await frog.harness.resume(
                 run_id,
@@ -119,29 +99,13 @@ class RunAdvancer:
                 approval=decision,
                 cancellation=cancellation,
             )
-            self._finish(result)
-        except asyncio.CancelledError:
-            self._cancelled(run_id)
-        except ResumeError as error:
-            self._queue.post_message(RunError(str(error)))
-        except Exception:
-            # Harness failures emit RunFailed first; the stream renderer posts RunError.
-            pass
+            self.run_id = result.run_id
+            return result
         finally:
             self.busy = False
             self.cancellation = None
 
-    def _finish(self, result: RunResult) -> None:
-        self.run_id = result.run_id
-        self._queue.post_message(
-            RunFinished(result=result, status=result.status, message=result.final_message)
-        )
-
-    def _cancelled(self, run_id: str | None) -> None:
-        self._queue.post_message(
-            RunFinished(
-                result=RunResult(run_id or "unknown", RunStatus.CANCELLED, "cancelled", 0),
-                status=RunStatus.CANCELLED,
-                message="Cancelled the current task.",
-            )
-        )
+    @staticmethod
+    def cancelled_result(run_id: str | None) -> RunResult:
+        """Synthetic result when a Textual worker is hard-cancelled."""
+        return RunResult(run_id or "unknown", RunStatus.CANCELLED, "cancelled", 0)

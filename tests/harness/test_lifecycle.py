@@ -92,7 +92,7 @@ async def test_dispatches_run_paused_event(tmp_path: Path) -> None:
 
     assert result.status is RunStatus.PAUSED_LIMIT
     assert len(paused) == 1
-    assert paused[0].status is RunStatus.PAUSED_LIMIT
+    assert paused[0].result.status is RunStatus.PAUSED_LIMIT
 
 
 @pytest.mark.asyncio
@@ -125,8 +125,8 @@ async def test_cancellation_stops_run(tmp_path: Path) -> None:
 
     assert result.status is RunStatus.CANCELLED
     assert len(cancelled) == 1
-    assert cancelled[0].reason == "cancelled"
-    assert cancelled[0].model_calls == 0
+    assert cancelled[0].result.final_message == "cancelled"
+    assert cancelled[0].result.model_calls == 0
     assert result.model_calls == 0
     store = SqliteCheckpointStore(tmp_path / "state.db")
     assert run_status(store, result.run_id) is RunStatus.CANCELLED
@@ -295,11 +295,13 @@ async def test_dispatches_run_failed_event(tmp_path: Path) -> None:
         handlers=registry,
     )
 
-    with pytest.raises(RuntimeError, match="boom"):
-        await harness.run(RunRequest("fail", tmp_path))
+    result = await harness.run(RunRequest("fail", tmp_path))
 
+    assert result.status is RunStatus.FAILED
+    assert "boom" in result.final_message
     assert len(failed) == 1
-    assert isinstance(failed[0].error, RuntimeError)
+    assert failed[0].result.status is RunStatus.FAILED
+    assert "boom" in failed[0].result.final_message
     store = SqliteCheckpointStore(tmp_path / "state.db")
     assert run_status(store, failed[0].run_id) is RunStatus.FAILED
 
