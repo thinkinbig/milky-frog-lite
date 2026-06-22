@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from textual.message import Message
-
 from milky_frog.domain import (
     ModelRequest,
     ModelResponse,
@@ -16,7 +14,7 @@ from milky_frog.handlers import (
     RunAfterModel,
     RunFailed,
     RunModelChunk,
-    RunNotification,
+    RunNotice,
     RunPaused,
 )
 from milky_frog.handlers.context import HandlerContext
@@ -24,7 +22,7 @@ from milky_frog.ui.tui.messages import (
     AddText,
     ApprovalRequired,
     RunError,
-    RunNotificationMsg,
+    RunNoticeMsg,
     UpdateUsage,
 )
 from milky_frog.ui.tui.renderer import TextualStreamRenderer
@@ -34,25 +32,25 @@ _WORKSPACE = Path("/tmp")
 
 class _MessageQueue:
     def __init__(self) -> None:
-        self.messages: list[Message] = []
+        self.messages: list[object] = []
 
-    def post_message(self, message: Message) -> bool:
+    def post_message(self, message: object) -> bool:
         self.messages.append(message)
         return True
 
 
-async def test_renderer_maps_run_notification() -> None:
+async def test_renderer_maps_run_notice() -> None:
     queue = _MessageQueue()
     renderer = TextualStreamRenderer(queue)
 
     await renderer.on_event(
-        RunNotification(run_id="run-1", message="retrying connection", level="warning"),
+        RunNotice(run_id="run-1", message="retrying connection", level="warning"),
         HandlerContext(),
     )
 
     assert len(queue.messages) == 1
     message = queue.messages[0]
-    assert isinstance(message, RunNotificationMsg)
+    assert isinstance(message, RunNoticeMsg)
     assert message.message == "retrying connection"
     assert message.level == "warning"
 

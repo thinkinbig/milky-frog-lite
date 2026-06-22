@@ -149,16 +149,17 @@ class RunFailed(BaseEvent):
     state: RunState
 
 
-NotificationLevel = Literal["info", "warning", "error"]
+NoticeLevel = Literal["info", "warning", "error"]
 
 
 @dataclass(frozen=True)
-class RunNotification(BaseEvent):
-    """Ephemeral user-facing notice while a Run is in progress.
+class RunNotice(BaseEvent):
+    """Ephemeral user-facing message during a Run.
 
-    Examples: model connection retries, rate-limit warnings. Published by
-    ``RunEmitter``; UI Handlers subscribe and render. Not checkpointed.
+    Not a lifecycle phase — examples: model connection retries, rate-limit
+    warnings. Published by ``RunEmitter``; UI Handlers subscribe and render.
+    Not checkpointed.
     """
 
     message: str
-    level: NotificationLevel = "info"
+    level: NoticeLevel = "info"

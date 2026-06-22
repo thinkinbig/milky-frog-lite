@@ -4,7 +4,7 @@ from pydantic import JsonValue
 from textual.message import Message
 
 from milky_frog.domain import RunResult, RunStatus, RunUsage
-from milky_frog.handlers import NotificationLevel
+from milky_frog.handlers.events import NoticeLevel
 
 
 class AddThinking(Message):
@@ -83,10 +83,10 @@ class RunError(Message):
         self.error = error
 
 
-class RunNotificationMsg(Message):
-    """Ephemeral user-facing notice while a Run is in progress."""
+class RunNoticeMsg(Message):
+    """Ephemeral user-facing message while a Run is in progress."""
 
-    def __init__(self, message: str, *, level: NotificationLevel = "info") -> None:
+    def __init__(self, message: str, *, level: NoticeLevel = "info") -> None:
         super().__init__()
         self.message = message
         self.level = level

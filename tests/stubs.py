@@ -165,6 +165,37 @@ class ContinuationModel:
         yield StreamDone(ModelResponse(content="ack"))
 
 
+class FlakyConnectionModel:
+    """Fails the first *failures* stream attempts with ``ConnectionError``."""
+
+    def __init__(self, *, failures: int = 2) -> None:
+        self._failures_left = failures
+        self.calls = 0
+
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        del request
+        self.calls += 1
+        if self._failures_left > 0:
+            self._failures_left -= 1
+            raise ConnectionError("offline")
+        yield TextDelta("ok")
+        yield StreamDone(ModelResponse(content="ok"))
+
+
+class ImmediateErrorModel:
+    """Always raises the configured error on stream."""
+
+    def __init__(self, error: Exception) -> None:
+        self._error = error
+        self.calls = 0
+
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        del request
+        self.calls += 1
+        raise self._error
+        yield StreamDone(ModelResponse())  # makes this an async generator; never reached
+
+
 # ── Langfuse stubs ───────────────────────────────────────────────────
 
 

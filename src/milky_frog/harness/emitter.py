@@ -29,14 +29,14 @@ from milky_frog.handlers import (
     RunFailed,
     RunModelChunk,
     RunModelReasoning,
-    RunNotification,
+    RunNotice,
     RunPaused,
     RunStarted,
     RunTurnEnd,
     RunTurnStart,
     SystemPromptSection,
 )
-from milky_frog.handlers.events import NotificationLevel
+from milky_frog.handlers.events import NoticeLevel
 
 
 class RunEmitter:
@@ -143,12 +143,12 @@ class RunEmitter:
     async def turn_ended(self, run_id: str, model_call: int) -> list[HandlerResult]:
         return await self._handlers.notify(RunTurnEnd(run_id=run_id, model_call=model_call))
 
-    async def run_notification(
-        self, run_id: str, message: str, *, level: NotificationLevel = "info"
+    async def run_notice(
+        self, run_id: str, message: str, *, level: NoticeLevel = "info"
     ) -> list[HandlerResult]:
-        """Dispatch an ephemeral user-facing notice (retry toast, warning, …)."""
+        """Dispatch an ephemeral user-facing Run notice (retry toast, warning, …)."""
         return await self._handlers.notify(
-            RunNotification(run_id=run_id, message=message, level=level)
+            RunNotice(run_id=run_id, message=message, level=level)
         )
 
     # ── Terminal Run flows ──────────────────────────────────────────────────

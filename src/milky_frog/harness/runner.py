@@ -6,7 +6,7 @@ from collections.abc import Coroutine
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from milky_frog.checkpoint import CheckpointStore, RunClaimError
@@ -31,6 +31,12 @@ from milky_frog.domain import (
 from milky_frog.handlers import ApprovalResult, BlockResult, LifecycleBus
 from milky_frog.handlers.checkpoint import CheckpointHandler
 from milky_frog.harness.emitter import RunEmitter
+from milky_frog.harness.model_retry import (
+    MODEL_RETRY_BASE_DELAY_S,
+    MODEL_RETRY_MAX_ATTEMPTS,
+    is_retriable_model_error,
+    retry_sleep,
+)
 from milky_frog.harness.sandbox import LocalSandbox, Sandbox, SandboxFactory
 from milky_frog.harness.state import (
     append_model_response,
@@ -159,8 +165,8 @@ class Harness:
                 await self._emitter.turn_started(run_id, model_call=calls + 1)
                 await self._emitter.before_model(run_id, request)
                 try:
-                    response = await self._run_cancellable(
-                        self._model_turn(run_id, request), cancellation
+                    response = await self._model_turn_with_retry(
+                        run_id, request, cancellation
                     )
                 except ToolRunCancelled:
                     return await self._emitter.finish_cancelled(state)
@@ -277,6 +283,53 @@ class Harness:
             )
         except ToolRunCancelled:
             return await self._emitter.finish_cancelled(plan.state)
+
+    async def _model_turn_with_retry(
+        self,
+        run_id: str,
+        request: ModelRequest,
+        cancellation: RunCancellation | None,
+    ) -> ModelResponse:
+        """Call the model, retrying transient connection failures with a Run notice."""
+        for attempt in range(1, MODEL_RETRY_MAX_ATTEMPTS + 1):
+            try:
+                return cast(
+                    ModelResponse,
+                    await self._run_cancellable(
+                        self._model_turn(run_id, request),
+                        cancellation,
+                    ),
+                )
+            except ToolRunCancelled:
+                raise
+            except Exception as error:
+                if not is_retriable_model_error(error) or attempt >= MODEL_RETRY_MAX_ATTEMPTS:
+                    raise
+                await self._emitter.run_notice(
+                    run_id,
+                    (
+                        f"Cannot reach model ({type(error).__name__}) — "
+                        f"retrying ({attempt + 1}/{MODEL_RETRY_MAX_ATTEMPTS})"
+                    ),
+                    level="warning",
+                )
+                await self._wait_before_model_retry(
+                    MODEL_RETRY_BASE_DELAY_S * attempt,
+                    cancellation,
+                )
+        raise RuntimeError("model retry loop exited without a response")
+
+    async def _wait_before_model_retry(
+        self,
+        delay_s: float,
+        cancellation: RunCancellation | None,
+    ) -> None:
+        """Pause between model retries, honouring cooperative cancellation."""
+        if is_cancelled(cancellation):
+            raise ToolRunCancelled
+        await retry_sleep(delay_s)
+        if is_cancelled(cancellation):
+            raise ToolRunCancelled
 
     async def _model_turn(
         self,

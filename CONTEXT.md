@@ -29,8 +29,12 @@ A callback registered on the Harness lifecycle-signal bus (`LifecycleBus`). Only
 _Avoid_: Middleware, hook, intercept
 
 **Lifecycle signal**:
-An ephemeral, in-process notification (for example `RunModelChunk`, `RunAfterModel`, `RunNotification`) published by `RunEmitter` during a Run and delivered to Handlers. Not replayed from the Checkpoint snapshot.
+An ephemeral, in-process Harness phase notification (for example `RunStarted`, `RunModelChunk`, `RunAfterModel`) published by `RunEmitter` during a Run and delivered to Handlers. Not replayed from the Checkpoint snapshot.
 _Avoid_: Event (unqualified), Checkpoint
+
+**Run notice**:
+An ephemeral user-facing message during a Run (for example a model retry warning). Published on the same bus as lifecycle signals but not a lifecycle phase. Not checkpointed.
+_Avoid_: Notification, toast event
 
 **Checkpoint snapshot**:
 The versioned JSON serialization of a Run's `RunState` (messages, accounting, reasoning log) stored on the `runs` row. The source of truth for resume. Distinct from lifecycle signals.
@@ -89,8 +93,12 @@ _避免使用_：业务工具
 _避免使用_：Middleware、Hook、intercept
 
 **Lifecycle signal（生命周期信号）**：
-Run 进行期间由 `RunEmitter` 发布、分发给 Handler 的临时进程内通知（例如 `RunModelChunk`、`RunAfterModel`、`RunNotification`）。不从 Checkpoint 快照 replay。
+Run 进行期间由 `RunEmitter` 发布、分发给 Handler 的 Harness 阶段通知（例如 `RunStarted`、`RunModelChunk`、`RunAfterModel`）。不从 Checkpoint 快照 replay。
 _避免使用_：Event（无前缀）、Checkpoint
+
+**Run notice（运行提示）**：
+Run 进行期间面向用户的临时消息（例如模型重试警告）。与生命周期信号走同一总线，但不是生命周期阶段。不写入 Checkpoint。
+_避免使用_：Notification、toast 事件
 
 **Checkpoint snapshot（Checkpoint 快照）**：
 Run 的 `RunState`（messages、计数、reasoning log 等）的版本化 JSON 序列化，存于 `runs` 行。resume 的真相来源。与生命周期信号不同。

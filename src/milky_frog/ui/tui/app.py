@@ -26,7 +26,7 @@ from milky_frog.ui.tui.messages import (
     ApprovalRequired,
     RunError,
     RunFinished,
-    RunNotificationMsg,
+    RunNoticeMsg,
     ToolCallMsg,
     ToolResultMsg,
     UpdateUsage,
@@ -473,7 +473,7 @@ class MilkyFrogApp(App[None]):
         self.query_one("#prompt-input", Input).disabled = False
         self.query_one("#prompt-input", Input).focus()
 
-    def on_run_notification_msg(self, event: RunNotificationMsg) -> None:
+    def on_run_notice_msg(self, event: RunNoticeMsg) -> None:
         self._render_notification(event.message, event.level)
 
     def on_approval_required(self, event: ApprovalRequired) -> None:

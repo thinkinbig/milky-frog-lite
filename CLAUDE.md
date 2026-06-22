@@ -103,7 +103,7 @@ both):
 |------|-----------|---------------------|
 | Run start | `save_state` (seeded transcript) | `RunBeforeStart`, `RunStarted` |
 | User message | `save_state` | — |
-| In-run notice | — | `RunNotification` |
+| In-run user message | — | `RunNotice` |
 | After model | `save_state` | `RunAfterModel` |
 | Streaming | — | `RunModelChunk`, `RunModelReasoning` |
 | After tool | `save_state` | `RunAfterTool` |

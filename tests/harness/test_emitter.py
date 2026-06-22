@@ -12,7 +12,7 @@ from milky_frog.handlers import (
     LifecycleBus,
     RunCancelled,
     RunFailed,
-    RunNotification,
+    RunNotice,
     RunTurnEnd,
     RunTurnStart,
 )
@@ -103,17 +103,17 @@ async def test_turn_ended_notifies_handler(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_notification_notifies_handler() -> None:
+async def test_run_notice_notifies_handler() -> None:
     registry = LifecycleBus()
-    seen: list[RunNotification] = []
+    seen: list[RunNotice] = []
 
-    @registry.on(RunNotification)
-    async def record(event: RunNotification, _ctx: HandlerContext) -> None:
+    @registry.on(RunNotice)
+    async def record(event: RunNotice, _ctx: HandlerContext) -> None:
         del _ctx
         seen.append(event)
 
     emitter = RunEmitter(registry)
-    await emitter.run_notification("run-1", "retrying model connection", level="warning")
+    await emitter.run_notice("run-1", "retrying model connection", level="warning")
 
     assert len(seen) == 1
     assert seen[0].message == "retrying model connection"
