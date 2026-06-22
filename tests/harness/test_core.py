@@ -8,8 +8,7 @@ import pytest
 
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import MessageRole, RunRequest, RunStatus, TokenUsage
-from milky_frog.handlers import LifecycleBus
-from milky_frog.harness.runner import Harness
+from milky_frog.handlers import EventDispatcher
 from milky_frog.harness.tools import ToolRegistry
 from tests.checkpoint_helpers import run_status, tool_messages
 from tests.stubs import (
@@ -20,17 +19,18 @@ from tests.stubs import (
     InvalidToolArgsThenRecoverModel,
     ReasoningModel,
     UsageReportingModel,
+    make_harness,
 )
 
 
 @pytest.mark.asyncio
 async def test_runs_tool_loop_and_persists_events(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    harness = Harness(
+    harness = make_harness(
         model=FakeModel(),
         tools=ToolRegistry((EchoTool(),)),
         checkpoints=store,
-        handlers=LifecycleBus(),
+        handlers=EventDispatcher(),
     )
 
     result = await harness.run(RunRequest("echo hello", tmp_path))
@@ -52,11 +52,11 @@ async def test_runs_tool_loop_and_persists_events(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_invalid_tool_arguments_become_tool_errors(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    harness = Harness(
+    harness = make_harness(
         model=InvalidToolArgsThenRecoverModel(),
         tools=ToolRegistry((EchoTool(),)),
         checkpoints=store,
-        handlers=LifecycleBus(),
+        handlers=EventDispatcher(),
     )
 
     result = await harness.run(RunRequest("echo hello", tmp_path))
@@ -74,11 +74,11 @@ async def test_invalid_tool_arguments_become_tool_errors(tmp_path: Path) -> None
 @pytest.mark.asyncio
 async def test_aggregates_token_usage_across_calls(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    harness = Harness(
+    harness = make_harness(
         model=UsageReportingModel(),
         tools=ToolRegistry((EchoTool(),)),
         checkpoints=store,
-        handlers=LifecycleBus(),
+        handlers=EventDispatcher(),
     )
 
     result = await harness.run(RunRequest("echo hello", tmp_path))
@@ -92,11 +92,11 @@ async def test_aggregates_token_usage_across_calls(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_stops_model_stream_after_stream_done(tmp_path: Path) -> None:
     model = EarlyStreamDoneModel()
-    harness = Harness(
+    harness = make_harness(
         model=model,
         tools=ToolRegistry(),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
-        handlers=LifecycleBus(),
+        handlers=EventDispatcher(),
     )
 
     result = await harness.run(RunRequest("hi", tmp_path))
@@ -108,11 +108,11 @@ async def test_stops_model_stream_after_stream_done(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_persists_reasoning_in_checkpoint(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    harness = Harness(
+    harness = make_harness(
         model=ReasoningModel(),
         tools=ToolRegistry(),
         checkpoints=store,
-        handlers=LifecycleBus(),
+        handlers=EventDispatcher(),
     )
 
     result = await harness.run(RunRequest("solve it", tmp_path))
@@ -125,11 +125,11 @@ async def test_persists_reasoning_in_checkpoint(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_injects_milky_frog_identity_before_user_prompt(tmp_path: Path) -> None:
-    harness = Harness(
+    harness = make_harness(
         model=IdentityCapturingModel(),
         tools=ToolRegistry(),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
-        handlers=LifecycleBus(),
+        handlers=EventDispatcher(),
     )
 
     result = await harness.run(RunRequest("Who are you?", tmp_path))

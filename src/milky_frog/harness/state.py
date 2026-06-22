@@ -23,11 +23,11 @@ __all__ = [
 ]
 
 
-def start_run(state: RunState, prompt: str) -> RunState:
+def start_run(state: RunState, prompt: str, extra_sections: tuple[str, ...] = ()) -> RunState:
     return replace(
         state,
         messages=(
-            Message(MessageRole.SYSTEM, system_prompt(state.workspace)),
+            Message(MessageRole.SYSTEM, system_prompt(state.workspace, extra_sections)),
             Message(MessageRole.USER, prompt),
         ),
     )

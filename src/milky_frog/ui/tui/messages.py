@@ -4,6 +4,7 @@ from pydantic import JsonValue
 from textual.message import Message
 
 from milky_frog.domain import RunResult, RunStatus, RunUsage
+from milky_frog.handlers.events import NoticeLevel
 
 
 class AddThinking(Message):
@@ -58,13 +59,20 @@ class RunFinished(Message):
         *,
         status: RunStatus,
         message: str,
-        is_streamed: bool,
     ) -> None:
         super().__init__()
         self.result = result
         self.status = status
         self.message = message
-        self.is_streamed = is_streamed
+
+
+class ApprovalRequired(Message):
+    """A Run paused waiting for the user to approve a pending tool call."""
+
+    def __init__(self, run_id: str, reason: str) -> None:
+        super().__init__()
+        self.run_id = run_id
+        self.reason = reason
 
 
 class RunError(Message):
@@ -73,3 +81,12 @@ class RunError(Message):
     def __init__(self, error: str) -> None:
         super().__init__()
         self.error = error
+
+
+class RunNoticeMsg(Message):
+    """Ephemeral user-facing message while a Run is in progress."""
+
+    def __init__(self, message: str, *, level: NoticeLevel = "info") -> None:
+        super().__init__()
+        self.message = message
+        self.level = level

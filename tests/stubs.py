@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 
 from pydantic import BaseModel
 
+from milky_frog.checkpoint import CheckpointStore
 from milky_frog.domain import (
     ModelChunk,
     ModelRequest,
@@ -15,7 +16,31 @@ from milky_frog.domain import (
     TokenUsage,
     ToolCall,
 )
-from milky_frog.harness.tools import ToolContext, ToolResult
+from milky_frog.handlers import EventDispatcher
+from milky_frog.handlers.checkpoint import CheckpointHandler
+from milky_frog.harness.runner import Harness
+from milky_frog.harness.tools import ToolContext, ToolRegistry, ToolResult
+from milky_frog.models import Model
+
+# ── Harness builder ───────────────────────────────────────────────────
+
+
+def make_harness(
+    model: Model,
+    tools: ToolRegistry,
+    checkpoints: CheckpointStore,
+    handlers: EventDispatcher | None = None,
+) -> Harness:
+    """Build a Harness with checkpointing wired, mirroring production assembly.
+
+    Production wires ``CheckpointHandler`` via ``handlers.default_handlers``; the
+    Harness no longer self-registers it. Tests that need a resumable Run use this
+    helper so the snapshot handler lands on the same bus they inspect.
+    """
+    bus = handlers if handlers is not None else EventDispatcher()
+    CheckpointHandler(checkpoints).register(bus)
+    return Harness(model, tools, checkpoints, bus)
+
 
 # ── Tool stubs ────────────────────────────────────────────────────────
 
@@ -27,7 +52,7 @@ class EchoInput(BaseModel):
 class EchoTool:
     name = "echo"
     description = "Echo text"
-    input_model = EchoInput
+    input_model: type[BaseModel] = EchoInput
 
     async def execute(self, context: ToolContext, input: BaseModel) -> ToolResult:
         assert context.workspace.is_dir()
@@ -163,6 +188,37 @@ class ContinuationModel:
         users = [m for m in request.messages if m.role.value == "user"]
         assert users[-1].content == self.expected_user
         yield StreamDone(ModelResponse(content="ack"))
+
+
+class FlakyConnectionModel:
+    """Fails the first *failures* stream attempts with ``ConnectionError``."""
+
+    def __init__(self, *, failures: int = 2) -> None:
+        self._failures_left = failures
+        self.calls = 0
+
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        del request
+        self.calls += 1
+        if self._failures_left > 0:
+            self._failures_left -= 1
+            raise ConnectionError("offline")
+        yield TextDelta("ok")
+        yield StreamDone(ModelResponse(content="ok"))
+
+
+class ImmediateErrorModel:
+    """Always raises the configured error on stream."""
+
+    def __init__(self, error: Exception) -> None:
+        self._error = error
+        self.calls = 0
+
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        del request
+        self.calls += 1
+        raise self._error
+        yield StreamDone(ModelResponse())  # makes this an async generator; never reached
 
 
 # ── Langfuse stubs ───────────────────────────────────────────────────

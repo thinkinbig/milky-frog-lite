@@ -25,5 +25,5 @@ Key decisions:
   mined tasks are candidates that **require manual review** before use.
 
 Measurement uses `ReadCollector` (subscribes `RunAfterTool` on the read-only
-`LifecycleBus`) — in-process, no Langfuse round-trip. Langfuse stays the
+`EventDispatcher`) — in-process, no Langfuse round-trip. Langfuse stays the
 long-term archive. See [[langfuse-log-storage]].

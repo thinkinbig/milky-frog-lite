@@ -25,12 +25,16 @@ A model-invoked Harness operation, such as requesting user input, loading a Skil
 _Avoid_: Business tool
 
 **Handler**:
-A read-only callback registered on the Harness lifecycle-signal bus (`LifecycleBus.notify`). Handlers observe live Runs for streaming output and observability; they do not persist state or change execution. Durable facts live in the Checkpoint snapshot instead.
+A callback registered on the Harness lifecycle-signal bus (`EventDispatcher`). Only `RunEmitter` publishes signals; Handlers subscribe and react. Most Handlers observe only (streaming UI, Langfuse). `RunBeforeTool` and `RunBeforeStart` may return control results that influence the next Harness step. `CheckpointHandler` persists RunState at durable boundaries in response to lifecycle signals — persistence is not embedded in the Harness loop itself.
 _Avoid_: Middleware, hook, intercept
 
 **Lifecycle signal**:
-An ephemeral, in-process notification (for example `OnModelChunk`, `AfterModel`) delivered to Handlers during a Run. Not replayed from the Checkpoint snapshot.
+An ephemeral, in-process Harness phase notification (for example `RunStarted`, `RunModelChunk`, `RunAfterModel`) published by `RunEmitter` during a Run and delivered to Handlers. Not replayed from the Checkpoint snapshot.
 _Avoid_: Event (unqualified), Checkpoint
+
+**Run notice**:
+An ephemeral user-facing message during a Run (for example a model retry warning). Published on the same bus as lifecycle signals but not a lifecycle phase. Not checkpointed.
+_Avoid_: Notification, toast event
 
 **Checkpoint snapshot**:
 The versioned JSON serialization of a Run's `RunState` (messages, accounting, reasoning log) stored on the `runs` row. The source of truth for resume. Distinct from lifecycle signals.
@@ -85,12 +89,16 @@ _避免使用_：插件、函数
 _避免使用_：业务工具
 
 **Handler（处理器）**：
-注册到 Harness 生命周期信号总线的只读回调（`LifecycleBus.notify`）。Handler 在 Run 进行期间观察流式输出与可观测性；不持久化状态、不改变执行。持久化事实由 Checkpoint 快照单独记录。
+注册到 Harness 生命周期信号总线（`EventDispatcher`）的回调。仅 `RunEmitter` 发布信号；Handler 订阅并响应。多数 Handler 只做观察（流式 UI、Langfuse）。`RunBeforeTool` 与 `RunBeforeStart` 可返回控制结果以影响 Harness 下一步。`CheckpointHandler` 在持久化边界根据生命周期信号写入 RunState——持久化不在 Harness 循环内硬编码。
 _避免使用_：Middleware、Hook、intercept
 
 **Lifecycle signal（生命周期信号）**：
-Run 进行期间的临时、进程内通知（例如 `OnModelChunk`、`AfterModel`），分发给 Handler。不从 Checkpoint 快照 replay。
+Run 进行期间由 `RunEmitter` 发布、分发给 Handler 的 Harness 阶段通知（例如 `RunStarted`、`RunModelChunk`、`RunAfterModel`）。不从 Checkpoint 快照 replay。
 _避免使用_：Event（无前缀）、Checkpoint
+
+**Run notice（运行提示）**：
+Run 进行期间面向用户的临时消息（例如模型重试警告）。与生命周期信号走同一总线，但不是生命周期阶段。不写入 Checkpoint。
+_避免使用_：Notification、toast 事件
 
 **Checkpoint snapshot（Checkpoint 快照）**：
 Run 的 `RunState`（messages、计数、reasoning log 等）的版本化 JSON 序列化，存于 `runs` 行。resume 的真相来源。与生命周期信号不同。

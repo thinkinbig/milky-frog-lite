@@ -29,6 +29,17 @@ class ToolDecision(StrEnum):
     NEEDS_APPROVAL = "needs_approval"
 
 
+class ApprovalDecision(StrEnum):
+    """User's verdict on a Run paused for tool approval.
+
+    Threaded into ``Harness.resume`` to release pending tool calls:
+    ``APPROVE`` executes them, ``DENY`` seals them with a refusal result.
+    """
+
+    APPROVE = "approve"
+    DENY = "deny"
+
+
 class MessageRole(StrEnum):
     SYSTEM = "system"
     USER = "user"

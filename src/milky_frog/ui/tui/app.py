@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from typing import ClassVar
 
@@ -17,24 +16,22 @@ from textual.reactive import reactive
 from textual.widgets import Footer, Header, Input, Static
 from textual.worker import Worker
 
-from milky_frog.checkpoint import SqliteCheckpointStore
-from milky_frog.domain import RunRequest, RunResult, RunStatus, RunUsage
-from milky_frog.harness.runner import Harness
-from milky_frog.harness.tools import ToolRegistry, default_tools
-from milky_frog.models import OpenAIModel
-from milky_frog.project import load_project_config
-from milky_frog.settings import Settings
+from milky_frog.domain import ApprovalDecision, RunStatus, RunUsage
+from milky_frog.runtime import MilkyFrog
 from milky_frog.ui.logo import pixel_frog_logo
-from milky_frog.ui.tui.handlers import TuiStreamingHandlers
+from milky_frog.ui.tui.advancer import RunAdvancer
 from milky_frog.ui.tui.messages import (
     AddText,
     AddThinking,
+    ApprovalRequired,
     RunError,
     RunFinished,
+    RunNoticeMsg,
     ToolCallMsg,
     ToolResultMsg,
     UpdateUsage,
 )
+from milky_frog.ui.tui.renderer import TextualStreamRenderer
 from milky_frog.ui.tui.rendering import (
     COMMANDS,
     DiffKind,
@@ -229,7 +226,7 @@ class MilkyFrogApp(App[None]):
         VerticalScroll — conversation: one widget per message, so text reflows
                          to the terminal width on resize (unlike an append-only log)
         command hints — slash-command completions (hidden unless typing a command)
-        PromptInput   — text prompt with Tab completion and Up/Down history
+        PromptInput   — text prompt with Tab completion and Up/Down history recall
         RunStatusBar  — model, workspace, run_id, token usage, status
         Footer        — keybindings
     """
@@ -269,16 +266,12 @@ class MilkyFrogApp(App[None]):
         Binding("escape", "cancel_run", "Interrupt"),
     ]
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, frog: MilkyFrog) -> None:
         super().__init__()
-        self._settings = settings
-        self._run_id: str | None = None
-        self._busy = False
-        self._harness: Harness | None = None
-        self._checkpoints: SqliteCheckpointStore | None = None
+        self._session = RunAdvancer(frog, self)
         self._worker: Worker[None] | None = None
 
-        # Streaming state: buffers plus the live widget being updated in place.
+        # Streaming render state: buffers plus the live widget updated in place.
         self._thinking_buf: list[str] = []
         self._answer_buf: list[str] = []
         self._phase: str | None = None  # None | "thinking" | "answer"
@@ -294,32 +287,17 @@ class MilkyFrogApp(App[None]):
             Static(id="command-hints"),
             PromptInput(id="prompt-input", placeholder="Type a task and press Enter..."),
             RunStatusBar(
-                model=self._settings.model or "unknown",
+                model=self._session.frog.model_name or "unknown",
                 workspace=Path.cwd(),
             ),
         )
         yield Footer()
 
     def on_mount(self) -> None:
-        """App started: render welcome and assemble Harness infrastructure."""
-        self._checkpoints = SqliteCheckpointStore(self._settings.database_path)
-
-        from milky_frog.handlers import LifecycleBus
-
-        model = OpenAIModel(
-            api_key=self._settings.api_key or "",
-            model=self._settings.model or "",
-            base_url=self._settings.base_url,
-        )
-        bus = LifecycleBus()
-        TuiStreamingHandlers(self).register(bus)
-
-        self._harness = Harness(
-            model=model,
-            tools=ToolRegistry(default_tools()),
-            checkpoints=self._checkpoints,
-            handlers=bus,
-        )
+        """App started: render welcome and wire up the stream renderer."""
+        # Stream renderer subscribes to the shared EventDispatcher alongside
+        # cross-cutting handlers (PolicyHandler, LangfuseHandler, …).
+        self._session.frog.dispatcher.subscribe(TextualStreamRenderer(self).on_event)
 
         self._render_welcome()
         self.query_one("#prompt-input", Input).focus()
@@ -392,6 +370,11 @@ class MilkyFrogApp(App[None]):
         if hint:
             self._append(Text(f"Hint: {hint}", style="bold cyan"))
 
+    def _render_notification(self, message: str, level: str) -> None:
+        prefix = {"info": "· ", "warning": "⚠ ", "error": "✗ "}.get(level, "")
+        style = {"info": "dim", "warning": "yellow", "error": "bold red"}.get(level, "dim")
+        self._append(_row(Text(prefix, style=style), Text(message, style=style)), spaced=False)
+
     def _render_help(self) -> None:
         commands = Table.grid(padding=(0, 2))
         commands.add_column(style="yellow", no_wrap=True)
@@ -456,12 +439,10 @@ class MilkyFrogApp(App[None]):
         self._append(Text.assemble((f"    {mark} ", style), (summary, "dim")))
 
     def on_update_usage(self, event: UpdateUsage) -> None:
-        status_bar = self.query_one(RunStatusBar)
-        status_bar.set_usage(event.usage)
+        self.query_one(RunStatusBar).set_usage(event.usage)
 
     def on_run_finished(self, event: RunFinished) -> None:
         """Run finished: commit any buffered content and show the footer."""
-        self._busy = False
         self._worker = None
         self._close_phase()
 
@@ -471,29 +452,45 @@ class MilkyFrogApp(App[None]):
             self._render_assistant_footer(event.result.run_id, usage=event.result.usage)
         elif event.status is RunStatus.CANCELLED:
             self._render_error(event.message, hint="Type a new prompt, or Ctrl+C to exit.")
-        elif event.status is RunStatus.FAILED or event.status in (
-            RunStatus.PAUSED_LIMIT,
-            RunStatus.WAITING_FOR_APPROVAL,
-        ):
+        # elif event.status is RunStatus.WAITING_FOR_APPROVAL:
+        #     # The approval prompt is rendered by on_approval_required (driven by
+        #     # the RunPaused lifecycle signal); nothing more to show here.
+        #     pass
+        elif event.status is RunStatus.FAILED or event.status is RunStatus.PAUSED_LIMIT:
             self._render_error(event.message)
 
-        # Thread the Run ID so the next prompt continues this conversation.
-        self._run_id = event.result.run_id
-        status_bar.set_run_id(self._run_id)
+        status_bar.set_run_id(event.result.run_id)
         status_bar.set_usage(event.result.usage or RunUsage())
         status_bar.set_ready()
         self.query_one("#prompt-input", Input).disabled = False
         self.query_one("#prompt-input", Input).focus()
 
     def on_run_error(self, event: RunError) -> None:
-        self._busy = False
         self._worker = None
         self._close_phase()
         self._render_error(event.error)
-        status_bar = self.query_one(RunStatusBar)
-        status_bar.set_ready()
+        self.query_one(RunStatusBar).set_ready()
         self.query_one("#prompt-input", Input).disabled = False
         self.query_one("#prompt-input", Input).focus()
+
+    def on_run_notice_msg(self, event: RunNoticeMsg) -> None:
+        self._render_notification(event.message, event.level)
+
+    def on_approval_required(self, event: ApprovalRequired) -> None:
+        """A tool call needs the user's verdict: render an inline y/n prompt."""
+        self._close_phase()
+        self._session.pending_approval = event.run_id
+        self._append(
+            _row(
+                Text("⚠", style="bold yellow"),
+                Text.assemble(
+                    (f"{event.reason}\n", "yellow"),
+                    ("Approve this tool call? ", "bold yellow"),
+                    ("[y]es / [n]o", "bright_black"),
+                ),
+            )
+        )
+        self._scroll_end()
 
     # ── Input handling ────────────────────────────────────────────────
 
@@ -526,7 +523,7 @@ class MilkyFrogApp(App[None]):
 
     def on_input_submitted(self, message: Input.Submitted) -> None:
         """Handle a user prompt submission."""
-        if self._busy:
+        if self._session.busy:
             return
         task = message.value.strip()
         if not task:
@@ -541,12 +538,17 @@ class MilkyFrogApp(App[None]):
         if command in {"exit", "quit", "/exit"}:
             self.exit()
             return
+
+        if self._session.pending_approval is not None:
+            self._resolve_approval(command)
+            return
+
         if command in {"?", "/help"}:
             self._render_help()
             return
         if command == "/clear":
             self._conversation().remove_children()
-            self._run_id = None
+            self._session.run_id = None
             return
 
         if command.startswith("/resume"):
@@ -569,27 +571,25 @@ class MilkyFrogApp(App[None]):
         prompt = tail.strip() or None
 
         try:
-            if self._checkpoints is not None:
-                run_id = self._checkpoints.resolve_run_id(run_id)
+            run_id = self._session.frog.checkpoints.resolve_run_id(run_id)
         except (LookupError, ValueError) as error:
             self._render_error(f"unknown Run: {error}")
             return
 
         if prompt is None:
-            self._run_id = run_id
-            status_bar = self.query_one(RunStatusBar)
-            status_bar.set_run_id(run_id)
+            self._session.run_id = run_id
+            self.query_one(RunStatusBar).set_run_id(run_id)
             self._append(
                 Text(f"Attached to run {run_id[:8]} · next prompt continues it", style="dim")
             )
             return
 
-        self._run_id = run_id
+        self._session.run_id = run_id
         self._start_run(prompt, run_id=run_id)
 
     def _start_run(self, task: str, *, run_id: str | None = None) -> None:
         """Kick off a Run as a Textual worker."""
-        self._busy = True
+        self._session.begin()
         self._phase = None
         self._thinking_buf.clear()
         self._answer_buf.clear()
@@ -597,63 +597,51 @@ class MilkyFrogApp(App[None]):
         self._answer_widget = None
 
         self._render_user_message(task)
-
-        status_bar = self.query_one(RunStatusBar)
-        status_bar.set_working()
-
-        prompt_input = self.query_one("#prompt-input", PromptInput)
-        prompt_input.disabled = True
+        self.query_one(RunStatusBar).set_working()
+        self.query_one("#prompt-input", PromptInput).disabled = True
 
         self._worker = self._do_run(task, run_id)
 
     @work(thread=False, exit_on_error=False)
     async def _do_run(self, task: str, run_id: str | None) -> None:
-        """Run the Harness as an async worker inside Textual's event loop."""
-        harness = self._harness
-        if harness is None:
-            self.post_message(RunError("Harness not initialised"))
+        """Thin worker: delegate to RunAdvancer and let it post the result messages."""
+        await self._session.do_run(task, run_id)
+
+    def _start_approval(self, run_id: str, decision: ApprovalDecision) -> None:
+        """Resume a paused Run with the user's approval verdict."""
+        self._session.begin()
+        self._phase = None
+        self._thinking_buf.clear()
+        self._answer_buf.clear()
+        self._thinking_widget = None
+        self._answer_widget = None
+
+        verb = "Approved" if decision is ApprovalDecision.APPROVE else "Denied"
+        self._append(_row(Text("▸", style="bold cyan"), Text(verb, style="dim")))
+        self.query_one(RunStatusBar).set_working()
+        self.query_one("#prompt-input", PromptInput).disabled = True
+
+        self._worker = self._do_approve(run_id, decision)
+
+    @work(thread=False, exit_on_error=False)
+    async def _do_approve(self, run_id: str, decision: ApprovalDecision) -> None:
+        """Thin worker: delegate to RunAdvancer and let it post the result messages."""
+        await self._session.do_approve(run_id, decision)
+
+    def _resolve_approval(self, answer: str) -> None:
+        """Interpret the user's y/n reply to a pending approval prompt."""
+        run_id = self._session.pending_approval
+        if run_id is None:
             return
-
-        try:
-            if run_id is None:
-                config = load_project_config(Path.cwd())
-                result = await harness.run(
-                    RunRequest(task, Path.cwd(), max_model_calls=config.max_model_calls)
-                )
-            else:
-                if self._checkpoints is None:
-                    self.post_message(RunError("Checkpoint store not initialised"))
-                    return
-                stored = self._checkpoints.get_run(run_id)
-                if stored is None:
-                    self.post_message(RunError(f"unknown Run: {run_id}"))
-                    return
-                config = load_project_config(stored.workspace)
-                result = await harness.resume(
-                    run_id,
-                    max_model_calls=config.max_model_calls,
-                    prompt=task,
-                )
-
-            self.post_message(
-                RunFinished(
-                    result=result,
-                    status=result.status,
-                    message=result.final_message,
-                    is_streamed=self._phase == "answer",
-                )
+        decision = self._session.resolve_approval(answer)
+        if decision is None:
+            self._append(
+                Text("Please answer y (approve) or n (deny).", style="dim"),
+                spaced=False,
             )
-        except asyncio.CancelledError:
-            self.post_message(
-                RunFinished(
-                    result=RunResult(run_id or "unknown", RunStatus.CANCELLED, "cancelled", 0),
-                    status=RunStatus.CANCELLED,
-                    message="Cancelled the current task.",
-                    is_streamed=False,
-                )
-            )
-        except Exception as error:
-            self.post_message(RunError(f"{type(error).__name__}: {error}"))
+            return
+        self._session.pending_approval = None
+        self._start_approval(run_id, decision)
 
     # ── Key bindings ──────────────────────────────────────────────────
 
@@ -661,6 +649,16 @@ class MilkyFrogApp(App[None]):
         self.exit()
 
     def action_cancel_run(self) -> None:
-        """Interrupt the in-flight Run, if any (Esc)."""
-        if self._busy and self._worker is not None:
+        """Interrupt the in-flight Run, if any (Esc).
+
+        Cooperative cancel first: signalling the token lets the Harness stop the
+        model stream and reach ``finish_cancelled`` (persisting CANCELLED with the
+        real run_id). ``worker.cancel()`` is a hard fallback if the token is
+        somehow not wired.
+        """
+        if not self._session.busy:
+            return
+        if self._session.cancellation is not None:
+            self._session.cancel()
+        elif self._worker is not None:
             self._worker.cancel()
