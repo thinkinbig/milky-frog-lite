@@ -28,10 +28,11 @@ from milky_frog.handlers.events import (
     RunTurnEnd,
     RunTurnStart,
 )
-from milky_frog.handlers.skills import SkillCatalogHandler
+from milky_frog.handlers.skills import AgentContextHandler
 from milky_frog.infra.observability.langfuse import LangfuseHandler
 
 __all__ = [
+    "AgentContextHandler",
     "ApprovalResult",
     "BaseEvent",
     "BaseHandler",
@@ -58,7 +59,6 @@ __all__ = [
     "RunStarted",
     "RunTurnEnd",
     "RunTurnStart",
-    "SkillCatalogHandler",
     "SystemPromptSection",
     "default_handlers",
 ]

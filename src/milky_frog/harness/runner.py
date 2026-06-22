@@ -342,14 +342,15 @@ class Harness:
         caller via ``_run_cancellable``."""
         response: ModelResponse | None = None
         observer_request = deepcopy(request)
-        async for chunk in self._model.stream(request):
-            if isinstance(chunk, TextDelta):
-                await self._emitter.on_model_chunk(run_id, observer_request, chunk)
-            elif isinstance(chunk, ReasoningDelta):
-                await self._emitter.on_model_reasoning(run_id, observer_request, chunk)
-            elif isinstance(chunk, StreamDone):
-                response = chunk.response
-                break
+        async with contextlib.aclosing(self._model.stream(request)) as model_stream:
+            async for chunk in model_stream:
+                if isinstance(chunk, TextDelta):
+                    await self._emitter.on_model_chunk(run_id, observer_request, chunk)
+                elif isinstance(chunk, ReasoningDelta):
+                    await self._emitter.on_model_reasoning(run_id, observer_request, chunk)
+                elif isinstance(chunk, StreamDone):
+                    response = chunk.response
+                    break
         if response is None:
             raise RuntimeError("model stream ended without a StreamDone chunk")
         return response

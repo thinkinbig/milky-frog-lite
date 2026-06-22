@@ -1,5 +1,6 @@
 import asyncio
 from pathlib import Path
+from unittest import mock
 
 from milky_frog.harness.sandbox import LocalSandbox
 from milky_frog.harness.tools import ToolContext
@@ -212,6 +213,89 @@ async def test_grep_count_is_noise_pattern(tmp_path: Path) -> None:
     assert not result.is_error
     assert "a.py" in result.content
     assert "b.py" in result.content
+
+
+async def test_grep_fallback_finds_matches(tmp_path: Path) -> None:
+    """When rg is not installed, GrepTool falls back to Python re."""
+    (tmp_path / "a.py").write_text(
+        "def hello():\n    pass\ndef world():\n    pass\n", encoding="utf-8"
+    )
+    (tmp_path / "b.py").write_text("class Foo:\n    pass\n", encoding="utf-8")
+
+    with mock.patch.object(GrepTool, "_rg_grep", side_effect=FileNotFoundError):
+        result = await GrepTool().execute(_context(tmp_path), GrepTool.input_model(pattern="def"))
+
+    assert not result.is_error
+    assert "a.py" in result.content
+    assert "def hello" in result.content
+
+
+async def test_grep_fallback_no_matches(tmp_path: Path) -> None:
+    """Fallback returns (no matches) when nothing matches."""
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+
+    with mock.patch.object(GrepTool, "_rg_grep", side_effect=FileNotFoundError):
+        result = await GrepTool().execute(
+            _context(tmp_path), GrepTool.input_model(pattern="zzz_no_match")
+        )
+
+    assert not result.is_error
+    assert result.content == "(no matches)"
+
+
+async def test_grep_fallback_invalid_regex_is_error(tmp_path: Path) -> None:
+    """Fallback returns an error for an invalid regex pattern."""
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+
+    with mock.patch.object(GrepTool, "_rg_grep", side_effect=FileNotFoundError):
+        result = await GrepTool().execute(
+            _context(tmp_path), GrepTool.input_model(pattern="[unclosed")
+        )
+
+    assert result.is_error
+    assert "invalid regex" in result.content.lower() or "regex" in result.content.lower()
+
+
+async def test_grep_fallback_file_search(tmp_path: Path) -> None:
+    """Fallback works when searching a single file path."""
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    (sub / "target.py").write_text("def hello():\n    pass\n", encoding="utf-8")
+
+    with mock.patch.object(GrepTool, "_rg_grep", side_effect=FileNotFoundError):
+        result = await GrepTool().execute(
+            _context(tmp_path), GrepTool.input_model(pattern="def", path="sub/target.py")
+        )
+
+    assert not result.is_error
+    # Path is workspace-relative: "sub/target.py"
+    assert "sub/target.py" in result.content
+    assert "def hello" in result.content
+
+
+async def test_grep_fallback_subdirectory(tmp_path: Path) -> None:
+    """Fallback respects the path parameter for subdirectory searches."""
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "root.py").write_text("def root(): pass\n", encoding="utf-8")
+    (tmp_path / "sub" / "child.py").write_text("def child(): pass\n", encoding="utf-8")
+
+    with mock.patch.object(GrepTool, "_rg_grep", side_effect=FileNotFoundError):
+        result = await GrepTool().execute(
+            _context(tmp_path), GrepTool.input_model(pattern="def", path="sub")
+        )
+
+    assert not result.is_error
+    assert "child.py" in result.content
+    assert "root.py" not in result.content
+
+
+async def test_grep_fallback_empty_pattern_is_error(tmp_path: Path) -> None:
+    """Empty pattern still returns an error in fallback mode."""
+    with mock.patch.object(GrepTool, "_rg_grep", side_effect=FileNotFoundError):
+        result = await GrepTool().execute(_context(tmp_path), GrepTool.input_model(pattern="  "))
+
+    assert result.is_error
+    assert "empty" in result.content
 
 
 async def test_git_diff_works(tmp_path: Path) -> None:
