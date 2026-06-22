@@ -58,13 +58,11 @@ class RunFinished(Message):
         *,
         status: RunStatus,
         message: str,
-        is_streamed: bool,
     ) -> None:
         super().__init__()
         self.result = result
         self.status = status
         self.message = message
-        self.is_streamed = is_streamed
 
 
 class ApprovalRequired(Message):
