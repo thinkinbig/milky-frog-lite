@@ -58,6 +58,13 @@ def _row(marker: Text, body: RenderableType) -> Table:
     return row
 
 
+def _thinking(text: str) -> Text:
+    """Render the reasoning block: a ``✻ thinking`` header with the body below."""
+    if not text:
+        return Text("✻ thinking", style="dim italic")
+    return Text.assemble(("✻ thinking\n", "dim italic"), (text, "dim italic"))
+
+
 # ── Status Widget ──────────────────────────────────────────────────────
 
 
@@ -326,18 +333,13 @@ class MilkyFrogApp(App[None]):
         self._append(_row(Text("▸", style="bold cyan"), Text(text)))
 
     def _flush_thinking(self) -> None:
-        """Fill in the reasoning body under its already-mounted ``✻ thinking`` header."""
+        """Finalize the live reasoning widget (it already holds the streamed body)."""
         widget = self._thinking_widget
         self._thinking_widget = None
-        text = "".join(self._thinking_buf).strip()
+        has_text = bool("".join(self._thinking_buf).strip())
         self._thinking_buf.clear()
-        if widget is None:
-            return
-        if not text:
+        if widget is not None and not has_text:
             widget.remove()  # no reasoning was produced; drop the bare header
-            return
-        widget.update(Text.assemble(("✻ thinking\n", "dim italic"), (text, "dim italic")))
-        self._scroll_end()
 
     def _commit_answer(self) -> None:
         """Finalize the live answer widget (it already holds the streamed markdown)."""
@@ -383,12 +385,15 @@ class MilkyFrogApp(App[None]):
     # ── Message handlers (lifecycle streaming) ────────────────────────
 
     def on_add_thinking(self, event: AddThinking) -> None:
-        """Accumulate reasoning chunks; show the header immediately."""
+        """Accumulate reasoning chunks; update the live reasoning widget in place."""
         if self._phase != "thinking":
             self._close_phase()
             self._phase = "thinking"
-            self._thinking_widget = self._append(Text("✻ thinking", style="dim italic"))
+            self._thinking_widget = self._append(_thinking(""))
         self._thinking_buf.append(event.text)
+        if self._thinking_widget is not None:
+            self._thinking_widget.update(_thinking("".join(self._thinking_buf).strip()))
+        self._scroll_end()
 
     def on_add_text(self, event: AddText) -> None:
         """Accumulate answer chunks; update the live answer widget in place."""
