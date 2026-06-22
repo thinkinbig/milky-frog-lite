@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from milky_frog.domain import (
+    ApprovalDecision,
     MessageRole,
     RunRequest,
     RunStatus,
@@ -42,6 +43,20 @@ def test_default_policy_allows_read_only_git_commands() -> None:
     assert (
         policy.decide(ToolCall("c3", "git", {"command": "log --oneline -5"})) is ToolDecision.ALLOW
     )
+
+
+def test_default_policy_allows_read_only_git_query_commands() -> None:
+    policy = DefaultToolPolicy()
+    for command in (
+        'grep -rn -i "skill" --include="*.py" src/',
+        "ls-files",
+        "show-ref --tags",
+        "cat-file -p HEAD",
+        "rev-list --count HEAD",
+        "merge-base main HEAD",
+    ):
+        decision = policy.decide(ToolCall("c", "git", {"command": command}))
+        assert decision is ToolDecision.ALLOW, command
 
 
 def test_default_policy_needs_approval_for_mutating_git_and_file_tools() -> None:
@@ -132,6 +147,36 @@ async def test_approval_pauses_run_and_resume_executes_approved_tool(
     # Resume without decision — should re-pause (PolicyHandler returns ApprovalResult)
     resumed = await harness.resume(result.run_id, max_model_calls=30)
     assert resumed.status is RunStatus.WAITING_FOR_APPROVAL
+
+    # Resume WITH approval — the pending tool executes and the run completes.
+    approved = await harness.resume(
+        result.run_id, max_model_calls=30, approval=ApprovalDecision.APPROVE
+    )
+    assert approved.status is RunStatus.COMPLETED
+    tool_msgs = tool_messages(store.load_state(result.run_id))
+    assert any("hello" in m for m in tool_msgs)
+
+
+@pytest.mark.asyncio
+async def test_approval_deny_seals_pending_tool_and_continues(tmp_path: Path) -> None:
+    """Resuming a paused Run with DENY seals the pending call and advances."""
+    from milky_frog.checkpoint import SqliteCheckpointStore
+
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    harness = Harness(
+        model=FakeModel(),
+        tools=ToolRegistry((EchoTool(),)),
+        checkpoints=store,
+        handlers=_make_bus(DefaultToolPolicy()),
+    )
+
+    result = await harness.run(RunRequest("echo hello", tmp_path))
+    assert result.status is RunStatus.WAITING_FOR_APPROVAL
+
+    denied = await harness.resume(result.run_id, max_model_calls=30, approval=ApprovalDecision.DENY)
+    assert denied.status is RunStatus.COMPLETED
+    tool_msgs = tool_messages(store.load_state(result.run_id))
+    assert any("denied by user" in m for m in tool_msgs)
 
 
 @pytest.mark.asyncio

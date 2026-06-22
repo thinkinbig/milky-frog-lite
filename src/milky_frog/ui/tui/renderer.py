@@ -2,18 +2,20 @@ from __future__ import annotations
 
 from textual.app import App
 
-from milky_frog.domain import RunUsage
+from milky_frog.domain import RunStatus, RunUsage
 from milky_frog.handlers import (
     RunAfterModel,
     RunAfterTool,
     RunBeforeTool,
     RunModelChunk,
     RunModelReasoning,
+    RunPaused,
     RunStarted,
 )
 from milky_frog.ui.tui.messages import (
     AddText,
     AddThinking,
+    ApprovalRequired,
     ToolCallMsg,
     ToolResultMsg,
     UpdateUsage,
@@ -58,3 +60,5 @@ class TextualStreamRenderer:
                         is_error=result.is_error,
                     )
                 )
+            case RunPaused(run_id=run_id, status=RunStatus.WAITING_FOR_APPROVAL, reason=reason):
+                self._app.post_message(ApprovalRequired(run_id, reason))

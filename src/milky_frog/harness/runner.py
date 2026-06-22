@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from milky_frog.checkpoint import CheckpointStore, RunClaimError
 from milky_frog.domain import (
+    ApprovalDecision,
     ModelRequest,
     ModelResponse,
     ReasoningDelta,
@@ -90,9 +91,15 @@ class Harness:
         max_model_calls: int,
         cancellation: RunCancellation | None = None,
         prompt: str | None = None,
+        approval: ApprovalDecision | None = None,
     ) -> RunResult:
         """Advance an existing Run: load its snapshot, repair interrupted
-        Tools, optionally append a new user turn, then advance."""
+        Tools, optionally append a new user turn, then advance.
+
+        ``approval`` releases a Run paused on ``WAITING_FOR_APPROVAL``:
+        ``APPROVE`` executes the pending tool calls, ``DENY`` seals them
+        with a refusal result.  When ``None``, pending calls are re-checked
+        against the tool policy (which may pause again)."""
         try:
             with self._checkpoints.claim(run_id):
                 stored = self._checkpoints.get_run(run_id)
@@ -115,7 +122,9 @@ class Harness:
                 plan = PreparedRun(state=state, sandbox=sandbox)
 
                 # Process pending tool approvals before advancing.
-                resolved = await self._apply_approvals(plan, run_id, sandbox, cancellation)
+                resolved = await self._apply_approvals(
+                    plan, run_id, sandbox, cancellation, approval
+                )
                 if isinstance(resolved, RunResult):
                     return resolved
                 plan = resolved
@@ -199,11 +208,15 @@ class Harness:
         run_id: str,
         sandbox: Sandbox,
         cancellation: RunCancellation | None,
+        approval: ApprovalDecision | None,
     ) -> PreparedRun | RunResult:
-        """Execute or deny tool calls that were pending approval on resume.
+        """Resolve tool calls that were pending approval on resume.
 
-        Returns an updated ``PreparedRun`` when all pending calls are resolved,
-        or a ``RunResult`` if approval is still needed (re-pause).
+        ``approval`` is the user's verdict: ``DENY`` seals each pending call
+        with a refusal, ``APPROVE`` executes it, and ``None`` re-checks it
+        against the tool policy (which may re-pause).  Returns an updated
+        ``PreparedRun`` when all pending calls are resolved, or a ``RunResult``
+        when the Run terminates (re-pause, denial-as-cancel, or cancellation).
         """
         pending = unmatched_tool_calls(plan.state.messages)
         if not pending:
@@ -212,27 +225,52 @@ class Harness:
             if is_cancelled(cancellation):
                 return await self._emitter.finish_cancelled(plan.state)
 
-            check_results = await self._emitter.before_tool(run_id, call)
-            blocked = [r for r in check_results if isinstance(r, BlockResult)]
-            approvals = [r for r in check_results if isinstance(r, ApprovalResult)]
-
-            if blocked:
-                result = ToolResult(blocked[0].reason, is_error=True)
-            elif approvals:
-                return await self._emitter.finish_approval_needed(plan.state, [call.name])
-            else:
-                try:
-                    result = await self._execute_tool(
-                        run_id, plan.state.workspace, sandbox, call, cancellation
-                    )
-                except ToolRunCancelled:
-                    return await self._emitter.finish_cancelled(plan.state)
+            resolved = await self._resolve_pending_call(
+                plan, run_id, sandbox, call, cancellation, approval
+            )
+            if isinstance(resolved, RunResult):
+                return resolved
             plan = PreparedRun(
-                state=append_tool_result(plan.state, call, result),
+                state=append_tool_result(plan.state, call, resolved),
                 sandbox=plan.sandbox,
             )
             self._emitter.persist(plan.state)
         return plan
+
+    async def _resolve_pending_call(
+        self,
+        plan: PreparedRun,
+        run_id: str,
+        sandbox: Sandbox,
+        call: ToolCall,
+        cancellation: RunCancellation | None,
+        approval: ApprovalDecision | None,
+    ) -> ToolResult | RunResult:
+        """Decide one pending call's fate; ``RunResult`` ends the Run."""
+        if approval is ApprovalDecision.DENY:
+            return ToolResult("denied by user", is_error=True)
+        if approval is ApprovalDecision.APPROVE:
+            try:
+                return await self._execute_tool(
+                    run_id, plan.state.workspace, sandbox, call, cancellation
+                )
+            except ToolRunCancelled:
+                return await self._emitter.finish_cancelled(plan.state)
+
+        # No verdict: fall back to the tool policy, which may pause again.
+        check_results = await self._emitter.before_tool(run_id, call)
+        blocked = [r for r in check_results if isinstance(r, BlockResult)]
+        approvals = [r for r in check_results if isinstance(r, ApprovalResult)]
+        if blocked:
+            return ToolResult(blocked[0].reason, is_error=True)
+        if approvals:
+            return await self._emitter.finish_approval_needed(plan.state, [call.name])
+        try:
+            return await self._execute_tool(
+                run_id, plan.state.workspace, sandbox, call, cancellation
+            )
+        except ToolRunCancelled:
+            return await self._emitter.finish_cancelled(plan.state)
 
     async def _model_turn(
         self,
@@ -284,13 +322,23 @@ class Harness:
         coro: Coroutine[Any, Any, Any],
         cancellation: RunCancellation | None,
     ) -> Any:
-        """Run *coro* as a task and cancel it when *cancellation* is set."""
+        """Run *coro* as a task, cancelling it on cooperative or external cancel.
+
+        The ``finally`` clause guarantees the child task is cancelled on *any*
+        exit — cooperative (``ToolRunCancelled``) or external (``CancelledError``
+        injected by the host, e.g. a TUI worker abort). Without it the child
+        keeps running as an orphan and continues streaming after the Run was
+        reported cancelled.
+        """
         task: asyncio.Task[Any] = asyncio.create_task(coro)
-        while not task.done():
-            if is_cancelled(cancellation):
+        try:
+            while not task.done():
+                if is_cancelled(cancellation):
+                    raise ToolRunCancelled
+                await asyncio.sleep(0)
+            return await task
+        finally:
+            if not task.done():
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
-                raise ToolRunCancelled
-            await asyncio.sleep(0)
-        return await task

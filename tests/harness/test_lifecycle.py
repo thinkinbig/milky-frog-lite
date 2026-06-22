@@ -236,6 +236,43 @@ async def test_external_cancellation_reraises(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_external_cancellation_kills_orphan_stream(tmp_path: Path) -> None:
+    """An external abort must cancel the model stream, not leave it running.
+
+    Regression: ``_run_cancellable`` used to drop its child task on external
+    ``CancelledError``, so the model kept streaming after the Run was reported
+    cancelled (the TUI rendered a full answer under an 'interrupted' notice)."""
+
+    class TrackingStreamModel:
+        def __init__(self) -> None:
+            self.completed = False
+
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            del request
+            await asyncio.sleep(0.05)
+            self.completed = True
+            yield StreamDone(ModelResponse(content="done"))
+
+    model = TrackingStreamModel()
+    harness = Harness(
+        model=model,
+        tools=ToolRegistry(),
+        checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
+        handlers=LifecycleBus(),
+    )
+
+    task = asyncio.create_task(harness.run(RunRequest("slow", tmp_path)))
+    await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    # Give any orphaned stream task time to finish; it must have been cancelled.
+    await asyncio.sleep(0.1)
+    assert model.completed is False
+
+
+@pytest.mark.asyncio
 async def test_dispatches_run_failed_event(tmp_path: Path) -> None:
     registry = LifecycleBus()
     failed: list[RunFailed] = []

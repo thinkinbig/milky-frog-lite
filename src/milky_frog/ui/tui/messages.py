@@ -67,6 +67,15 @@ class RunFinished(Message):
         self.is_streamed = is_streamed
 
 
+class ApprovalRequired(Message):
+    """A Run paused waiting for the user to approve a pending tool call."""
+
+    def __init__(self, run_id: str, reason: str) -> None:
+        super().__init__()
+        self.run_id = run_id
+        self.reason = reason
+
+
 class RunError(Message):
     """An unexpected error occurred during the Run."""
 

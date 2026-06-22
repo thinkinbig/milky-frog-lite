@@ -17,14 +17,21 @@ from textual.reactive import reactive
 from textual.widgets import Footer, Header, Input, Static
 from textual.worker import Worker
 
-from milky_frog.domain import RunRequest, RunResult, RunStatus, RunUsage
+from milky_frog.domain import (
+    ApprovalDecision,
+    RunCancellation,
+    RunRequest,
+    RunResult,
+    RunStatus,
+    RunUsage,
+)
 from milky_frog.project import load_project_config
-from milky_frog.settings import Settings
 from milky_frog.runtime import MilkyFrog
 from milky_frog.ui.logo import pixel_frog_logo
 from milky_frog.ui.tui.messages import (
     AddText,
     AddThinking,
+    ApprovalRequired,
     RunError,
     RunFinished,
     ToolCallMsg,
@@ -272,6 +279,10 @@ class MilkyFrogApp(App[None]):
         self._run_id: str | None = None
         self._busy = False
         self._worker: Worker[None] | None = None
+        # Cooperative cancel token for the in-flight Run (Esc signals it).
+        self._cancellation: RunCancellation | None = None
+        # Run ID awaiting a y/n approval verdict, or None when no Run is paused.
+        self._pending_approval: str | None = None
 
         # Streaming state: buffers plus the live widget being updated in place.
         self._thinking_buf: list[str] = []
@@ -443,6 +454,7 @@ class MilkyFrogApp(App[None]):
         """Run finished: commit any buffered content and show the footer."""
         self._busy = False
         self._worker = None
+        self._cancellation = None
         self._close_phase()
 
         status_bar = self.query_one(RunStatusBar)
@@ -451,10 +463,11 @@ class MilkyFrogApp(App[None]):
             self._render_assistant_footer(event.result.run_id, usage=event.result.usage)
         elif event.status is RunStatus.CANCELLED:
             self._render_error(event.message, hint="Type a new prompt, or Ctrl+C to exit.")
-        elif event.status is RunStatus.FAILED or event.status in (
-            RunStatus.PAUSED_LIMIT,
-            RunStatus.WAITING_FOR_APPROVAL,
-        ):
+        elif event.status is RunStatus.WAITING_FOR_APPROVAL:
+            # The approval prompt is rendered by on_approval_required (driven by
+            # the RunPaused lifecycle signal); nothing more to show here.
+            pass
+        elif event.status is RunStatus.FAILED or event.status is RunStatus.PAUSED_LIMIT:
             self._render_error(event.message)
 
         # Thread the Run ID so the next prompt continues this conversation.
@@ -468,12 +481,29 @@ class MilkyFrogApp(App[None]):
     def on_run_error(self, event: RunError) -> None:
         self._busy = False
         self._worker = None
+        self._cancellation = None
         self._close_phase()
         self._render_error(event.error)
         status_bar = self.query_one(RunStatusBar)
         status_bar.set_ready()
         self.query_one("#prompt-input", Input).disabled = False
         self.query_one("#prompt-input", Input).focus()
+
+    def on_approval_required(self, event: ApprovalRequired) -> None:
+        """A tool call needs the user's verdict: render an inline y/n prompt."""
+        self._close_phase()
+        self._pending_approval = event.run_id
+        self._append(
+            _row(
+                Text("⚠", style="bold yellow"),
+                Text.assemble(
+                    (f"{event.reason}\n", "yellow"),
+                    ("Approve this tool call? ", "bold yellow"),
+                    ("[y]es / [n]o", "bright_black"),
+                ),
+            )
+        )
+        self._scroll_end()
 
     # ── Input handling ────────────────────────────────────────────────
 
@@ -521,6 +551,11 @@ class MilkyFrogApp(App[None]):
         if command in {"exit", "quit", "/exit"}:
             self.exit()
             return
+
+        if self._pending_approval is not None:
+            self._resolve_approval(command)
+            return
+
         if command in {"?", "/help"}:
             self._render_help()
             return
@@ -584,6 +619,7 @@ class MilkyFrogApp(App[None]):
         prompt_input = self.query_one("#prompt-input", PromptInput)
         prompt_input.disabled = True
 
+        self._cancellation = RunCancellation()
         self._worker = self._do_run(task, run_id)
 
     @work(thread=False, exit_on_error=False)
@@ -594,11 +630,17 @@ class MilkyFrogApp(App[None]):
             self.post_message(RunError("Milky Frog not initialised"))
             return
 
+        cancellation = self._cancellation
         try:
             if run_id is None:
                 config = load_project_config(Path.cwd())
                 result = await frog.harness.run(
-                    RunRequest(task, Path.cwd(), max_model_calls=config.max_model_calls)
+                    RunRequest(
+                        task,
+                        Path.cwd(),
+                        max_model_calls=config.max_model_calls,
+                        cancellation=cancellation,
+                    )
                 )
             else:
                 stored = frog.checkpoints.get_run(run_id)
@@ -610,25 +652,98 @@ class MilkyFrogApp(App[None]):
                     run_id,
                     max_model_calls=config.max_model_calls,
                     prompt=task,
+                    cancellation=cancellation,
                 )
 
-            self.post_message(
-                RunFinished(
-                    result=result,
-                    status=result.status,
-                    message=result.final_message,
-                    is_streamed=self._phase == "answer",
-                )
-            )
+            self._post_finished(result)
         except asyncio.CancelledError:
-            self.post_message(
-                RunFinished(
-                    result=RunResult(run_id or "unknown", RunStatus.CANCELLED, "cancelled", 0),
-                    status=RunStatus.CANCELLED,
-                    message="Cancelled the current task.",
-                    is_streamed=False,
-                )
+            self._post_cancelled(run_id)
+        except Exception as error:
+            self.post_message(RunError(f"{type(error).__name__}: {error}"))
+
+    def _post_finished(self, result: RunResult) -> None:
+        """Post a terminal ``RunFinished`` for a completed worker."""
+        self.post_message(
+            RunFinished(
+                result=result,
+                status=result.status,
+                message=result.final_message,
+                is_streamed=self._phase == "answer",
             )
+        )
+
+    def _post_cancelled(self, run_id: str | None) -> None:
+        """Post a synthetic cancelled ``RunFinished`` when a worker is aborted."""
+        self.post_message(
+            RunFinished(
+                result=RunResult(run_id or "unknown", RunStatus.CANCELLED, "cancelled", 0),
+                status=RunStatus.CANCELLED,
+                message="Cancelled the current task.",
+                is_streamed=False,
+            )
+        )
+
+    # ── Tool approval ─────────────────────────────────────────────────
+
+    def _resolve_approval(self, answer: str) -> None:
+        """Interpret the user's y/n reply to a pending approval prompt."""
+        run_id = self._pending_approval
+        if run_id is None:
+            return
+        if answer in {"y", "yes", "a", "approve"}:
+            self._pending_approval = None
+            self._start_approval(run_id, ApprovalDecision.APPROVE)
+        elif answer in {"n", "no", "d", "deny"}:
+            self._pending_approval = None
+            self._start_approval(run_id, ApprovalDecision.DENY)
+        else:
+            self._append(
+                Text("Please answer y (approve) or n (deny).", style="dim"),
+                spaced=False,
+            )
+
+    def _start_approval(self, run_id: str, decision: ApprovalDecision) -> None:
+        """Resume a paused Run with the user's approval verdict."""
+        self._busy = True
+        self._phase = None
+        self._thinking_buf.clear()
+        self._answer_buf.clear()
+        self._thinking_widget = None
+        self._answer_widget = None
+
+        verb = "Approved" if decision is ApprovalDecision.APPROVE else "Denied"
+        self._append(_row(Text("▸", style="bold cyan"), Text(verb, style="dim")))
+
+        status_bar = self.query_one(RunStatusBar)
+        status_bar.set_working()
+        self.query_one("#prompt-input", PromptInput).disabled = True
+
+        self._cancellation = RunCancellation()
+        self._worker = self._do_approval(run_id, decision)
+
+    @work(thread=False, exit_on_error=False)
+    async def _do_approval(self, run_id: str, decision: ApprovalDecision) -> None:
+        """Resume the paused Run with the approval verdict, as a worker."""
+        frog = self._frog
+        if frog is None:
+            self.post_message(RunError("Milky Frog not initialised"))
+            return
+        cancellation = self._cancellation
+        try:
+            stored = frog.checkpoints.get_run(run_id)
+            if stored is None:
+                self.post_message(RunError(f"unknown Run: {run_id}"))
+                return
+            config = load_project_config(stored.workspace)
+            result = await frog.harness.resume(
+                run_id,
+                max_model_calls=config.max_model_calls,
+                approval=decision,
+                cancellation=cancellation,
+            )
+            self._post_finished(result)
+        except asyncio.CancelledError:
+            self._post_cancelled(run_id)
         except Exception as error:
             self.post_message(RunError(f"{type(error).__name__}: {error}"))
 
@@ -638,6 +753,16 @@ class MilkyFrogApp(App[None]):
         self.exit()
 
     def action_cancel_run(self) -> None:
-        """Interrupt the in-flight Run, if any (Esc)."""
-        if self._busy and self._worker is not None:
+        """Interrupt the in-flight Run, if any (Esc).
+
+        Cooperative cancel first: signalling the token lets the Harness stop the
+        model stream and reach ``finish_cancelled`` (persisting CANCELLED with the
+        real run_id). ``worker.cancel()`` is a hard fallback if the token is
+        somehow not wired.
+        """
+        if not self._busy:
+            return
+        if self._cancellation is not None:
+            self._cancellation.cancel()
+        elif self._worker is not None:
             self._worker.cancel()
