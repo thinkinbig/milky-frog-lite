@@ -58,9 +58,7 @@ class DenyAllPolicy:
 
 def approval_free_tool_names(tools: tuple[Tool, ...]) -> frozenset[str]:
     """Return tool names that never need approval (``requires_approval`` is false)."""
-    return frozenset(
-        tool.name for tool in tools if not getattr(tool, "requires_approval", True)
-    )
+    return frozenset(tool.name for tool in tools if not getattr(tool, "requires_approval", True))
 
 
 def call_needs_approval(tool: Tool, call: ToolCall) -> bool:

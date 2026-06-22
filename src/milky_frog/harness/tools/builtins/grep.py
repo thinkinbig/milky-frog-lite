@@ -18,8 +18,7 @@ class GrepInput(BaseModel):
     path: str = Field(
         default=".",
         description=(
-            "Workspace-relative directory or file to search in. "
-            "Defaults to the workspace root."
+            "Workspace-relative directory or file to search in. Defaults to the workspace root."
         ),
     )
 
@@ -68,9 +67,7 @@ class GrepTool:
         except TimeoutError:
             process.kill()
             await process.wait()
-            return ToolResult(
-                f"rg timed out after {_RG_TIMEOUT_SECONDS}s", is_error=True
-            )
+            return ToolResult(f"rg timed out after {_RG_TIMEOUT_SECONDS}s", is_error=True)
 
         rc = process.returncode or 0
 
