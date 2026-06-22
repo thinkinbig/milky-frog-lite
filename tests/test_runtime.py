@@ -18,7 +18,7 @@ from milky_frog.domain import (
     StreamDone,
     TextDelta,
 )
-from milky_frog.handlers import BaseHandler, LifecycleBus, RunCancelled
+from milky_frog.handlers import BaseHandler, HandlerContext, LifecycleBus, RunCancelled
 from milky_frog.models import OpenAIModel
 from milky_frog.runtime import MilkyFrog, MissingModelConfiguration
 from milky_frog.settings import LangfuseSettings, Settings
@@ -66,7 +66,8 @@ def test_milky_frog_cancel_stops_foreground_run(
     cancelled: list[RunCancelled] = []
 
     @registry.on(RunCancelled)
-    async def record(event: RunCancelled) -> None:
+    async def record(event: RunCancelled, ctx: HandlerContext) -> None:
+        del ctx
         cancelled.append(event)
 
     frog = MilkyFrog.from_settings(settings, handlers=registry)

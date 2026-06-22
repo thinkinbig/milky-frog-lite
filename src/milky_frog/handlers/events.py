@@ -27,6 +27,19 @@ class BaseEvent:
 
 
 @dataclass(frozen=True)
+class RunBeforeResume(BaseEvent):
+    """Dispatched before a Run is prepared for resumption.
+
+    Pure observation — handlers can inspect / log the stored Run data
+    before the Harness loads state, seals interrupted tools, and
+    optionally appends a new user turn.
+    """
+
+    prompt: str | None
+    stored_status: RunStatus
+
+
+@dataclass(frozen=True)
 class RunStarted(BaseEvent):
     request: RunRequest
 
@@ -56,6 +69,15 @@ class RunAfterModel(BaseEvent):
 
 @dataclass(frozen=True)
 class RunBeforeTool(BaseEvent):
+    """Dispatched before a tool call — handlers may observe OR control.
+
+    **Observation**: return ``None`` (the default).  The call proceeds.
+    **Control**: return ``BlockResult(reason=…)`` or ``ApprovalResult()``.
+
+    Control is purely through return values — the event itself stays
+    frozen and immutable.
+    """
+
     call: ToolCall
 
 

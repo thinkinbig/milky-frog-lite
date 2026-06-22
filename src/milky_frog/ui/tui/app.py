@@ -17,15 +17,11 @@ from textual.reactive import reactive
 from textual.widgets import Footer, Header, Input, Static
 from textual.worker import Worker
 
-from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import RunRequest, RunResult, RunStatus, RunUsage
-from milky_frog.harness.runner import Harness
-from milky_frog.harness.tools import ToolRegistry, default_tools
-from milky_frog.models import OpenAIModel
 from milky_frog.project import load_project_config
 from milky_frog.settings import Settings
+from milky_frog.runtime import MilkyFrog
 from milky_frog.ui.logo import pixel_frog_logo
-from milky_frog.ui.tui.handlers import TuiStreamingHandlers
 from milky_frog.ui.tui.messages import (
     AddText,
     AddThinking,
@@ -35,6 +31,7 @@ from milky_frog.ui.tui.messages import (
     ToolResultMsg,
     UpdateUsage,
 )
+from milky_frog.ui.tui.renderer import TextualStreamRenderer
 from milky_frog.ui.tui.rendering import (
     COMMANDS,
     DiffKind,
@@ -269,13 +266,11 @@ class MilkyFrogApp(App[None]):
         Binding("escape", "cancel_run", "Interrupt"),
     ]
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, frog: MilkyFrog) -> None:
         super().__init__()
-        self._settings = settings
+        self._frog = frog
         self._run_id: str | None = None
         self._busy = False
-        self._harness: Harness | None = None
-        self._checkpoints: SqliteCheckpointStore | None = None
         self._worker: Worker[None] | None = None
 
         # Streaming state: buffers plus the live widget being updated in place.
@@ -294,32 +289,17 @@ class MilkyFrogApp(App[None]):
             Static(id="command-hints"),
             PromptInput(id="prompt-input", placeholder="Type a task and press Enter..."),
             RunStatusBar(
-                model=self._settings.model or "unknown",
+                model=self._frog.model_name or "unknown",
                 workspace=Path.cwd(),
             ),
         )
         yield Footer()
 
     def on_mount(self) -> None:
-        """App started: render welcome and assemble Harness infrastructure."""
-        self._checkpoints = SqliteCheckpointStore(self._settings.database_path)
-
-        from milky_frog.handlers import LifecycleBus
-
-        model = OpenAIModel(
-            api_key=self._settings.api_key or "",
-            model=self._settings.model or "",
-            base_url=self._settings.base_url,
-        )
-        bus = LifecycleBus()
-        TuiStreamingHandlers(self).register(bus)
-
-        self._harness = Harness(
-            model=model,
-            tools=ToolRegistry(default_tools()),
-            checkpoints=self._checkpoints,
-            handlers=bus,
-        )
+        """App started: render welcome and wire up the stream renderer."""
+        # Stream renderer subscribes to the shared LifecycleBus alongside
+        # cross-cutting handlers (PolicyHandler, LangfuseHandler, …).
+        self._frog.bus.subscribe(TextualStreamRenderer(self).on_event)
 
         self._render_welcome()
         self.query_one("#prompt-input", Input).focus()
@@ -569,8 +549,8 @@ class MilkyFrogApp(App[None]):
         prompt = tail.strip() or None
 
         try:
-            if self._checkpoints is not None:
-                run_id = self._checkpoints.resolve_run_id(run_id)
+            if self._frog is not None:
+                run_id = self._frog.checkpoints.resolve_run_id(run_id)
         except (LookupError, ValueError) as error:
             self._render_error(f"unknown Run: {error}")
             return
@@ -609,27 +589,24 @@ class MilkyFrogApp(App[None]):
     @work(thread=False, exit_on_error=False)
     async def _do_run(self, task: str, run_id: str | None) -> None:
         """Run the Harness as an async worker inside Textual's event loop."""
-        harness = self._harness
-        if harness is None:
-            self.post_message(RunError("Harness not initialised"))
+        frog = self._frog
+        if frog is None:
+            self.post_message(RunError("Milky Frog not initialised"))
             return
 
         try:
             if run_id is None:
                 config = load_project_config(Path.cwd())
-                result = await harness.run(
+                result = await frog.harness.run(
                     RunRequest(task, Path.cwd(), max_model_calls=config.max_model_calls)
                 )
             else:
-                if self._checkpoints is None:
-                    self.post_message(RunError("Checkpoint store not initialised"))
-                    return
-                stored = self._checkpoints.get_run(run_id)
+                stored = frog.checkpoints.get_run(run_id)
                 if stored is None:
                     self.post_message(RunError(f"unknown Run: {run_id}"))
                     return
                 config = load_project_config(stored.workspace)
-                result = await harness.resume(
+                result = await frog.harness.resume(
                     run_id,
                     max_model_calls=config.max_model_calls,
                     prompt=task,

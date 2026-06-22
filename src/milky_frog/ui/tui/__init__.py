@@ -1,5 +1,4 @@
 from milky_frog.ui.tui.app import MilkyFrogApp
-from milky_frog.ui.tui.handlers import TuiStreamingHandlers
 from milky_frog.ui.tui.messages import (
     AddText,
     AddThinking,
@@ -9,6 +8,7 @@ from milky_frog.ui.tui.messages import (
     ToolResultMsg,
     UpdateUsage,
 )
+from milky_frog.ui.tui.renderer import TextualStreamRenderer
 
 __all__ = [
     "AddText",
@@ -16,8 +16,8 @@ __all__ = [
     "MilkyFrogApp",
     "RunError",
     "RunFinished",
+    "TextualStreamRenderer",
     "ToolCallMsg",
     "ToolResultMsg",
-    "TuiStreamingHandlers",
     "UpdateUsage",
 ]

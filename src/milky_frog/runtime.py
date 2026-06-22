@@ -9,10 +9,11 @@ from types import FrameType, TracebackType
 
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import ResumeError, RunCancellation, RunRequest, RunResult
-from milky_frog.gates import ToolGate, ToolPolicy
-from milky_frog.handlers import BaseHandler, LifecycleBus
+from milky_frog.handlers import BaseHandler, LangfuseHandler, LifecycleBus
+from milky_frog.handlers.policy import PolicyHandler
 from milky_frog.harness.runner import Harness
 from milky_frog.harness.tools import ToolRegistry, default_tools
+from milky_frog.harness.tools.tool_policy import ToolPolicy
 from milky_frog.models import OpenAIModel
 from milky_frog.project import load_project_config
 from milky_frog.settings import Settings
@@ -45,13 +46,29 @@ class MilkyFrog:
         api_key, model = self.require_model_configuration(settings)
         self._handlers: list[BaseHandler] = list(bundles) if bundles else []
         self._checkpoints = SqliteCheckpointStore(settings.database_path)
-        self._tool_gate = ToolGate(tool_policy)
+
+        self._model_name = model
+        self._bus = handlers if handlers is not None else LifecycleBus()
+
+        # Register built-in tool policy on RunBeforeTool.
+        PolicyHandler(tool_policy).register(self._bus)
+
+        # Register lifecycle handlers (observability, policy, …) on the bus
+        # so they receive lifecycle events alongside the built-in harness.
+        for bundle in self._handlers:
+            bundle.register(self._bus)
+
+        # Auto-register Langfuse observability if configured.
+        if settings.langfuse.active:
+            langfuse = LangfuseHandler(settings.langfuse)
+            langfuse.register(self._bus)
+            self._handlers.append(langfuse)
+
         self._harness = Harness(
             model=OpenAIModel(api_key=api_key, model=model, base_url=settings.base_url),
             tools=ToolRegistry(default_tools()),
             checkpoints=self._checkpoints,
-            handlers=handlers if handlers is not None else LifecycleBus(),
-            tool_gate=self._tool_gate,
+            handlers=self._bus,
         )
         self._loop: asyncio.AbstractEventLoop | None = None
         self._cancellation: RunCancellation | None = None
@@ -101,9 +118,26 @@ class MilkyFrog:
             self._loop = None
 
     @property
-    def tool_gate(self) -> ToolGate:
-        """Shared ToolGate for CLI to approve/deny before resume."""
-        return self._tool_gate
+    def model_name(self) -> str:
+        """The configured model identifier (for display in the TUI)."""
+        return self._model_name
+
+    @property
+    def bus(self) -> LifecycleBus:
+        """The shared LifecycleBus — TUI subscribes its renderer here."""
+        return self._bus
+
+    @property
+    def checkpoints(self) -> SqliteCheckpointStore:
+        """The shared checkpoint store — TUI resolves run IDs here."""
+        return self._checkpoints
+
+    @property
+    def harness(self) -> Harness:
+        """The async Harness — TUI uses this to drive Runs inside Textual's
+        event loop instead of going through the sync ``run()`` / ``resume()``
+        wrappers that create their own loop."""
+        return self._harness
 
     def cancel(self) -> None:
         """Request cooperative cancellation of the foreground Run."""

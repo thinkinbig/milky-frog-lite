@@ -89,7 +89,8 @@ def interactive() -> None:
     except MissingModelConfiguration:
         _render_configuration_error()
         raise typer.Exit(code=2) from None
-    MilkyFrogApp(settings).run()
+    frog = MilkyFrog.from_settings(settings)
+    MilkyFrogApp(frog).run()
 
 
 def _render_configuration_error(*, run_doctor_again: bool = False) -> None:

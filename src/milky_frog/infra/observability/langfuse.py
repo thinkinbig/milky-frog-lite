@@ -8,6 +8,7 @@ from langfuse import Langfuse
 from langfuse.types import TraceContext
 
 from milky_frog.handlers.bus import BaseHandler, LifecycleBus
+from milky_frog.handlers.context import HandlerContext
 from milky_frog.handlers.events import (
     BaseEvent,
     RunAfterModel,
@@ -70,13 +71,13 @@ class LangfuseHandler(BaseHandler):
 
     # ── Run lifecycle ────────────────────────────────────────────────
 
-    async def _run_started(self, event: RunStarted) -> None:
+    async def _run_started(self, event: RunStarted, ctx: HandlerContext) -> None:
         try:
             self._trace_ids.setdefault(event.run_id, self._client.create_trace_id())
         except Exception:
             logger.exception("Langfuse run_started error")
 
-    async def _on_terminal(self, event: BaseEvent) -> None:
+    async def _on_terminal(self, event: BaseEvent, ctx: HandlerContext) -> None:
         try:
             self._end_run(event)
         except Exception:
@@ -125,7 +126,7 @@ class LangfuseHandler(BaseHandler):
 
     # ── Turn lifecycle ─────────────────────────────────────────────
 
-    async def _turn_start(self, event: RunTurnStart) -> None:
+    async def _turn_start(self, event: RunTurnStart, ctx: HandlerContext) -> None:
         try:
             trace_id = self._trace_ids.get(event.run_id)
             if trace_id:
@@ -137,7 +138,7 @@ class LangfuseHandler(BaseHandler):
         except Exception:
             logger.exception("Langfuse turn_start error")
 
-    async def _turn_end(self, event: RunTurnEnd) -> None:
+    async def _turn_end(self, event: RunTurnEnd, ctx: HandlerContext) -> None:
         try:
             span = self._turn_spans.pop(event.run_id, None)
             if span:
@@ -147,7 +148,7 @@ class LangfuseHandler(BaseHandler):
 
     # ── Model calls ──────────────────────────────────────────────────
 
-    async def _before_model(self, event: RunBeforeModel) -> None:
+    async def _before_model(self, event: RunBeforeModel, ctx: HandlerContext) -> None:
         try:
             trace_id = self._trace_ids.setdefault(event.run_id, self._client.create_trace_id())
             self._generations[event.run_id] = self._client.start_observation(
@@ -161,7 +162,7 @@ class LangfuseHandler(BaseHandler):
         except Exception:
             logger.exception("Langfuse before_model error")
 
-    async def _after_model(self, event: RunAfterModel) -> None:
+    async def _after_model(self, event: RunAfterModel, ctx: HandlerContext) -> None:
         try:
             gen = self._generations.pop(event.run_id, None)
             if gen:
@@ -181,7 +182,7 @@ class LangfuseHandler(BaseHandler):
 
     # ── Tool calls ───────────────────────────────────────────────────
 
-    async def _before_tool(self, event: RunBeforeTool) -> None:
+    async def _before_tool(self, event: RunBeforeTool, ctx: HandlerContext) -> None:
         try:
             trace_id = self._trace_ids.get(event.run_id)
             if trace_id:
@@ -195,7 +196,7 @@ class LangfuseHandler(BaseHandler):
         except Exception:
             logger.exception("Langfuse before_tool error")
 
-    async def _after_tool(self, event: RunAfterTool) -> None:
+    async def _after_tool(self, event: RunAfterTool, ctx: HandlerContext) -> None:
         try:
             key = f"{event.run_id}:{event.call.id}"
             span = self._tool_spans.pop(key, None)

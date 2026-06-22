@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 from collections.abc import Coroutine
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -13,30 +14,40 @@ from milky_frog.domain import (
     ModelRequest,
     ModelResponse,
     ReasoningDelta,
+    ResumeError,
     RunCancellation,
     RunRequest,
     RunResult,
     RunState,
+    RunStatus,
     StreamDone,
     TextDelta,
     ToolCall,
-    ToolDecision,
     ToolResult,
     ToolRunCancelled,
     is_cancelled,
 )
-from milky_frog.gates import PreparedRun, ResumeError, ResumeGate, ToolGate
-from milky_frog.handlers import LifecycleBus
+from milky_frog.handlers import ApprovalResult, BlockResult, LifecycleBus
 from milky_frog.harness.emitter import RunEmitter
 from milky_frog.harness.sandbox import LocalSandbox, Sandbox, SandboxFactory
 from milky_frog.harness.state import (
     append_model_response,
     append_tool_result,
+    append_user_message,
+    seal,
     start_run,
     unmatched_tool_calls,
 )
 from milky_frog.harness.tools import ToolContext, ToolRegistry
 from milky_frog.models import Model
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedRun:
+    """State and sandbox prepared for ``Harness._advance`` after a resume."""
+
+    state: RunState
+    sandbox: Sandbox
 
 
 class Harness:
@@ -49,15 +60,13 @@ class Harness:
         checkpoints: CheckpointStore,
         handlers: LifecycleBus,
         sandbox_factory: SandboxFactory = LocalSandbox,
-        tool_gate: ToolGate | None = None,
     ) -> None:
         self._model = model
         self._tools = tools
         self._checkpoints = checkpoints
         self._sandbox_factory = sandbox_factory
+        self._handlers = handlers
         self._emitter = RunEmitter(checkpoints, handlers)
-        self._resume_gate = ResumeGate(checkpoints)
-        self._tool_gate = tool_gate
 
     async def run(self, run_request: RunRequest) -> RunResult:
         """Start a fresh Run: seed the transcript from the prompt, then advance."""
@@ -87,15 +96,24 @@ class Harness:
         try:
             with self._checkpoints.claim(run_id):
                 stored = self._checkpoints.get_run(run_id)
-                stored = ResumeGate.validate(stored, run_id, prompt)
+                if stored is None:
+                    raise ResumeError(f"unknown Run: {run_id}")
+
                 sandbox = self._sandbox_factory(stored.workspace)
-                plan = self._resume_gate.prepare(
-                    run_id,
-                    stored,
-                    sandbox=sandbox,
-                    prompt=prompt,
-                    updated_at=stored.updated_at,
-                )
+
+                # Notify observers before preparing state.
+                await self._emitter.before_resume(run_id, prompt, stored.status)
+
+                # Load snapshot, seal interrupted tools, optionally append prompt.
+                state = self._checkpoints.load_state(run_id)
+                if stored.status is not RunStatus.WAITING_FOR_APPROVAL:
+                    state, _repaired = seal(state)
+                if prompt is not None:
+                    state = append_user_message(state, prompt)
+                self._checkpoints.prepare_resume(run_id, stored.updated_at, state)
+
+                plan = PreparedRun(state=state, sandbox=sandbox)
+
                 # Process pending tool approvals before advancing.
                 resolved = await self._apply_approvals(plan, run_id, sandbox, cancellation)
                 if isinstance(resolved, RunResult):
@@ -142,13 +160,15 @@ class Harness:
                 for call in response.tool_calls:
                     if is_cancelled(cancellation):
                         return await self._emitter.finish_cancelled(state)
-                    if self._tool_gate is not None:
-                        decision = self._tool_gate.check(call)
-                    else:
-                        decision = ToolDecision.ALLOW
-                    if decision is ToolDecision.DENY:
-                        result = ToolResult("denied by tool policy", is_error=True)
-                    elif decision is ToolDecision.NEEDS_APPROVAL:
+
+                    # Unified control + observation: RunBeforeTool.
+                    check_results = await self._emitter.before_tool(run_id, call)
+                    blocked = [r for r in check_results if isinstance(r, BlockResult)]
+                    approvals = [r for r in check_results if isinstance(r, ApprovalResult)]
+
+                    if blocked:
+                        result = ToolResult(blocked[0].reason, is_error=True)
+                    elif approvals:
                         return await self._emitter.finish_approval_needed(state, [call.name])
                     else:
                         try:
@@ -186,23 +206,27 @@ class Harness:
         or a ``RunResult`` if approval is still needed (re-pause).
         """
         pending = unmatched_tool_calls(plan.state.messages)
-        if not pending or self._tool_gate is None:
+        if not pending:
             return plan
         for call in pending:
             if is_cancelled(cancellation):
                 return await self._emitter.finish_cancelled(plan.state)
-            decision = self._tool_gate.check(call)
-            if decision is ToolDecision.ALLOW:
+
+            check_results = await self._emitter.before_tool(run_id, call)
+            blocked = [r for r in check_results if isinstance(r, BlockResult)]
+            approvals = [r for r in check_results if isinstance(r, ApprovalResult)]
+
+            if blocked:
+                result = ToolResult(blocked[0].reason, is_error=True)
+            elif approvals:
+                return await self._emitter.finish_approval_needed(plan.state, [call.name])
+            else:
                 try:
                     result = await self._execute_tool(
                         run_id, plan.state.workspace, sandbox, call, cancellation
                     )
                 except ToolRunCancelled:
                     return await self._emitter.finish_cancelled(plan.state)
-            elif decision is ToolDecision.DENY:
-                result = ToolResult("denied by user", is_error=True)
-            else:
-                return await self._emitter.finish_approval_needed(plan.state, [call.name])
             plan = PreparedRun(
                 state=append_tool_result(plan.state, call, result),
                 sandbox=plan.sandbox,

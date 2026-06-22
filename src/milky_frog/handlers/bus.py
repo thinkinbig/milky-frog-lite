@@ -6,11 +6,12 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, TypeVar, cast
 
+from milky_frog.handlers.context import HandlerContext, HandlerResult
 from milky_frog.handlers.events import BaseEvent
 
 EventT = TypeVar("EventT", bound=BaseEvent)
-NotifyHandler = Callable[[EventT], Awaitable[None]]
-Handler = Callable[[Any], Awaitable[None]]
+NotifyHandler = Callable[[EventT, HandlerContext], Awaitable[HandlerResult]]
+Handler = Callable[[Any, HandlerContext], Awaitable[HandlerResult]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,23 +21,23 @@ class _Registration:
     handler: Handler
 
 
-class _RegistrationSortKey:
-    def __call__(self, registration: _Registration) -> tuple[int, int]:
-        return (-registration.priority, registration.order)
-
-
 class LifecycleBus:
     """Instance-owned read-only notification bus for Harness lifecycle signals.
 
     Handlers registered via ``observe`` (or ``on`` / ``subscribe``) may inspect
     signals only; they cannot change Harness execution. Checkpoint events are
     separate — see ``milky_frog.harness.state``.
+
+    A ``HandlerContext`` may be set on the bus (via ``set_context``) so that
+    every handler receives shared framework-managed resources — UI, workspace,
+    etc. — without wiring them through constructors.
     """
 
     def __init__(self) -> None:
         self._observe: dict[type[object], list[_Registration]] = defaultdict(list)
         self._wildcard_observe: list[_Registration] = []
         self._next_order = 0
+        self._context: HandlerContext = HandlerContext()
 
     def observe(
         self, event_type: type[EventT], *, priority: int = 0
@@ -62,12 +63,27 @@ class LifecycleBus:
         self._wildcard_observe.append(self._registration(priority, handler))
         return handler
 
-    async def notify(self, event: BaseEvent) -> None:
-        """Deliver a lifecycle signal to every matching observe Handler."""
+    def set_context(self, ctx: HandlerContext) -> None:
+        """Set the shared HandlerContext for every subsequent ``notify``."""
+        self._context = ctx
+
+    async def notify(self, event: BaseEvent) -> list[HandlerResult]:
+        """Deliver a lifecycle signal to every matching observe Handler.
+
+        Each handler receives the event together with the shared
+        ``HandlerContext`` set via ``set_context``.  Non-``None`` return
+        values are collected and returned — the caller (typically the
+        ``RunEmitter``) decides whether to act on them.
+        """
         registrations = list(self._observe[type(event)])
         registrations.extend(self._wildcard_observe)
+        ctx = self._context
+        results: list[HandlerResult] = []
         for registration in self._sorted(registrations):
-            await registration.handler(event)
+            result = await registration.handler(event, ctx)
+            if result is not None:
+                results.append(result)
+        return results
 
     def _registration(self, priority: int, handler: Callable[..., Any]) -> _Registration:
         registration = _Registration(priority, self._next_order, cast(Handler, handler))
@@ -76,7 +92,7 @@ class LifecycleBus:
 
     @staticmethod
     def _sorted(registrations: list[_Registration]) -> list[_Registration]:
-        return sorted(registrations, key=_RegistrationSortKey())
+        return sorted(registrations, key=lambda r: (-r.priority, r.order))
 
 
 class BaseHandler(ABC):

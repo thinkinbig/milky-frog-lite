@@ -4,6 +4,7 @@ import pytest
 
 from milky_frog.domain import ToolCall
 from milky_frog.handlers.bus import LifecycleBus
+from milky_frog.handlers.context import HandlerContext
 from milky_frog.handlers.events import BaseEvent, RunBeforeTool
 
 
@@ -18,15 +19,18 @@ async def test_observe_handlers_run_by_priority_then_registration_order() -> Non
     calls: list[str] = []
 
     @registry.observe(SampleEvent, priority=10)
-    async def first_high_priority(event: SampleEvent) -> None:
+    async def first_high_priority(event: SampleEvent, ctx: HandlerContext) -> None:
+        del ctx
         calls.append(f"first:{event.value}")
 
     @registry.observe(SampleEvent, priority=10)
-    async def second_high_priority(event: SampleEvent) -> None:
+    async def second_high_priority(event: SampleEvent, ctx: HandlerContext) -> None:
+        del ctx
         calls.append(f"second:{event.value}")
 
     @registry.observe(SampleEvent)
-    async def low_priority(event: SampleEvent) -> None:
+    async def low_priority(event: SampleEvent, ctx: HandlerContext) -> None:
+        del ctx
         calls.append(f"low:{event.value}")
 
     await registry.notify(SampleEvent(run_id="test", value="value"))
@@ -40,7 +44,8 @@ async def test_on_registers_observe_handlers() -> None:
     calls: list[str] = []
 
     @registry.on(SampleEvent)
-    async def record(event: SampleEvent) -> None:
+    async def record(event: SampleEvent, ctx: HandlerContext) -> None:
+        del ctx
         calls.append(event.value)
 
     await registry.notify(SampleEvent(run_id="test", value="legacy"))
@@ -54,7 +59,8 @@ async def test_subscribe_receives_every_notified_signal() -> None:
     seen: list[str] = []
 
     @registry.subscribe
-    async def record(event: BaseEvent) -> None:
+    async def record(event: BaseEvent, ctx: HandlerContext) -> None:
+        del ctx
         seen.append(type(event).__name__)
 
     await registry.notify(SampleEvent(run_id="test", value="one"))
@@ -68,13 +74,13 @@ async def test_subscribe_runs_by_priority_with_typed_observe_handlers() -> None:
     registry = LifecycleBus()
     calls: list[str] = []
 
-    async def wildcard_first(_event: BaseEvent) -> None:
+    async def wildcard_first(_event: BaseEvent, _ctx: HandlerContext) -> None:
         calls.append("wildcard")
 
     registry.subscribe(wildcard_first, priority=10)
 
     @registry.observe(SampleEvent)
-    async def typed(_event: SampleEvent) -> None:
+    async def typed(_event: SampleEvent, _ctx: HandlerContext) -> None:
         calls.append("typed")
 
     await registry.notify(SampleEvent(run_id="test", value="value"))

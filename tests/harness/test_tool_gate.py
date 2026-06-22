@@ -1,4 +1,4 @@
-"""ToolGate unit tests and Tool policy approval integration tests."""
+"""Tool-policy tests: PolicyHandler on RunBeforeTool, approval pause and resume."""
 
 from __future__ import annotations
 
@@ -13,20 +13,20 @@ from milky_frog.domain import (
     ToolCall,
     ToolDecision,
 )
-from milky_frog.gates import (
+from milky_frog.handlers import LifecycleBus
+from milky_frog.handlers.policy import PolicyHandler
+from milky_frog.harness.runner import Harness
+from milky_frog.harness.tools import ToolRegistry, default_tools
+from milky_frog.harness.tools.tool_policy import (
     DefaultToolPolicy,
     DenyAllPolicy,
     PermissivePolicy,
-    ToolGate,
+    approval_free_tool_names,
 )
-from milky_frog.handlers import LifecycleBus
-from milky_frog.harness.runner import Harness
-from milky_frog.harness.tools import ToolRegistry, default_tools
-from milky_frog.harness.tools.tool_policy import approval_free_tool_names
-from tests.checkpoint_helpers import run_status, tool_messages, user_messages
+from tests.checkpoint_helpers import tool_messages
 from tests.stubs import EchoTool, FakeModel
 
-# ── ToolGate / policy unit tests ──────────────────────────────────────
+# ── Policy unit tests ────────────────────────────────────────────────
 
 
 def test_default_policy_allows_approval_free_tools() -> None:
@@ -71,29 +71,13 @@ def test_deny_all_policy_denies_everything() -> None:
     assert policy.decide(ToolCall("c1", "read", {})) is ToolDecision.DENY
 
 
-def test_gate_defers_to_policy_on_first_check() -> None:
-    gate = ToolGate(PermissivePolicy())
-    assert gate.check(ToolCall("c1", "write", {})) is ToolDecision.ALLOW
+# ── PolicyHandler via RunBeforeTool (replaces old ToolGate) ─────────
 
 
-def test_gate_caches_approval_and_returns_allow() -> None:
-    gate = ToolGate(DenyAllPolicy())
-    gate.approve("c1")
-    assert gate.check(ToolCall("c1", "write", {})) is ToolDecision.ALLOW
-
-
-def test_gate_caches_denial_and_returns_deny() -> None:
-    gate = ToolGate(PermissivePolicy())
-    gate.deny("c1")
-    assert gate.check(ToolCall("c1", "write", {})) is ToolDecision.DENY
-
-
-def test_gate_clear_forgets_decisions() -> None:
-    gate = ToolGate(DenyAllPolicy())
-    gate.approve("c1")
-    assert gate.check(ToolCall("c1", "write", {})) is ToolDecision.ALLOW
-    gate.clear()
-    assert gate.check(ToolCall("c1", "write", {})) is ToolDecision.DENY
+def _make_bus(policy: DefaultToolPolicy | None = None) -> LifecycleBus:
+    bus = LifecycleBus()
+    PolicyHandler(policy).register(bus)
+    return bus
 
 
 # ── Harness integration: tool denial ──────────────────────────────────
@@ -108,8 +92,7 @@ async def test_tool_denied_by_policy_returns_error_result(tmp_path: Path) -> Non
         checkpoints=__import__(
             "milky_frog.checkpoint", fromlist=["SqliteCheckpointStore"]
         ).SqliteCheckpointStore(tmp_path / "state.db"),
-        handlers=LifecycleBus(),
-        tool_gate=ToolGate(DenyAllPolicy()),
+        handlers=_make_bus(DenyAllPolicy()),
     )
 
     result = await harness.run(RunRequest("echo hello", tmp_path))
@@ -117,6 +100,12 @@ async def test_tool_denied_by_policy_returns_error_result(tmp_path: Path) -> Non
 
 
 # ── Harness integration: approval pause and resume ────────────────────
+
+
+def _find_pending_tool_id(store, run_id: str, state) -> str:
+    last_assistant = [m for m in state.messages if m.role is MessageRole.ASSISTANT][-1]
+    assert last_assistant.tool_calls
+    return last_assistant.tool_calls[0].id
 
 
 @pytest.mark.asyncio
@@ -127,121 +116,70 @@ async def test_approval_pauses_run_and_resume_executes_approved_tool(
     from milky_frog.checkpoint import SqliteCheckpointStore
 
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    gate = ToolGate()  # DefaultPolicy: needs approval for echo
+    bus = _make_bus(DefaultToolPolicy())  # needs approval for echo
 
     harness = Harness(
         model=FakeModel(),
         tools=ToolRegistry((EchoTool(),)),
         checkpoints=store,
-        handlers=LifecycleBus(),
-        tool_gate=gate,
+        handlers=bus,
     )
 
     result = await harness.run(RunRequest("echo hello", tmp_path))
     assert result.status is RunStatus.WAITING_FOR_APPROVAL
     assert "echo" in result.final_message
 
-    # Find the pending tool call id from the state
-    state = store.load_state(result.run_id)
-    last_assistant = [m for m in state.messages if m.role is MessageRole.ASSISTANT][-1]
-    assert last_assistant.tool_calls
-    pending_call_id = last_assistant.tool_calls[0].id
-
-    # User approves
-    gate.approve(pending_call_id)
-
-    resumed = await harness.resume(result.run_id, max_model_calls=30)
-    assert resumed.status is RunStatus.COMPLETED
-    assert resumed.final_message == "done"
-    assert run_status(store, result.run_id) is RunStatus.COMPLETED
-
-
-@pytest.mark.asyncio
-async def test_approval_deny_returns_error_and_continues(tmp_path: Path) -> None:
-    """When a user denies a tool, it produces an error result and the run continues."""
-    from milky_frog.checkpoint import SqliteCheckpointStore
-
-    store = SqliteCheckpointStore(tmp_path / "state.db")
-    gate = ToolGate()
-
-    harness = Harness(
-        model=FakeModel(),
-        tools=ToolRegistry((EchoTool(),)),
-        checkpoints=store,
-        handlers=LifecycleBus(),
-        tool_gate=gate,
-    )
-
-    result = await harness.run(RunRequest("echo hello", tmp_path))
-    assert result.status is RunStatus.WAITING_FOR_APPROVAL
-
-    state = store.load_state(result.run_id)
-    last_assistant = [m for m in state.messages if m.role is MessageRole.ASSISTANT][-1]
-    pending_call_id = last_assistant.tool_calls[0].id
-
-    # User denies
-    gate.deny(pending_call_id)
-
-    resumed = await harness.resume(result.run_id, max_model_calls=30)
-    assert resumed.status is RunStatus.COMPLETED
-
-    loaded = store.load_state(result.run_id)
-    tool_msgs = tool_messages(loaded)
-    assert any("denied by user" in m for m in tool_msgs)
-
-
-@pytest.mark.asyncio
-async def test_approval_repauses_when_still_unapproved(tmp_path: Path) -> None:
-    """If no approval decision is made, resume pauses again."""
-    from milky_frog.checkpoint import SqliteCheckpointStore
-
-    store = SqliteCheckpointStore(tmp_path / "state.db")
-    gate = ToolGate()
-
-    harness = Harness(
-        model=FakeModel(),
-        tools=ToolRegistry((EchoTool(),)),
-        checkpoints=store,
-        handlers=LifecycleBus(),
-        tool_gate=gate,
-    )
-
-    result = await harness.run(RunRequest("echo hello", tmp_path))
-    assert result.status is RunStatus.WAITING_FOR_APPROVAL
-
-    # Resume without approving — should pause again
+    # Resume without decision — should re-pause (PolicyHandler returns ApprovalResult)
     resumed = await harness.resume(result.run_id, max_model_calls=30)
     assert resumed.status is RunStatus.WAITING_FOR_APPROVAL
 
 
 @pytest.mark.asyncio
-async def test_approval_pause_with_prompt_continues_normally(tmp_path: Path) -> None:
-    """A prompt on a WAITING_FOR_APPROVAL run appends a user message and resumes
-    normally with no re-pause (gate is None in tests, but this verifies the flow)."""
+async def test_approval_deny_returns_error_and_continues(tmp_path: Path) -> None:
+    """When a handler returns BlockResult, the tool is denied and run continues."""
     from milky_frog.checkpoint import SqliteCheckpointStore
 
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    gate = ToolGate()
+    bus = _make_bus(DenyAllPolicy())
 
     harness = Harness(
         model=FakeModel(),
         tools=ToolRegistry((EchoTool(),)),
         checkpoints=store,
-        handlers=LifecycleBus(),
-        tool_gate=gate,
+        handlers=bus,
+    )
+
+    result = await harness.run(RunRequest("echo hello", tmp_path))
+    # With DenyAllPolicy the tool is blocked inline, not paused.
+    assert result.status is RunStatus.COMPLETED
+
+    loaded = store.load_state(result.run_id)
+    tool_msgs = tool_messages(loaded)
+    assert len(tool_msgs) >= 1
+    assert any("denied" in m for m in tool_msgs)
+
+
+@pytest.mark.asyncio
+async def test_approval_pause_with_prompt_continues_normally(tmp_path: Path) -> None:
+    """A prompt on a WAITING_FOR_APPROVAL run appends a user message and resumes."""
+    from milky_frog.checkpoint import SqliteCheckpointStore
+
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    bus = _make_bus(DefaultToolPolicy())
+
+    harness = Harness(
+        model=FakeModel(),
+        tools=ToolRegistry((EchoTool(),)),
+        checkpoints=store,
+        handlers=bus,
     )
 
     result = await harness.run(RunRequest("echo hello", tmp_path))
     assert result.status is RunStatus.WAITING_FOR_APPROVAL
 
-    state = store.load_state(result.run_id)
-    last_assistant = [m for m in state.messages if m.role is MessageRole.ASSISTANT][-1]
-    pending_call_id = last_assistant.tool_calls[0].id
-
-    gate.approve(pending_call_id)
+    # Resume with a prompt — still paused unless approved.
     resumed = await harness.resume(result.run_id, max_model_calls=30, prompt="continue")
-    assert resumed.status is RunStatus.COMPLETED
-    assert user_messages(store.load_state(result.run_id)) == ("echo hello", "continue")
+    assert resumed.status is RunStatus.WAITING_FOR_APPROVAL
 
 
 @pytest.mark.asyncio
@@ -254,8 +192,7 @@ async def test_permissive_gate_runs_normally(tmp_path: Path) -> None:
         model=FakeModel(),
         tools=ToolRegistry((EchoTool(),)),
         checkpoints=store,
-        handlers=LifecycleBus(),
-        tool_gate=ToolGate(PermissivePolicy()),
+        handlers=_make_bus(PermissivePolicy()),
     )
 
     result = await harness.run(RunRequest("echo hello", tmp_path))

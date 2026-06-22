@@ -6,7 +6,14 @@ import pytest
 
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import RunResult, RunState, RunStatus
-from milky_frog.handlers import LifecycleBus, RunCancelled, RunFailed, RunTurnEnd, RunTurnStart
+from milky_frog.handlers import (
+    HandlerContext,
+    LifecycleBus,
+    RunCancelled,
+    RunFailed,
+    RunTurnEnd,
+    RunTurnStart,
+)
 from milky_frog.harness.emitter import RunEmitter
 
 
@@ -17,7 +24,7 @@ async def test_run_cancelled_persists_checkpoint_before_handler(tmp_path: Path) 
     checkpoint_seen = False
 
     @registry.on(RunCancelled)
-    async def record(_event: RunCancelled) -> None:
+    async def record(_event: RunCancelled, _ctx: HandlerContext) -> None:
         nonlocal checkpoint_seen
         run = store.get_run(_event.run_id)
         checkpoint_seen = run is not None and run.status is RunStatus.CANCELLED
@@ -39,7 +46,7 @@ async def test_run_failed_persists_checkpoint_before_handler(tmp_path: Path) -> 
     checkpoint_seen = False
 
     @registry.on(RunFailed)
-    async def record(_event: RunFailed) -> None:
+    async def record(_event: RunFailed, _ctx: HandlerContext) -> None:
         nonlocal checkpoint_seen
         run = store.get_run(_event.run_id)
         checkpoint_seen = run is not None and run.status is RunStatus.FAILED
@@ -59,7 +66,8 @@ async def test_turn_started_notifies_handler(tmp_path: Path) -> None:
     seen: list[RunTurnStart] = []
 
     @registry.on(RunTurnStart)
-    async def record(event: RunTurnStart) -> None:
+    async def record(event: RunTurnStart, _ctx: HandlerContext) -> None:
+        del _ctx
         seen.append(event)
 
     emitter = RunEmitter(SqliteCheckpointStore(tmp_path / "state.db"), registry)
@@ -76,7 +84,8 @@ async def test_turn_ended_notifies_handler(tmp_path: Path) -> None:
     seen: list[RunTurnEnd] = []
 
     @registry.on(RunTurnEnd)
-    async def record(event: RunTurnEnd) -> None:
+    async def record(event: RunTurnEnd, _ctx: HandlerContext) -> None:
+        del _ctx
         seen.append(event)
 
     emitter = RunEmitter(SqliteCheckpointStore(tmp_path / "state.db"), registry)

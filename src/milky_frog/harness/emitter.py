@@ -16,10 +16,12 @@ from milky_frog.domain import (
     ToolResult,
 )
 from milky_frog.handlers import (
+    HandlerResult,
     LifecycleBus,
     RunAfterModel,
     RunAfterTool,
     RunBeforeModel,
+    RunBeforeResume,
     RunBeforeTool,
     RunCancelled,
     RunCompleted,
@@ -34,7 +36,12 @@ from milky_frog.handlers import (
 
 
 class RunEmitter:
-    """Owns the Harness persistence matrix: Checkpoint snapshot vs lifecycle notify."""
+    """Owns the Harness persistence matrix: Checkpoint snapshot vs lifecycle notify.
+
+    Every event is dispatched through the ``LifecycleBus``.  The bus
+    may have subscribers that render (TUI), observe (Langfuse), or
+    control (PolicyHandler) — the emitter doesn't know or care which.
+    """
 
     def __init__(
         self,
@@ -64,6 +71,12 @@ class RunEmitter:
         self.persist(state, status=RunStatus.RUNNING)
         await self._handlers.notify(RunStarted(run_id=run_id, request=deepcopy(request)))
 
+    async def before_resume(self, run_id: str, prompt: str | None, status: RunStatus) -> None:
+        """Notify handlers before a Run is prepared for resumption."""
+        await self._handlers.notify(
+            RunBeforeResume(run_id=run_id, prompt=prompt, stored_status=status)
+        )
+
     async def before_model(self, run_id: str, request: ModelRequest) -> None:
         await self._handlers.notify(RunBeforeModel(run_id=run_id, request=deepcopy(request)))
 
@@ -86,8 +99,14 @@ class RunEmitter:
             RunAfterModel(run_id=run_id, request=deepcopy(request), response=deepcopy(response))
         )
 
-    async def before_tool(self, run_id: str, call: ToolCall) -> None:
-        await self._handlers.notify(
+    async def before_tool(self, run_id: str, call: ToolCall) -> list[HandlerResult]:
+        """Dispatch ``RunBeforeTool`` and return handler results.
+
+        Handlers return ``BlockResult`` to deny the call or
+        ``ApprovalResult`` to pause for approval.  The Harness checks
+        these results after dispatch — no separate control path needed.
+        """
+        return await self._handlers.notify(
             RunBeforeTool(
                 run_id=run_id,
                 call=ToolCall(call.id, call.name, deepcopy(call.arguments)),
