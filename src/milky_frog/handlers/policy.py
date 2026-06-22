@@ -7,7 +7,7 @@ this module (and ``ToolPolicy``) can be removed.
 from __future__ import annotations
 
 from milky_frog.domain import ToolDecision
-from milky_frog.handlers.bus import BaseHandler, LifecycleBus
+from milky_frog.handlers.dispatcher import BaseHandler, EventDispatcher
 from milky_frog.handlers.context import ApprovalResult, BlockResult, HandlerContext, HandlerResult
 from milky_frog.handlers.events import RunBeforeTool
 from milky_frog.harness.tools.tool_policy import DefaultToolPolicy, ToolPolicy
@@ -23,7 +23,7 @@ class PolicyHandler(BaseHandler):
     def __init__(self, policy: ToolPolicy | None = None) -> None:
         self._policy: ToolPolicy = policy or DefaultToolPolicy()
 
-    def register(self, registry: LifecycleBus) -> None:
+    def register(self, registry: EventDispatcher) -> None:
         registry.on(RunBeforeTool)(self._on_before_tool)
 
     async def _on_before_tool(

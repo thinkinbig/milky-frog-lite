@@ -29,7 +29,7 @@ class TextualStreamRenderer:
     """Framework-internal render pipeline: translates streaming events into
     Textual messages posted to the TUI app.
 
-    Subscribes to the ``LifecycleBus`` via ``subscribe`` so it receives
+    Subscribes to the ``EventDispatcher`` via ``subscribe`` so it receives
     every event alongside cross-cutting handlers (observability, policy, …)
     — no direct coupling to the emitter or Harness.
     """
@@ -38,10 +38,10 @@ class TextualStreamRenderer:
         self._queue = queue
         self._running = RunUsage()
 
-    # ── Bus entry point ───────────────────────────────────────────────
+    # ── Dispatcher entry point ─────────────────────────────────────────
 
     async def on_event(self, event: object, ctx: object) -> None:
-        """Receive every lifecycle signal via ``LifecycleBus.subscribe``."""
+        """Receive every lifecycle signal via ``EventDispatcher.subscribe``."""
         del ctx
         match event:
             case RunStarted():

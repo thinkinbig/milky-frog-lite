@@ -295,9 +295,9 @@ class MilkyFrogApp(App[None]):
 
     def on_mount(self) -> None:
         """App started: render welcome and wire up the stream renderer."""
-        # Stream renderer subscribes to the shared LifecycleBus alongside
+        # Stream renderer subscribes to the shared EventDispatcher alongside
         # cross-cutting handlers (PolicyHandler, LangfuseHandler, …).
-        self._session.frog.bus.subscribe(TextualStreamRenderer(self).on_event)
+        self._session.frog.dispatcher.subscribe(TextualStreamRenderer(self).on_event)
 
         self._render_welcome()
         self.query_one("#prompt-input", Input).focus()

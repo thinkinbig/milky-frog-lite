@@ -16,7 +16,7 @@ from milky_frog.domain import (
     TokenUsage,
     ToolCall,
 )
-from milky_frog.handlers import LifecycleBus
+from milky_frog.handlers import EventDispatcher
 from milky_frog.handlers.checkpoint import CheckpointHandler
 from milky_frog.harness.runner import Harness
 from milky_frog.harness.tools import ToolContext, ToolRegistry, ToolResult
@@ -29,7 +29,7 @@ def make_harness(
     model: Model,
     tools: ToolRegistry,
     checkpoints: CheckpointStore,
-    handlers: LifecycleBus | None = None,
+    handlers: EventDispatcher | None = None,
 ) -> Harness:
     """Build a Harness with checkpointing wired, mirroring production assembly.
 
@@ -37,7 +37,7 @@ def make_harness(
     Harness no longer self-registers it. Tests that need a resumable Run use this
     helper so the snapshot handler lands on the same bus they inspect.
     """
-    bus = handlers if handlers is not None else LifecycleBus()
+    bus = handlers if handlers is not None else EventDispatcher()
     CheckpointHandler(checkpoints).register(bus)
     return Harness(model, tools, checkpoints, bus)
 

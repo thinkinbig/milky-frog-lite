@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from milky_frog.checkpoint import CheckpointStore
 from milky_frog.domain import RunStatus
-from milky_frog.handlers.bus import BaseHandler, LifecycleBus
+from milky_frog.handlers.dispatcher import BaseHandler, EventDispatcher
 from milky_frog.handlers.context import HandlerContext
 from milky_frog.handlers.events import (
     RunAfterModel,
@@ -27,7 +27,7 @@ class CheckpointHandler(BaseHandler):
     def __init__(self, store: CheckpointStore) -> None:
         self._store = store
 
-    def register(self, registry: LifecycleBus) -> None:
+    def register(self, registry: EventDispatcher) -> None:
         registry.on(RunStarted, priority=_PRIORITY)(self._on_run_started)
         registry.on(RunAfterModel, priority=_PRIORITY)(self._on_after_model)
         registry.on(RunAfterTool, priority=_PRIORITY)(self._on_after_tool)

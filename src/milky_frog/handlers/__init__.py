@@ -1,5 +1,5 @@
 from milky_frog.handlers.assembly import default_handlers
-from milky_frog.handlers.bus import BaseHandler, LifecycleBus
+from milky_frog.handlers.dispatcher import BaseHandler, EventDispatcher
 from milky_frog.handlers.checkpoint import CheckpointHandler
 from milky_frog.handlers.context import (
     ApprovalResult,
@@ -40,7 +40,7 @@ __all__ = [
     "HandlerContext",
     "HandlerResult",
     "LangfuseHandler",
-    "LifecycleBus",
+    "EventDispatcher",
     "NoticeLevel",
     "RunAfterModel",
     "RunAfterTool",

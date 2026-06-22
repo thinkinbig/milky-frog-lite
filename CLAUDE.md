@@ -85,7 +85,7 @@ named class — so alternatives can be swapped without touching the Harness:
 - `tools/` — `Tool` protocol + `ToolRegistry` + built-in Tools.
 - `checkpoint/` — `CheckpointStore` protocol, `SqliteCheckpointStore`, `RunSnapshot` serialization (ADR-0014).
 - `harness/state.py` — transcript mutators and `repair_transcript` (interrupted-tool repair).
-- `handlers/` — lifecycle signals + `LifecycleBus` (ADR-0012); only `RunEmitter` publishes.
+- `handlers/` — lifecycle signals + `EventDispatcher` (ADR-0012); only `RunEmitter` publishes.
 - `ui/protocols.py` — `RunAdvancer`, `RunCanceller` for the interactive loop.
 - `skills/` — `SkillCatalog`, declarative `SKILL.md` bundles (never executable).
 - `sandbox/` — `LocalSandbox` policy (denies `.git`, `.env`, keys; path-escape

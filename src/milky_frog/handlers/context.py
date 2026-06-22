@@ -40,5 +40,5 @@ class HandlerContext:
     """Framework-managed resources passed to every handler at notify time.
 
     Handlers receive this alongside the event. Empty today; reserved for
-    shared read-only services injected via ``LifecycleBus.set_context``.
+    shared read-only services injected via ``EventDispatcher.set_context``.
     """

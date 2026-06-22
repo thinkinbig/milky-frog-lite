@@ -17,7 +17,7 @@ from milky_frog.domain import (
 )
 from milky_frog.handlers import (
     HandlerResult,
-    LifecycleBus,
+    EventDispatcher,
     RunAfterModel,
     RunAfterTool,
     RunBeforeModel,
@@ -40,15 +40,15 @@ from milky_frog.handlers.events import NoticeLevel
 
 
 class RunEmitter:
-    """Dispatches Harness lifecycle signals to the LifecycleBus.
+    """Dispatches Harness lifecycle signals to the EventDispatcher.
 
-    Every event is dispatched through the ``LifecycleBus``.  The bus
+    Every event is dispatched through the ``EventDispatcher``.  The dispatcher
     may have subscribers that render (TUI), observe (Langfuse),
     persist (CheckpointHandler), or control (PolicyHandler) — the
     emitter doesn't know or care which.
     """
 
-    def __init__(self, handlers: LifecycleBus) -> None:
+    def __init__(self, handlers: EventDispatcher) -> None:
         self._handlers = handlers
 
     # ── Run lifecycle ──────────────────────────────────────────────────────

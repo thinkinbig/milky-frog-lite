@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from milky_frog.checkpoint import CheckpointStore
-from milky_frog.handlers.bus import BaseHandler
+from milky_frog.handlers.dispatcher import BaseHandler
 from milky_frog.handlers.checkpoint import CheckpointHandler
 from milky_frog.handlers.policy import PolicyHandler
 from milky_frog.handlers.skills import SkillCatalogHandler
@@ -23,9 +23,9 @@ def default_handlers(
 
     Returns the bundles in registration order. ``CheckpointHandler`` declares
     its own priority (100) so it always persists before other observers
-    regardless of list position. The caller registers each bundle on the bus and
-    owns their lifetime — every returned bundle must be ``aclose``-d when the
-    session ends.
+    regardless of list position. The caller registers each bundle on the
+    dispatcher and owns their lifetime — every returned bundle must be
+    ``aclose``-d when the session ends.
     """
     bundles: list[BaseHandler] = [
         CheckpointHandler(checkpoints),

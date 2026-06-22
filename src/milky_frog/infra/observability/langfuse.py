@@ -7,7 +7,7 @@ from typing import Any, Literal
 from langfuse import Langfuse
 from langfuse.types import TraceContext
 
-from milky_frog.handlers.bus import BaseHandler, LifecycleBus
+from milky_frog.handlers.dispatcher import BaseHandler, EventDispatcher
 from milky_frog.handlers.context import HandlerContext
 from milky_frog.handlers.events import (
     BaseEvent,
@@ -64,7 +64,7 @@ class LangfuseHandler(BaseHandler):
         self._stream_text: dict[str, str] = {}
         self._stream_reasoning: dict[str, str] = {}
 
-    def register(self, registry: LifecycleBus) -> None:
+    def register(self, registry: EventDispatcher) -> None:
         registry.on(RunBeforeStart)(self._before_start)
         registry.on(RunBeforeResume)(self._before_resume)
         registry.on(RunStarted)(self._run_started)

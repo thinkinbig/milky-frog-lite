@@ -9,7 +9,7 @@ from milky_frog.domain import RunState, RunStatus
 from milky_frog.handlers import (
     CheckpointHandler,
     HandlerContext,
-    LifecycleBus,
+    EventDispatcher,
     RunCancelled,
     RunFailed,
     RunNotice,
@@ -19,7 +19,7 @@ from milky_frog.handlers import (
 from milky_frog.harness.emitter import RunEmitter
 
 
-def _make_emitter(store: SqliteCheckpointStore, registry: LifecycleBus) -> RunEmitter:
+def _make_emitter(store: SqliteCheckpointStore, registry: EventDispatcher) -> RunEmitter:
     CheckpointHandler(store).register(registry)
     return RunEmitter(registry)
 
@@ -27,7 +27,7 @@ def _make_emitter(store: SqliteCheckpointStore, registry: LifecycleBus) -> RunEm
 @pytest.mark.asyncio
 async def test_run_cancelled_persists_checkpoint_before_handler(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    registry = LifecycleBus()
+    registry = EventDispatcher()
     checkpoint_seen = False
 
     @registry.on(RunCancelled)
@@ -48,7 +48,7 @@ async def test_run_cancelled_persists_checkpoint_before_handler(tmp_path: Path) 
 @pytest.mark.asyncio
 async def test_run_failed_persists_checkpoint_before_handler(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    registry = LifecycleBus()
+    registry = EventDispatcher()
     checkpoint_seen = False
 
     @registry.on(RunFailed)
@@ -68,7 +68,7 @@ async def test_run_failed_persists_checkpoint_before_handler(tmp_path: Path) -> 
 
 @pytest.mark.asyncio
 async def test_turn_started_notifies_handler(tmp_path: Path) -> None:
-    registry = LifecycleBus()
+    registry = EventDispatcher()
     seen: list[RunTurnStart] = []
 
     @registry.on(RunTurnStart)
@@ -86,7 +86,7 @@ async def test_turn_started_notifies_handler(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_turn_ended_notifies_handler(tmp_path: Path) -> None:
-    registry = LifecycleBus()
+    registry = EventDispatcher()
     seen: list[RunTurnEnd] = []
 
     @registry.on(RunTurnEnd)
@@ -104,7 +104,7 @@ async def test_turn_ended_notifies_handler(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_run_notice_notifies_handler() -> None:
-    registry = LifecycleBus()
+    registry = EventDispatcher()
     seen: list[RunNotice] = []
 
     @registry.on(RunNotice)

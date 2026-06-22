@@ -5,7 +5,7 @@ import pytest
 
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import ModelChunk, ModelRequest, ModelResponse, RunRequest, StreamDone
-from milky_frog.handlers import LifecycleBus, RunBeforeStart, SystemPromptSection
+from milky_frog.handlers import EventDispatcher, RunBeforeStart, SystemPromptSection
 from milky_frog.handlers.skills import SkillCatalogHandler
 from milky_frog.harness.skills import SkillCatalog
 from milky_frog.harness.tools import ToolRegistry
@@ -51,7 +51,7 @@ async def test_handler_injects_skill_into_system_prompt(tmp_path: Path) -> None:
     user_skills = tmp_path / "user_skills"
     _write_skill(user_skills, "review", "Code review skill", "Always check for typos.")
 
-    bus = LifecycleBus()
+    bus = EventDispatcher()
     SkillCatalogHandler(user_skills).register(bus)
 
     results = await bus.notify(_make_event(workspace))
@@ -68,7 +68,7 @@ async def test_handler_returns_none_when_no_skills(tmp_path: Path) -> None:
     workspace.mkdir()
     user_skills = tmp_path / "user_skills"
 
-    bus = LifecycleBus()
+    bus = EventDispatcher()
     SkillCatalogHandler(user_skills).register(bus)
 
     results = await bus.notify(_make_event(workspace))
@@ -86,7 +86,7 @@ async def test_project_skills_override_user_skills_in_handler(tmp_path: Path) ->
     _write_skill(user_skills, "review", "user", "user instructions")
     _write_skill(project_skills, "review", "project", "project instructions")
 
-    bus = LifecycleBus()
+    bus = EventDispatcher()
     SkillCatalogHandler(user_skills).register(bus)
 
     results = await bus.notify(_make_event(workspace))
@@ -109,7 +109,7 @@ async def test_handler_skips_malformed_skill(tmp_path: Path) -> None:
     bad.mkdir()
     (bad / "SKILL.md").write_text("no frontmatter here", encoding="utf-8")
 
-    bus = LifecycleBus()
+    bus = EventDispatcher()
     SkillCatalogHandler(user_skills).register(bus)
 
     results = await bus.notify(_make_event(workspace))
@@ -136,7 +136,7 @@ async def test_skill_instructions_appear_in_system_message(tmp_path: Path) -> No
             yield StreamDone(ModelResponse(content="done"))
 
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    bus = LifecycleBus()
+    bus = EventDispatcher()
     SkillCatalogHandler(tmp_path / "no_user_skills").register(bus)
 
     harness = make_harness(

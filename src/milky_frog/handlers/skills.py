@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from milky_frog.handlers.bus import BaseHandler, LifecycleBus
+from milky_frog.handlers.dispatcher import BaseHandler, EventDispatcher
 from milky_frog.handlers.context import HandlerContext, SystemPromptSection
 from milky_frog.handlers.events import RunBeforeStart
 from milky_frog.harness.skills.catalog import SkillCatalog
@@ -26,7 +26,7 @@ class SkillCatalogHandler(BaseHandler):
     def __init__(self, user_skills_dir: Path) -> None:
         self._user_skills_dir = user_skills_dir
 
-    def register(self, registry: LifecycleBus) -> None:
+    def register(self, registry: EventDispatcher) -> None:
         registry.on(RunBeforeStart)(self._on_before_start)
 
     async def _on_before_start(

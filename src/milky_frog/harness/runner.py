@@ -28,7 +28,7 @@ from milky_frog.domain import (
     ToolRunCancelled,
     is_cancelled,
 )
-from milky_frog.handlers import ApprovalResult, BlockResult, LifecycleBus
+from milky_frog.handlers import ApprovalResult, BlockResult, EventDispatcher
 from milky_frog.harness.emitter import RunEmitter
 from milky_frog.harness.model_retry import (
     MODEL_RETRY_BASE_DELAY_S,
@@ -71,7 +71,7 @@ class Harness:
         model: Model,
         tools: ToolRegistry,
         checkpoints: CheckpointStore,
-        handlers: LifecycleBus,
+        handlers: EventDispatcher,
         sandbox_factory: SandboxFactory = LocalSandbox,
     ) -> None:
         self._model = model

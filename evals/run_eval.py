@@ -23,7 +23,7 @@ from typing import Any
 
 from evals.read_collector import ReadCollector, ReadRecord
 from evals.scoring import TaskScore, score_run
-from milky_frog.handlers import LifecycleBus
+from milky_frog.handlers import EventDispatcher
 from milky_frog.harness.tools import PermissivePolicy
 from milky_frog.runtime import MilkyFrog
 from milky_frog.settings import Settings
@@ -58,7 +58,7 @@ def run_task(settings: Settings, task: dict[str, Any], max_model_calls: int) -> 
         cfg.mkdir(exist_ok=True)
         (cfg / "config.toml").write_text(f"max_model_calls = {max_model_calls}\n")
 
-        bus = LifecycleBus()
+        bus = EventDispatcher()
         collector = ReadCollector()
         collector.register(bus)
         # Eval runs unattended: auto-approve every tool so the agent's natural

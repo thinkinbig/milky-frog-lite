@@ -21,15 +21,15 @@ class _Registration:
     handler: Handler
 
 
-class LifecycleBus:
-    """Instance-owned notification bus for Harness lifecycle signals.
+class EventDispatcher:
+    """Instance-owned one-to-many event dispatcher for Harness lifecycle events.
 
-    Only ``RunEmitter`` publishes signals. Handlers register via ``observe``,
+    Only ``RunEmitter`` dispatches events. Handlers subscribe via ``observe``,
     ``on``, or ``subscribe``; most return ``None`` (pure observation). A few
-    signals accept control returns — see ``RunBeforeTool`` and
+    events accept control returns — see ``RunBeforeTool`` and
     ``RunBeforeStart``.
 
-    A ``HandlerContext`` may be set on the bus (via ``set_context``) so that
+    A ``HandlerContext`` may be set (via ``set_context``) so that
     every handler receives shared framework-managed resources without wiring
     them through constructors.
     """
@@ -99,14 +99,14 @@ class LifecycleBus:
 class BaseHandler(ABC):
     """A cross-cutting bundle of Handlers with an optional resource lifetime.
 
-    A bundle wires several callbacks onto a LifecycleBus in one place (its
+    A bundle wires several callbacks onto an EventDispatcher in one place (its
     own file) via ``register``. Bundles that hold resources for the process's
     lifetime (clients, connections) override ``aclose``; the rest inherit the
     no-op default so the runtime can release every bundle uniformly.
     """
 
     @abstractmethod
-    def register(self, registry: LifecycleBus) -> None:
+    def register(self, registry: EventDispatcher) -> None:
         """Wire this bundle's callbacks onto the registry."""
 
     async def aclose(self) -> None:  # noqa: B027 - intentional no-op default; resource-holding bundles override

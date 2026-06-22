@@ -14,7 +14,7 @@ from milky_frog.domain import (
     RunStatus,
     TextDelta,
 )
-from milky_frog.handlers.bus import LifecycleBus
+from milky_frog.handlers.dispatcher import EventDispatcher
 from milky_frog.handlers.events import (
     RunBeforeModel,
     RunBeforeResume,
@@ -99,7 +99,7 @@ async def test_langfuse_run_started_registers_trace(
     langfuse_handler: tuple[LangfuseHandler, FakeLangfuseClient],
 ) -> None:
     handler, client = langfuse_handler
-    registry = LifecycleBus()
+    registry = EventDispatcher()
     handler.register(registry)
 
     await registry.notify(RunStarted(run_id="run-1", request=_run_request(), state=_run_state()))
@@ -113,7 +113,7 @@ async def test_langfuse_run_completed_records_span_and_cleans_up(
     langfuse_handler: tuple[LangfuseHandler, FakeLangfuseClient],
 ) -> None:
     handler, client = langfuse_handler
-    registry = LifecycleBus()
+    registry = EventDispatcher()
     handler.register(registry)
     await registry.notify(RunStarted(run_id="run-1", request=_run_request(), state=_run_state()))
 
@@ -131,7 +131,7 @@ async def test_langfuse_run_cancelled_records_warning_span_and_cleans_up(
     langfuse_handler: tuple[LangfuseHandler, FakeLangfuseClient],
 ) -> None:
     handler, client = langfuse_handler
-    registry = LifecycleBus()
+    registry = EventDispatcher()
     handler.register(registry)
     await registry.notify(RunStarted(run_id="run-1", request=_run_request(), state=_run_state()))
 
@@ -151,7 +151,7 @@ async def test_langfuse_run_paused_records_warning_span_and_cleans_up(
     langfuse_handler: tuple[LangfuseHandler, FakeLangfuseClient],
 ) -> None:
     handler, client = langfuse_handler
-    registry = LifecycleBus()
+    registry = EventDispatcher()
     handler.register(registry)
     await registry.notify(RunStarted(run_id="run-1", request=_run_request(), state=_run_state()))
 
@@ -176,7 +176,7 @@ async def test_langfuse_run_failed_records_error_span_and_cleans_up(
     langfuse_handler: tuple[LangfuseHandler, FakeLangfuseClient],
 ) -> None:
     handler, client = langfuse_handler
-    registry = LifecycleBus()
+    registry = EventDispatcher()
     handler.register(registry)
     await registry.notify(RunStarted(run_id="run-1", request=_run_request(), state=_run_state()))
 
@@ -194,7 +194,7 @@ async def test_langfuse_terminal_event_flushes_and_cleans_up(
     langfuse_handler: tuple[LangfuseHandler, FakeLangfuseClient],
 ) -> None:
     handler, client = langfuse_handler
-    registry = LifecycleBus()
+    registry = EventDispatcher()
     handler.register(registry)
     await registry.notify(RunStarted(run_id="run-1", request=_run_request(), state=_run_state()))
 
@@ -221,7 +221,7 @@ async def test_langfuse_turn_events_create_and_end_span(
     langfuse_handler: tuple[LangfuseHandler, FakeLangfuseClient],
 ) -> None:
     handler, client = langfuse_handler
-    registry = LifecycleBus()
+    registry = EventDispatcher()
     handler.register(registry)
     await registry.notify(RunStarted(run_id="run-1", request=_run_request(), state=_run_state()))
 
@@ -240,7 +240,7 @@ async def test_langfuse_turn_span_nests_model_and_tool(
 ) -> None:
     """Turn span opens at RunTurnStart and closes at RunTurnEnd."""
     handler, client = langfuse_handler
-    registry = LifecycleBus()
+    registry = EventDispatcher()
     handler.register(registry)
     await registry.notify(RunStarted(run_id="run-1", request=_run_request(), state=_run_state()))
 
@@ -257,7 +257,7 @@ async def test_langfuse_before_start_registers_trace_and_span(
     langfuse_handler: tuple[LangfuseHandler, FakeLangfuseClient],
 ) -> None:
     handler, client = langfuse_handler
-    registry = LifecycleBus()
+    registry = EventDispatcher()
     handler.register(registry)
 
     await registry.notify(
@@ -276,7 +276,7 @@ async def test_langfuse_before_resume_registers_trace_and_span(
     langfuse_handler: tuple[LangfuseHandler, FakeLangfuseClient],
 ) -> None:
     handler, client = langfuse_handler
-    registry = LifecycleBus()
+    registry = EventDispatcher()
     handler.register(registry)
 
     await registry.notify(
@@ -302,7 +302,7 @@ async def test_langfuse_model_chunk_updates_generation_incrementally(
     langfuse_handler: tuple[LangfuseHandler, FakeLangfuseClient],
 ) -> None:
     handler, client = langfuse_handler
-    registry = LifecycleBus()
+    registry = EventDispatcher()
     handler.register(registry)
     await registry.notify(RunStarted(run_id="run-1", request=_run_request(), state=_run_state()))
     request = ModelRequest(messages=(), tools=())
@@ -325,7 +325,7 @@ async def test_langfuse_model_reasoning_updates_generation_metadata(
     langfuse_handler: tuple[LangfuseHandler, FakeLangfuseClient],
 ) -> None:
     handler, client = langfuse_handler
-    registry = LifecycleBus()
+    registry = EventDispatcher()
     handler.register(registry)
     await registry.notify(RunStarted(run_id="run-1", request=_run_request(), state=_run_state()))
     request = ModelRequest(messages=(), tools=())
@@ -344,7 +344,7 @@ async def test_langfuse_run_notice_records_event(
     langfuse_handler: tuple[LangfuseHandler, FakeLangfuseClient],
 ) -> None:
     handler, client = langfuse_handler
-    registry = LifecycleBus()
+    registry = EventDispatcher()
     handler.register(registry)
     await registry.notify(RunStarted(run_id="run-1", request=_run_request(), state=_run_state()))
 

@@ -9,7 +9,7 @@ from types import FrameType, TracebackType
 
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import ResumeError, RunCancellation, RunRequest, RunResult
-from milky_frog.handlers import BaseHandler, LifecycleBus, default_handlers
+from milky_frog.handlers import BaseHandler, EventDispatcher, default_handlers
 from milky_frog.harness.runner import Harness
 from milky_frog.harness.tools import ToolRegistry, default_tools
 from milky_frog.harness.tools.tool_policy import ToolPolicy
@@ -38,7 +38,7 @@ class MilkyFrog:
     def __init__(
         self,
         settings: Settings,
-        handlers: LifecycleBus | None = None,
+        handlers: EventDispatcher | None = None,
         bundles: list[BaseHandler] | None = None,
         tool_policy: ToolPolicy | None = None,
     ) -> None:
@@ -46,11 +46,11 @@ class MilkyFrog:
         self._checkpoints = SqliteCheckpointStore(settings.database_path)
 
         self._model_name = model
-        self._bus = handlers if handlers is not None else LifecycleBus()
+        self._dispatcher = handlers if handlers is not None else EventDispatcher()
 
         # Assemble every lifecycle handler bundle in one place (checkpointing,
         # tool policy, Skills, caller-supplied bundles, Langfuse), then register
-        # each on the bus and track it so close() releases every one uniformly.
+        # each on the dispatcher and track it so close() releases every one uniformly.
         self._handlers: list[BaseHandler] = default_handlers(
             settings,
             self._checkpoints,
@@ -58,13 +58,13 @@ class MilkyFrog:
             extra=bundles or (),
         )
         for bundle in self._handlers:
-            bundle.register(self._bus)
+            bundle.register(self._dispatcher)
 
         self._harness = Harness(
             model=OpenAIModel(api_key=api_key, model=model, base_url=settings.base_url),
             tools=ToolRegistry(default_tools()),
             checkpoints=self._checkpoints,
-            handlers=self._bus,
+            handlers=self._dispatcher,
         )
         self._loop: asyncio.AbstractEventLoop | None = None
         self._cancellation: RunCancellation | None = None
@@ -81,7 +81,7 @@ class MilkyFrog:
     def from_settings(
         cls,
         settings: Settings,
-        handlers: LifecycleBus | None = None,
+        handlers: EventDispatcher | None = None,
         bundles: list[BaseHandler] | None = None,
         tool_policy: ToolPolicy | None = None,
     ) -> MilkyFrog:
@@ -119,9 +119,9 @@ class MilkyFrog:
         return self._model_name
 
     @property
-    def bus(self) -> LifecycleBus:
-        """The shared LifecycleBus — TUI subscribes its renderer here."""
-        return self._bus
+    def dispatcher(self) -> EventDispatcher:
+        """The shared EventDispatcher — TUI subscribes its renderer here."""
+        return self._dispatcher
 
     @property
     def checkpoints(self) -> SqliteCheckpointStore:

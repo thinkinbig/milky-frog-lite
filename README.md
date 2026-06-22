@@ -74,7 +74,7 @@ milky-frog resume RUN_ID          # replay pending work
 src/milky_frog/
 ├── checkpoint/   # CheckpointStore seam, RunSnapshot JSON, SQLite adapter
 ├── cli/          # Typer commands, HandlerFactory, MilkyFrogAdvancer
-├── handlers/     # lifecycle signals, LifecycleBus (RunEmitter publishes)
+├── handlers/     # lifecycle signals, EventDispatcher (RunEmitter publishes)
 ├── harness/      # Harness loop, state mutators, repair_transcript
 ├── models/       # model-provider seam
 ├── runtime.py    # MilkyFrog: sync boundary, assembly
