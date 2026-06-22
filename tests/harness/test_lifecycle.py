@@ -32,10 +32,9 @@ from milky_frog.handlers import (
     RunTurnEnd,
     RunTurnStart,
 )
-from milky_frog.harness.runner import Harness
 from milky_frog.harness.tools import ToolContext, ToolRegistry, ToolResult
 from tests.checkpoint_helpers import run_status, tool_messages
-from tests.stubs import EchoTool, FakeModel, SlowStreamModel
+from tests.stubs import EchoTool, FakeModel, SlowStreamModel, make_harness
 
 
 @pytest.mark.asyncio
@@ -48,7 +47,7 @@ async def test_dispatches_run_lifecycle_events(tmp_path: Path) -> None:
         del ctx
         seen.append(type(event).__name__)
 
-    harness = Harness(
+    harness = make_harness(
         model=FakeModel(),
         tools=ToolRegistry((EchoTool(),)),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
@@ -82,7 +81,7 @@ async def test_dispatches_run_paused_event(tmp_path: Path) -> None:
                 ModelResponse(tool_calls=(ToolCall("call-1", "echo", {"text": "hello"}),))
             )
 
-    harness = Harness(
+    harness = make_harness(
         model=NoToolModel(),
         tools=ToolRegistry((EchoTool(),)),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
@@ -107,7 +106,7 @@ async def test_cancellation_stops_run(tmp_path: Path) -> None:
         cancelled.append(event)
 
     cancellation = RunCancellation()
-    harness = Harness(
+    harness = make_harness(
         model=SlowStreamModel(),
         tools=ToolRegistry(),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
@@ -154,7 +153,7 @@ async def test_cancellation_during_tool_execution(tmp_path: Path) -> None:
             yield StreamDone(ModelResponse(tool_calls=(ToolCall("call-1", "slow", {}),)))
 
     cancellation = RunCancellation()
-    harness = Harness(
+    harness = make_harness(
         model=SlowToolModel(),
         tools=ToolRegistry((SlowTool(),)),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
@@ -199,7 +198,7 @@ async def test_cancelled_handler_runs_after_checkpoint(tmp_path: Path) -> None:
         checkpoint_seen = run is not None and run.status is RunStatus.CANCELLED
 
     cancellation = RunCancellation()
-    harness = Harness(
+    harness = make_harness(
         model=SlowStreamModel(),
         tools=ToolRegistry(),
         checkpoints=store,
@@ -221,7 +220,7 @@ async def test_cancelled_handler_runs_after_checkpoint(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_external_cancellation_reraises(tmp_path: Path) -> None:
-    harness = Harness(
+    harness = make_harness(
         model=SlowStreamModel(),
         tools=ToolRegistry(),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
@@ -255,7 +254,7 @@ async def test_external_cancellation_kills_orphan_stream(tmp_path: Path) -> None
             yield StreamDone(ModelResponse(content="done"))
 
     model = TrackingStreamModel()
-    harness = Harness(
+    harness = make_harness(
         model=model,
         tools=ToolRegistry(),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
@@ -289,7 +288,7 @@ async def test_dispatches_run_failed_event(tmp_path: Path) -> None:
             raise RuntimeError("boom")
             yield StreamDone(ModelResponse())  # pragma: no cover
 
-    harness = Harness(
+    harness = make_harness(
         model=BrokenModel(),
         tools=ToolRegistry(),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
@@ -315,7 +314,7 @@ async def test_before_tool_handler_cannot_mutate_executed_call(tmp_path: Path) -
         event.call.arguments["text"] = "tampered"
 
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    result = await Harness(FakeModel(), ToolRegistry((EchoTool(),)), store, handlers).run(
+    result = await make_harness(FakeModel(), ToolRegistry((EchoTool(),)), store, handlers).run(
         RunRequest("echo hello", tmp_path)
     )
 
@@ -338,7 +337,7 @@ async def test_run_started_handler_cannot_control_live_run(tmp_path: Path) -> No
             yield StreamDone(ModelResponse(content="done"))
 
     cancellation = RunCancellation()
-    result = await Harness(
+    result = await make_harness(
         SimpleModel(),
         ToolRegistry(),
         SqliteCheckpointStore(tmp_path / "state.db"),
@@ -366,7 +365,7 @@ async def test_dispatches_run_turn_events(tmp_path: Path) -> None:
         del ctx
         ends.append(event)
 
-    harness = Harness(
+    harness = make_harness(
         model=FakeModel(),
         tools=ToolRegistry((EchoTool(),)),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
@@ -401,7 +400,7 @@ async def test_turn_events_fire_before_complete(tmp_path: Path) -> None:
             del request
             yield StreamDone(ModelResponse(content="done"))
 
-    harness = Harness(
+    harness = make_harness(
         model=ContentModel(),
         tools=ToolRegistry(),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),

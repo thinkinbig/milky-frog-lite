@@ -7,9 +7,9 @@ from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import ModelChunk, ModelRequest, ModelResponse, RunRequest, StreamDone
 from milky_frog.handlers import LifecycleBus, RunBeforeStart, SystemPromptSection
 from milky_frog.handlers.skills import SkillCatalogHandler
-from milky_frog.harness.runner import Harness
 from milky_frog.harness.skills import SkillCatalog
 from milky_frog.harness.tools import ToolRegistry
+from tests.stubs import make_harness
 
 
 def _write_skill(directory: Path, name: str, description: str, instructions: str) -> None:
@@ -139,7 +139,7 @@ async def test_skill_instructions_appear_in_system_message(tmp_path: Path) -> No
     bus = LifecycleBus()
     SkillCatalogHandler(tmp_path / "no_user_skills").register(bus)
 
-    harness = Harness(
+    harness = make_harness(
         model=ImmediateModel(),
         tools=ToolRegistry(),
         checkpoints=store,

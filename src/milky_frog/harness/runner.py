@@ -29,7 +29,6 @@ from milky_frog.domain import (
     is_cancelled,
 )
 from milky_frog.handlers import ApprovalResult, BlockResult, LifecycleBus
-from milky_frog.handlers.checkpoint import CheckpointHandler
 from milky_frog.harness.emitter import RunEmitter
 from milky_frog.harness.model_retry import (
     MODEL_RETRY_BASE_DELAY_S,
@@ -59,7 +58,13 @@ class PreparedRun:
 
 
 class Harness:
-    """Advances one durable Run through a linear model and Tool loop."""
+    """Advances one durable Run through a linear model and Tool loop.
+
+    The Harness uses ``checkpoints`` directly for claiming and seeding Runs, but
+    persistence-on-lifecycle is wired through the bus: the ``handlers`` bus must
+    already carry a ``CheckpointHandler`` (see ``handlers.default_handlers``) for
+    a Run to be resumable.
+    """
 
     def __init__(
         self,
@@ -74,7 +79,6 @@ class Harness:
         self._checkpoints = checkpoints
         self._sandbox_factory = sandbox_factory
         self._handlers = handlers
-        CheckpointHandler(checkpoints).register(handlers)
         self._emitter = RunEmitter(handlers)
 
     async def run(self, run_request: RunRequest) -> RunResult:
@@ -165,9 +169,7 @@ class Harness:
                 await self._emitter.turn_started(run_id, model_call=calls + 1)
                 await self._emitter.before_model(run_id, request)
                 try:
-                    response = await self._model_turn_with_retry(
-                        run_id, request, cancellation
-                    )
+                    response = await self._model_turn_with_retry(run_id, request, cancellation)
                 except ToolRunCancelled:
                     return await self._emitter.finish_cancelled(state)
                 state = append_model_response(state, response)

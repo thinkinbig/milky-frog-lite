@@ -8,9 +8,8 @@ from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import RunRequest, RunStatus
 from milky_frog.handlers import HandlerContext, LifecycleBus, RunFailed, RunNotice
 from milky_frog.harness.model_retry import is_retriable_model_error
-from milky_frog.harness.runner import Harness
 from milky_frog.harness.tools import ToolRegistry
-from tests.stubs import FlakyConnectionModel, ImmediateErrorModel
+from tests.stubs import FlakyConnectionModel, ImmediateErrorModel, make_harness
 
 
 @pytest.fixture(autouse=True)
@@ -43,7 +42,7 @@ async def test_retries_retriable_model_errors_and_emits_run_notice(
         notices.append(event)
 
     model = FlakyConnectionModel(failures=2)
-    harness = Harness(
+    harness = make_harness(
         model=model,
         tools=ToolRegistry(),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
@@ -72,7 +71,7 @@ async def test_exhausted_retries_emit_run_failed(tmp_path: Path) -> None:
         failed.append(event)
 
     model = FlakyConnectionModel(failures=5)
-    harness = Harness(
+    harness = make_harness(
         model=model,
         tools=ToolRegistry(),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
@@ -97,7 +96,7 @@ async def test_non_retriable_model_errors_do_not_retry(tmp_path: Path) -> None:
         notices.append(event)
 
     model = ImmediateErrorModel(ValueError("bad request"))
-    harness = Harness(
+    harness = make_harness(
         model=model,
         tools=ToolRegistry(),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),

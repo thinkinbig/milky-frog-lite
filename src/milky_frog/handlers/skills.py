@@ -26,8 +26,8 @@ class SkillCatalogHandler(BaseHandler):
     def __init__(self, user_skills_dir: Path) -> None:
         self._user_skills_dir = user_skills_dir
 
-    def register(self, bus: LifecycleBus) -> None:
-        bus.on(RunBeforeStart)(self._on_before_start)
+    def register(self, registry: LifecycleBus) -> None:
+        registry.on(RunBeforeStart)(self._on_before_start)
 
     async def _on_before_start(
         self, event: RunBeforeStart, ctx: HandlerContext

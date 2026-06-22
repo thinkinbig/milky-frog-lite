@@ -147,9 +147,7 @@ class RunEmitter:
         self, run_id: str, message: str, *, level: NoticeLevel = "info"
     ) -> list[HandlerResult]:
         """Dispatch an ephemeral user-facing Run notice (retry toast, warning, …)."""
-        return await self._handlers.notify(
-            RunNotice(run_id=run_id, message=message, level=level)
-        )
+        return await self._handlers.notify(RunNotice(run_id=run_id, message=message, level=level))
 
     # ── Terminal Run flows ──────────────────────────────────────────────────
 

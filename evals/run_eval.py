@@ -23,8 +23,8 @@ from typing import Any
 
 from evals.read_collector import ReadCollector, ReadRecord
 from evals.scoring import TaskScore, score_run
-from milky_frog.gates import PermissivePolicy
 from milky_frog.handlers import LifecycleBus
+from milky_frog.harness.tools import PermissivePolicy
 from milky_frog.runtime import MilkyFrog
 from milky_frog.settings import Settings
 

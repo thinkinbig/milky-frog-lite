@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 
 from pydantic import BaseModel
 
+from milky_frog.checkpoint import CheckpointStore
 from milky_frog.domain import (
     ModelChunk,
     ModelRequest,
@@ -15,7 +16,31 @@ from milky_frog.domain import (
     TokenUsage,
     ToolCall,
 )
-from milky_frog.harness.tools import ToolContext, ToolResult
+from milky_frog.handlers import LifecycleBus
+from milky_frog.handlers.checkpoint import CheckpointHandler
+from milky_frog.harness.runner import Harness
+from milky_frog.harness.tools import ToolContext, ToolRegistry, ToolResult
+from milky_frog.models import Model
+
+# ── Harness builder ───────────────────────────────────────────────────
+
+
+def make_harness(
+    model: Model,
+    tools: ToolRegistry,
+    checkpoints: CheckpointStore,
+    handlers: LifecycleBus | None = None,
+) -> Harness:
+    """Build a Harness with checkpointing wired, mirroring production assembly.
+
+    Production wires ``CheckpointHandler`` via ``handlers.default_handlers``; the
+    Harness no longer self-registers it. Tests that need a resumable Run use this
+    helper so the snapshot handler lands on the same bus they inspect.
+    """
+    bus = handlers if handlers is not None else LifecycleBus()
+    CheckpointHandler(checkpoints).register(bus)
+    return Harness(model, tools, checkpoints, bus)
+
 
 # ── Tool stubs ────────────────────────────────────────────────────────
 
@@ -27,7 +52,7 @@ class EchoInput(BaseModel):
 class EchoTool:
     name = "echo"
     description = "Echo text"
-    input_model = EchoInput
+    input_model: type[BaseModel] = EchoInput
 
     async def execute(self, context: ToolContext, input: BaseModel) -> ToolResult:
         assert context.workspace.is_dir()

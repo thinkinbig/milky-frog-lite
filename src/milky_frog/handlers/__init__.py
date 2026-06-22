@@ -1,3 +1,4 @@
+from milky_frog.handlers.assembly import default_handlers
 from milky_frog.handlers.bus import BaseHandler, LifecycleBus
 from milky_frog.handlers.checkpoint import CheckpointHandler
 from milky_frog.handlers.context import (
@@ -59,4 +60,5 @@ __all__ = [
     "RunTurnStart",
     "SkillCatalogHandler",
     "SystemPromptSection",
+    "default_handlers",
 ]
