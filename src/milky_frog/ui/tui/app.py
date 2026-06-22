@@ -136,6 +136,10 @@ class PromptInput(Input):
         self._draft = ""
 
     async def on_key(self, event: events.Key) -> None:
+        # Never intercept text/IME input (e.g. CJK characters): let the base
+        # Input insert them. We only handle the navigation keys below.
+        if event.is_printable:
+            return
         if event.key == "tab":
             completion = complete_command(self.value)
             if completion is not None and completion != self.value:
@@ -247,7 +251,9 @@ class MilkyFrogApp(App[None]):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield Vertical(
-            VerticalScroll(id="conversation"),
+            # Not focusable: the prompt must keep focus so typing (incl. IME
+            # composition) always lands in the input; mouse-wheel scroll still works.
+            VerticalScroll(id="conversation", can_focus=False),
             Static(id="command-hints"),
             PromptInput(id="prompt-input", placeholder="Type a task and press Enter..."),
             RunStatusBar(
