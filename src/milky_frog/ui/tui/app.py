@@ -67,24 +67,32 @@ def _thinking(text: str) -> Text:
     return Text.assemble(("✻ thinking\n", "dim italic"), (text, "dim italic"))
 
 
-_DIFF_STYLE: dict[DiffKind, str] = {"add": "green", "remove": "red", "context": "dim"}
+# Full-row styles (foreground on background) so each diff line is highlighted
+# edge to edge, GitHub/pi-agent style, rather than just the characters.
+_DIFF_ROW_STYLE: dict[DiffKind, str] = {
+    "add": "#b9f6b0 on #0f2e17",
+    "remove": "#f6b0b0 on #2e0f14",
+    "context": "dim",
+}
 _DIFF_SIGN: dict[DiffKind, str] = {"add": "+ ", "remove": "- ", "context": "  "}
 _MAX_DIFF_LINES = 40
 
 
-def _diff_renderable(rows: list[tuple[DiffKind, str]]) -> Text:
-    """Render diff rows as one indented, colored block (green add, red remove, dim ctx)."""
-    text = Text()
+def _diff_renderable(rows: list[tuple[DiffKind, str]]) -> Table:
+    """Render diff rows as full-width highlighted lines (green add, red remove, dim ctx).
+
+    A one-column ``expand``ed grid: each row's style fills the whole line, so the
+    highlight spans the terminal width and reflows on resize.
+    """
+    table = Table.grid(expand=True, padding=(0, 0, 0, 2))
+    table.add_column()
     shown = rows[:_MAX_DIFF_LINES]
-    for index, (kind, line) in enumerate(shown):
-        if index:
-            text.append("\n")
-        text.append(f"    {_DIFF_SIGN[kind]}{line}", style=_DIFF_STYLE[kind])
+    for kind, line in shown:
+        table.add_row(f"{_DIFF_SIGN[kind]}{line}", style=_DIFF_ROW_STYLE[kind])
     extra = len(rows) - len(shown)
     if extra:
-        text.append("\n" if shown else "")
-        text.append(f"    … {extra} more line{'s' if extra != 1 else ''}", style="bright_black")
-    return text
+        table.add_row(f"… {extra} more line{'s' if extra != 1 else ''}", style="bright_black")
+    return table
 
 
 # ── Status Widget ──────────────────────────────────────────────────────
