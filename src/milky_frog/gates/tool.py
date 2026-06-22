@@ -1,41 +1,7 @@
 from __future__ import annotations
 
-from typing import Protocol
-
 from milky_frog.domain import ToolCall, ToolDecision
-
-
-class ToolPolicy(Protocol):
-    """Decide whether a tool call is allowed, denied, or needs approval."""
-
-    def decide(self, call: ToolCall) -> ToolDecision: ...
-
-
-class DefaultToolPolicy:
-    """Built-in policy: read/list_dir always allowed; everything else needs approval."""
-
-    _ALWAYS_ALLOW: frozenset[str] = frozenset({"read", "list_dir"})
-
-    def decide(self, call: ToolCall) -> ToolDecision:
-        if call.name in self._ALWAYS_ALLOW:
-            return ToolDecision.ALLOW
-        return ToolDecision.NEEDS_APPROVAL
-
-
-class PermissivePolicy:
-    """Policy that allows every tool call — useful in tests."""
-
-    def decide(self, call: ToolCall) -> ToolDecision:
-        del call
-        return ToolDecision.ALLOW
-
-
-class DenyAllPolicy:
-    """Policy that denies every tool call."""
-
-    def decide(self, call: ToolCall) -> ToolDecision:
-        del call
-        return ToolDecision.DENY
+from milky_frog.harness.tools.tool_policy import DefaultToolPolicy, ToolPolicy
 
 
 class ToolGate:

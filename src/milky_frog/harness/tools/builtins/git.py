@@ -3,13 +3,14 @@ from __future__ import annotations
 import asyncio
 import shlex
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, JsonValue
 
 from milky_frog.domain import ToolResult
 from milky_frog.harness.tools.base import ToolContext
 
 _GIT_TIMEOUT_SECONDS = 30.0
 _MAX_OUTPUT_BYTES = 128 * 1024
+_GIT_READ_ONLY_SUBCOMMANDS = frozenset({"status", "diff", "log", "show", "blame", "rev-parse"})
 
 
 class GitInput(BaseModel):
@@ -18,38 +19,96 @@ class GitInput(BaseModel):
     )
 
 
+def _git_tokens(command: str) -> list[str] | None:
+    command_str = command.strip()
+    if not command_str:
+        return None
+    try:
+        tokens = shlex.split(command_str)
+    except ValueError:
+        return None
+    if not tokens:
+        return None
+    if tokens[0] == "git":
+        tokens = tokens[1:]
+    return tokens or None
+
+
+def _git_branch_is_list_only(args: list[str]) -> bool:
+    mutating = {"-d", "-D", "-m", "-M", "-c", "-C"}
+    if any(flag in mutating for flag in args):
+        return False
+    return not any(not arg.startswith("-") for arg in args)
+
+
+def _git_tag_is_list_only(args: list[str]) -> bool:
+    if "-d" in args or "--delete" in args:
+        return False
+    return not any(not arg.startswith("-") for arg in args)
+
+
+def _git_remote_is_list_only(args: list[str]) -> bool:
+    mutating = {"add", "remove", "rm", "rename", "set-url", "set-branches", "update", "prune"}
+    return not args or args[0] not in mutating
+
+
+def _git_config_is_list_only(args: list[str]) -> bool:
+    return "--list" in args or "-l" in args
+
+
+def git_needs_approval(command: str) -> bool:
+    """Return True when the git invocation may mutate repo state or history."""
+    tokens = _git_tokens(command)
+    if tokens is None:
+        return True
+    subcommand = tokens[0]
+    args = tokens[1:]
+    if subcommand in _GIT_READ_ONLY_SUBCOMMANDS:
+        return False
+    if subcommand == "branch":
+        return not _git_branch_is_list_only(args)
+    if subcommand == "tag":
+        return not _git_tag_is_list_only(args)
+    if subcommand == "remote":
+        return not _git_remote_is_list_only(args)
+    if subcommand == "config":
+        return not _git_config_is_list_only(args)
+    return True
+
+
 class GitTool:
     """Run a git command inside the Workspace directory."""
 
     name = "git"
+    requires_approval = True
     description = (
         "Run a git subcommand in the workspace repository and return its stdout. "
-        "Allowed subcommands: status, diff, diff --staged, log, branch, tag, show, "
-        "add, reset, commit, stash, blame, rev-parse, remote, config --list. "
-        "Commands that modify the working tree or history (e.g. commit, add, reset) "
-        "are visible to the model but require user approval through the Handler layer. "
-        "The command is executed with a clean, allow-listed environment."
+        "Read-only commands (status, diff, log, show, blame, rev-parse, listing branch/tag/"
+        "remote, config --list) run immediately. Commands that modify the working tree or "
+        "history (add, reset, commit, stash, branch creation, tag creation, etc.) pause the "
+        "Run until the user approves. The command is executed with a clean, allow-listed "
+        "environment."
     )
     input_model: type[BaseModel] = GitInput
 
+    def needs_approval_for_call(self, arguments: dict[str, JsonValue]) -> bool:
+        command = arguments.get("command")
+        if not isinstance(command, str):
+            return True
+        return git_needs_approval(command)
+
     async def execute(self, context: ToolContext, input: BaseModel) -> ToolResult:
         params = GitInput.model_validate(input)
-        command_str = params.command.strip()
-        if not command_str:
-            return ToolResult("empty git command", is_error=True)
+        tokens = _git_tokens(params.command)
+        if tokens is None:
+            if not params.command.strip():
+                return ToolResult("empty git command", is_error=True)
+            return ToolResult("invalid git command", is_error=True)
         sandbox = context.require_sandbox()
-        try:
-            tokens = shlex.split(command_str)
-        except ValueError as error:
-            return ToolResult(f"invalid git command: {error}", is_error=True)
-        if not tokens or tokens[0] != "git":
-            tokens = ["git", *tokens]
-        else:
-            # User already included "git"; just use as-is
-            pass
         env = sandbox.command_environment()
         try:
             process = await asyncio.create_subprocess_exec(
+                "git",
                 *tokens,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

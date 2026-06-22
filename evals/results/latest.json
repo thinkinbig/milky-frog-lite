@@ -1,0 +1,65 @@
+[
+  {
+    "task_id": "unify-cancellation-via-generic-run-cancellable",
+    "reads_total": 7,
+    "reads_ok_unique": 7,
+    "in_scope": 3,
+    "out_of_scope": 4,
+    "scope_precision": 0.429,
+    "noise_rate": 0.571,
+    "failed_reads": 0,
+    "duplicate_reads": 0,
+    "edits_total": 2,
+    "reads_per_edit": 3.5,
+    "completed": true,
+    "relevant_hit": 1,
+    "relevant_total": 1,
+    "out_of_scope_paths": [
+      "src/milky_frog/domain.py",
+      "src/milky_frog/harness/tools/base.py",
+      "tests/harness/test_lifecycle.py",
+      "tests/stubs.py"
+    ]
+  },
+  {
+    "task_id": "add-git-tool-for-running-git-subcommands-in-work",
+    "reads_total": 10,
+    "reads_ok_unique": 9,
+    "in_scope": 7,
+    "out_of_scope": 2,
+    "scope_precision": 0.778,
+    "noise_rate": 0.222,
+    "failed_reads": 1,
+    "duplicate_reads": 0,
+    "edits_total": 0,
+    "reads_per_edit": null,
+    "completed": false,
+    "relevant_hit": 1,
+    "relevant_total": 1,
+    "out_of_scope_paths": [
+      "src/milky_frog/domain.py",
+      "CLAUDE.md"
+    ]
+  },
+  {
+    "task_id": "inject-sandboxfactory-into-harness-simplify-sqli",
+    "reads_total": 10,
+    "reads_ok_unique": 10,
+    "in_scope": 7,
+    "out_of_scope": 3,
+    "scope_precision": 0.7,
+    "noise_rate": 0.3,
+    "failed_reads": 0,
+    "duplicate_reads": 0,
+    "edits_total": 2,
+    "reads_per_edit": 5.0,
+    "completed": true,
+    "relevant_hit": 4,
+    "relevant_total": 4,
+    "out_of_scope_paths": [
+      "src/milky_frog/infra/sandbox/local.py",
+      "src/milky_frog/checkpoint/__init__.py",
+      "src/milky_frog/checkpoint/base.py"
+    ]
+  }
+]

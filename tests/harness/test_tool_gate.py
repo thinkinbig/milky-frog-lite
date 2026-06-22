@@ -21,24 +21,47 @@ from milky_frog.gates import (
 )
 from milky_frog.handlers import LifecycleBus
 from milky_frog.harness.runner import Harness
-from milky_frog.harness.tools import ToolRegistry
+from milky_frog.harness.tools import ToolRegistry, default_tools
+from milky_frog.harness.tools.tool_policy import approval_free_tool_names
 from tests.checkpoint_helpers import run_status, tool_messages, user_messages
 from tests.stubs import EchoTool, FakeModel
 
 # ── ToolGate / policy unit tests ──────────────────────────────────────
 
 
-def test_default_policy_allows_read_and_list_dir() -> None:
+def test_default_policy_allows_approval_free_tools() -> None:
     policy = DefaultToolPolicy()
-    assert policy.decide(ToolCall("c1", "read", {})) is ToolDecision.ALLOW
-    assert policy.decide(ToolCall("c2", "list_dir", {})) is ToolDecision.ALLOW
+    for name in approval_free_tool_names(default_tools()):
+        assert policy.decide(ToolCall("c1", name, {})) is ToolDecision.ALLOW
 
 
-def test_default_policy_needs_approval_for_write_and_echo() -> None:
+def test_default_policy_allows_read_only_git_commands() -> None:
     policy = DefaultToolPolicy()
-    assert policy.decide(ToolCall("c1", "write", {})) is ToolDecision.NEEDS_APPROVAL
-    assert policy.decide(ToolCall("c2", "echo", {})) is ToolDecision.NEEDS_APPROVAL
-    assert policy.decide(ToolCall("c3", "bash", {})) is ToolDecision.NEEDS_APPROVAL
+    assert policy.decide(ToolCall("c1", "git", {"command": "status"})) is ToolDecision.ALLOW
+    assert policy.decide(ToolCall("c2", "git", {"command": "diff --staged"})) is ToolDecision.ALLOW
+    assert (
+        policy.decide(ToolCall("c3", "git", {"command": "log --oneline -5"}))
+        is ToolDecision.ALLOW
+    )
+
+
+def test_default_policy_needs_approval_for_mutating_git_and_file_tools() -> None:
+    policy = DefaultToolPolicy()
+    assert (
+        policy.decide(ToolCall("c1", "git", {"command": "add ."}))
+        is ToolDecision.NEEDS_APPROVAL
+    )
+    assert (
+        policy.decide(ToolCall("c2", "git", {"command": "commit -m msg"}))
+        is ToolDecision.NEEDS_APPROVAL
+    )
+    assert (
+        policy.decide(ToolCall("c3", "git", {"command": "branch feature"}))
+        is ToolDecision.NEEDS_APPROVAL
+    )
+    assert policy.decide(ToolCall("c4", "write_file", {})) is ToolDecision.NEEDS_APPROVAL
+    assert policy.decide(ToolCall("c5", "edit_file", {})) is ToolDecision.NEEDS_APPROVAL
+    assert policy.decide(ToolCall("c6", "echo", {})) is ToolDecision.NEEDS_APPROVAL
 
 
 def test_permissive_policy_allows_everything() -> None:

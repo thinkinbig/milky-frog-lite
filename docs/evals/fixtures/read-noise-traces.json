@@ -1,0 +1,1324 @@
+[
+  {
+    "trace_id": "0ce0d8fe3cef5c54d7cdd7f901be4285",
+    "prompt": "你是谁",
+    "n_model_calls": 1,
+    "tool_calls": []
+  },
+  {
+    "trace_id": "83554aae607298c36a611609992a1748",
+    "prompt": "你是谁",
+    "n_model_calls": 1,
+    "tool_calls": []
+  },
+  {
+    "trace_id": "add32120cf11c8b8684e4ed7ae670f3a",
+    "prompt": "帮我看看我嘛steering的实现",
+    "n_model_calls": 14,
+    "tool_calls": [
+      {
+        "name": "read_file",
+        "path": "tests/test_steering.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "tests/test_harness.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "tests/test_steering.py",
+        "error": false
+      },
+      {
+        "name": "edit_file",
+        "path": "tests/test_steering.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "tests/test_harness.py",
+        "error": false
+      },
+      {
+        "name": "edit_file",
+        "path": "tests/test_harness.py",
+        "error": false
+      },
+      {
+        "name": "edit_file",
+        "path": "src/milky_frog/harness/runner.py",
+        "error": true
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/runner.py",
+        "error": false
+      },
+      {
+        "name": "edit_file",
+        "path": "tests/test_harness.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "/Users/zeyuli/CodeProject/milky-frog-lite/.env",
+        "error": true
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/runner.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "tests/test_steering.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "tests/test_harness.py",
+        "error": false
+      },
+      {
+        "name": "edit_file",
+        "path": "tests/test_harness.py",
+        "error": false
+      }
+    ]
+  },
+  {
+    "trace_id": "522b9e1dcd7d73487a33eb7bfc542bbd",
+    "prompt": "帮我看看我嘛steering的实现",
+    "n_model_calls": 22,
+    "tool_calls": [
+      {
+        "name": "list_dir",
+        "path": "tests",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "tests/test_steering.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "tests/test_harness.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/events.py",
+        "error": false
+      },
+      {
+        "name": "edit_file",
+        "path": "src/milky_frog/harness/runner.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/runner.py",
+        "error": false
+      },
+      {
+        "name": "edit_file",
+        "path": "src/milky_frog/harness/runner.py",
+        "error": false
+      },
+      {
+        "name": "edit_file",
+        "path": "src/milky_frog/harness/runner.py",
+        "error": false
+      },
+      {
+        "name": "edit_file",
+        "path": "src/milky_frog/harness/runner.py",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/checkpoint",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/checkpoint/sqlite.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/state.py",
+        "error": false
+      },
+      {
+        "name": "edit_file",
+        "path": "src/milky_frog/harness/runner.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/runner.py",
+        "error": false
+      },
+      {
+        "name": "edit_file",
+        "path": "src/milky_frog/harness/runner.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/runner.py",
+        "error": false
+      },
+      {
+        "name": "edit_file",
+        "path": "src/milky_frog/harness/runner.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "pyproject.toml",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "/Users/zeyuli/CodeProject/milky-frog-lite",
+        "error": true
+      },
+      {
+        "name": "edit_file",
+        "path": "src/milky_frog/harness/runner.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/runner.py",
+        "error": false
+      }
+    ]
+  },
+  {
+    "trace_id": "dbb2122694d73209d17c3c9d492be63e",
+    "prompt": "帮我看看我嘛steering的实现",
+    "n_model_calls": 1,
+    "tool_calls": []
+  },
+  {
+    "trace_id": "016b27f05a15d41c7d4a937d55c523e3",
+    "prompt": "帮我看看我嘛steering的实现",
+    "n_model_calls": 9,
+    "tool_calls": [
+      {
+        "name": "list_dir",
+        "path": ".",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/steering.py",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/models",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/domain.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/runtime.py",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/harness",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/runner.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/foreground.py",
+        "error": false
+      }
+    ]
+  },
+  {
+    "trace_id": "3828b8392583b1f2977f5e94ad4ff05b",
+    "prompt": "你好 我们刚刚实现了checkpoint",
+    "n_model_calls": 1,
+    "tool_calls": []
+  },
+  {
+    "trace_id": "0391df13c6f39177a2d7c3abdd7ac5b6",
+    "prompt": "你好 我们刚刚实现了checkpoint",
+    "n_model_calls": 8,
+    "tool_calls": [
+      {
+        "name": "list_dir",
+        "path": ".",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/checkpoint",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/checkpoint/__init__.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/checkpoint/base.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/checkpoint/events.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/checkpoint/sqlite.py",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "tests",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "tests/test_checkpoint.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/domain.py",
+        "error": false
+      }
+    ]
+  },
+  {
+    "trace_id": "de730cf097a32b0b17bfebab6fe06913",
+    "prompt": "你好",
+    "n_model_calls": 3,
+    "tool_calls": [
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/domain.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/prompt.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/state.py",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": ".milky-frog/skills",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/harness/tools",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "pyproject.toml",
+        "error": false
+      }
+    ]
+  },
+  {
+    "trace_id": "9734a32df8a17cf34019b14f21638e7e",
+    "prompt": "你好",
+    "n_model_calls": 2,
+    "tool_calls": [
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/runtime.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/settings.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/runner.py",
+        "error": false
+      }
+    ]
+  },
+  {
+    "trace_id": "3eea77067df6edb991d0381870c1bedd",
+    "prompt": "你好",
+    "n_model_calls": 6,
+    "tool_calls": [
+      {
+        "name": "list_dir",
+        "path": ".",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": ".milky-frog",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "milky-frog.json",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": ".milky-frog/config.toml",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "CONTEXT.md",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "CLAUDE.md",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": ".gitignore",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/harness",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/checkpoint",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/models",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "docs",
+        "error": false
+      }
+    ]
+  },
+  {
+    "trace_id": "6cb66073bd7e0ecc988b525007e05cff",
+    "prompt": "/resume",
+    "n_model_calls": 6,
+    "tool_calls": [
+      {
+        "name": "list_dir",
+        "path": ".",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": ".milky-frog",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "README.md",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/cli",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/cli/app.py",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "docs",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/settings.py",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/ui",
+        "error": false
+      }
+    ]
+  },
+  {
+    "trace_id": "68e4de3fb9360a4211c819dc51d9c412",
+    "prompt": "你好",
+    "n_model_calls": 6,
+    "tool_calls": [
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/domain.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/runner.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/domain.py",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "tests",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "tests/test_harness.py",
+        "error": false
+      },
+      {
+        "name": "edit_file",
+        "path": "src/milky_frog/domain.py",
+        "error": false
+      },
+      {
+        "name": "edit_file",
+        "path": null,
+        "error": false
+      }
+    ]
+  },
+  {
+    "trace_id": "f6c98f8110c59f019b2ff2e672e0da08",
+    "prompt": "你好",
+    "n_model_calls": 6,
+    "tool_calls": [
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/handlers/registry.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/handlers/assembly.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/foreground.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/models/base.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/models/openai.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/handlers/langfuse.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/settings.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/checkpoint/sqlite.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/checkpoint/base.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/tools",
+        "error": true
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/project.py",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/harness/tools",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/cli",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/harness/sandbox",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/tools/registry.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/tools/base.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/sandbox/local.py",
+        "error": false
+      }
+    ]
+  },
+  {
+    "trace_id": "e53e4bb625887cd31c9634eda3312aea",
+    "prompt": "你好",
+    "n_model_calls": 1,
+    "tool_calls": []
+  },
+  {
+    "trace_id": "8282c584bf887f2d0c1d226f7a52824b",
+    "prompt": "你好",
+    "n_model_calls": 3,
+    "tool_calls": [
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/handlers",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/handlers/events.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/handlers/base.py",
+        "error": false
+      }
+    ]
+  },
+  {
+    "trace_id": "8c1ead1463bf628d3b6e84e92aa97c17",
+    "prompt": "你好",
+    "n_model_calls": 11,
+    "tool_calls": [
+      {
+        "name": "list_dir",
+        "path": ".",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "docs",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "docs/adr",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/runtime",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/models",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/runtime.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness",
+        "error": true
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/harness",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/domain.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/state.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/events.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/checkpoint",
+        "error": true
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/checkpoint",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "docs/adr/0009-resume-runs-by-folding-the-checkpoint-log.md",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "docs/adr/0013-type-checkpoint-events-as-a-pydantic-discriminated-union.md",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/checkpoint/events.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/runner.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "docs/adr/0002-use-an-append-only-event-log-for-checkpoints.md",
+        "error": false
+      }
+    ]
+  },
+  {
+    "trace_id": "ddbb57ae071fe9038d68d043f84853f9",
+    "prompt": "你好",
+    "n_model_calls": 1,
+    "tool_calls": []
+  },
+  {
+    "trace_id": "52ae4ba1e8445d80e56ac18c9b50a9a4",
+    "prompt": "你觉得我们工具类实现的好吗",
+    "n_model_calls": 16,
+    "tool_calls": [
+      {
+        "name": "list_dir",
+        "path": ".",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "tests",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/tools",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/tools/__init__.py",
+        "error": true
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/runtime.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/domain.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness",
+        "error": true
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/harness",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/harness/tools",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/__init__.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/tools/__init__.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/tools/base.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/tools/registry.py",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/harness/tools/builtins",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/tools/builtins/__init__.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/tools/builtins/read.py",
+        "error": true
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/tools/builtins/write.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/tools/builtins/edit.py",
+        "error": true
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/tools/builtins/list_dir.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/sandbox/__init__.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/runner.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "tests/test_builtin_tools.py",
+        "error": true
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/sandbox",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/sandbox/local.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/models/__init__.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/handlers/__init__.py",
+        "error": false
+      }
+    ]
+  },
+  {
+    "trace_id": "af61ca23ec04f3c286893b02a59ce33b",
+    "prompt": "你能帮我读取项目里面的agent loop怎么做的吗",
+    "n_model_calls": 7,
+    "tool_calls": [
+      {
+        "name": "list_dir",
+        "path": ".",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/handlers",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/cli",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/runtime.py",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/harness",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/runner.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/__init__.py",
+        "error": false
+      }
+    ]
+  },
+  {
+    "trace_id": "63aa1f06fcf75d4de9acb3eafce7b76f",
+    "prompt": "你现在有什么工具",
+    "n_model_calls": 1,
+    "tool_calls": []
+  },
+  {
+    "trace_id": "1329dee5d2602881c92d6c6d31e45e40",
+    "prompt": "没有用titoken吗",
+    "n_model_calls": 8,
+    "tool_calls": [
+      {
+        "name": "list_dir",
+        "path": ".",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "README.md",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "pyproject.toml",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "CLAUDE.md",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog",
+        "error": true
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/models",
+        "error": true
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/settings.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "pyproject.toml",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/models",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/harness",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/models/openai.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/runner.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "uv.lock",
+        "error": false
+      }
+    ]
+  },
+  {
+    "trace_id": "7552a72aee53ac85087aa82c6f37f3aa",
+    "prompt": "帮我看一下你是如何计算token的",
+    "n_model_calls": 19,
+    "tool_calls": [
+      {
+        "name": "list_dir",
+        "path": ".",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/models",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/checkpoint",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/models/base.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/models/openai.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/models/__init__.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/domain.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/checkpoint/base.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/checkpoint/sqlite.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/settings.py",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/handlers",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness",
+        "error": true
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/harness",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/handlers/base.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/harness/runner.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/runtime.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/handlers/events.py",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/cli",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/cli/app.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/cli/factory.py",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/ui",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/ui/usage.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/ui/streaming.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/ui/handlers.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/ui/__init__.py",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": "src/milky_frog/ui/presenter",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/ui/presenter/__init__.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/ui/presenter/_messages.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/ui/presenter/_base.py",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "src/milky_frog/ui/presenter/_session.py",
+        "error": false
+      }
+    ]
+  },
+  {
+    "trace_id": "da8897cce4b954e3ab084ec89f970e49",
+    "prompt": "你是奶龙吗",
+    "n_model_calls": 1,
+    "tool_calls": []
+  },
+  {
+    "trace_id": "8930cd88287c1c96319a3ff3bde71cce",
+    "prompt": "你真是大聪明",
+    "n_model_calls": 1,
+    "tool_calls": []
+  },
+  {
+    "trace_id": "2091c0cdd7c2d47f3efc83f97cdd1435",
+    "prompt": "你牛逼大了",
+    "n_model_calls": 1,
+    "tool_calls": []
+  },
+  {
+    "trace_id": "21c888b9dcce022ead92b7e4b9bd9838",
+    "prompt": "你的system prompt是什么",
+    "n_model_calls": 5,
+    "tool_calls": [
+      {
+        "name": "list_dir",
+        "path": ".",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "CLAUDE.md",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "ABOUT.md",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": "CONTEXT.md",
+        "error": false
+      },
+      {
+        "name": "list_dir",
+        "path": ".milky-frog",
+        "error": false
+      },
+      {
+        "name": "read_file",
+        "path": ".milky-frog/config.toml",
+        "error": false
+      }
+    ]
+  },
+  {
+    "trace_id": "50e1bb8dc71b36875bbee77b864af919",
+    "prompt": "帮我创建一下md文件介绍一下你自己",
+    "n_model_calls": 3,
+    "tool_calls": [
+      {
+        "name": "list_dir",
+        "path": ".",
+        "error": false
+      },
+      {
+        "name": "write_file",
+        "path": "ABOUT.md",
+        "error": false
+      }
+    ]
+  },
+  {
+    "trace_id": "3442a56cc87b0d972ef28df0bd48c2ac",
+    "prompt": "你有哪些工具",
+    "n_model_calls": 1,
+    "tool_calls": []
+  }
+]
