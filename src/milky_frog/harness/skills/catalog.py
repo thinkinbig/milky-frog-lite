@@ -33,6 +33,14 @@ class SkillCatalog:
     def summaries(self) -> tuple[SkillSummary, ...]:
         return tuple(self._load(path).summary for _, path in sorted(self._paths.items()))
 
+    def prompt_locations(self) -> tuple[tuple[str, str, Path], ...]:
+        """Skill metadata for system-prompt injection (name, description, path)."""
+        return tuple(
+            (skill.summary.name, skill.summary.description, path)
+            for _, path in sorted(self._paths.items())
+            for skill in (self._load(path),)
+        )
+
     def load(self, name: str) -> Skill:
         try:
             path = self._paths[name]
