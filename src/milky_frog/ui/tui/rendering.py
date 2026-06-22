@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import difflib
 from dataclasses import dataclass
+from typing import Literal
 
 from pydantic import JsonValue
+
+DiffKind = Literal["add", "remove", "context"]
 
 # ── Slash commands ─────────────────────────────────────────────────────
 
@@ -107,3 +111,44 @@ def summarize_tool_result(content: str, *, is_error: bool) -> str:
     if len(lines) > 1:
         return f"{first} (+{len(lines) - 1} more line{'s' if len(lines) - 1 != 1 else ''})"
     return first
+
+
+# ── File-change diffs ──────────────────────────────────────────────────
+
+
+def build_diff_lines(old: str, new: str) -> list[tuple[DiffKind, str]]:
+    """A unified diff of ``old`` vs ``new`` as ``(kind, text)`` rows.
+
+    ``kind`` is ``"add"`` / ``"remove"`` / ``"context"``. Hunk and file headers
+    are dropped — for a replaced snippet the line numbers are not meaningful.
+    """
+    old_lines = old.splitlines() or [""]
+    new_lines = new.splitlines() or [""]
+    rows: list[tuple[DiffKind, str]] = []
+    for line in difflib.unified_diff(old_lines, new_lines, lineterm="", n=2):
+        if line.startswith(("+++", "---", "@@")):
+            continue
+        if line.startswith("+"):
+            rows.append(("add", line[1:]))
+        elif line.startswith("-"):
+            rows.append(("remove", line[1:]))
+        else:
+            rows.append(("context", line[1:] if line.startswith(" ") else line))
+    return rows
+
+
+def file_change_diff(
+    name: str, arguments: dict[str, JsonValue]
+) -> list[tuple[DiffKind, str]] | None:
+    """Derive a colored diff from a file-editing tool's call arguments, or ``None``.
+
+    ``edit_file`` carries ``old``/``new``; ``write_file`` carries ``content``
+    (shown entirely as additions). The TUI renders the result without the tool
+    having to return a diff itself.
+    """
+    if name == "edit_file" and "old" in arguments and "new" in arguments:
+        return build_diff_lines(_stringify(arguments["old"]), _stringify(arguments["new"]))
+    if name == "write_file" and "content" in arguments:
+        body = _stringify(arguments["content"]).splitlines() or [""]
+        return [("add", line) for line in body]
+    return None

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from milky_frog.ui.tui.rendering import (
+    build_diff_lines,
     complete_command,
+    file_change_diff,
     format_tool_call,
     matching_commands,
     summarize_tool_result,
@@ -58,3 +60,30 @@ def test_complete_command_resolves_unique_prefix() -> None:
 
 def test_complete_command_stays_ambiguous_for_bare_slash() -> None:
     assert complete_command("/") is None
+
+
+def test_build_diff_lines_marks_add_remove_and_context() -> None:
+    rows = build_diff_lines("a\nb\nc", "a\nB\nc")
+    assert ("context", "a") in rows
+    assert ("remove", "b") in rows
+    assert ("add", "B") in rows
+    assert ("context", "c") in rows
+    # hunk/file headers are dropped
+    assert all(not text.startswith("@@") for _, text in rows)
+
+
+def test_file_change_diff_for_edit_file() -> None:
+    rows = file_change_diff("edit_file", {"path": "x.py", "old": "foo", "new": "bar"})
+    assert rows is not None
+    assert ("remove", "foo") in rows
+    assert ("add", "bar") in rows
+
+
+def test_file_change_diff_for_write_file_is_all_additions() -> None:
+    rows = file_change_diff("write_file", {"path": "x.py", "content": "one\ntwo"})
+    assert rows == [("add", "one"), ("add", "two")]
+
+
+def test_file_change_diff_returns_none_for_other_tools() -> None:
+    assert file_change_diff("read_file", {"path": "x.py"}) is None
+    assert file_change_diff("edit_file", {"path": "x.py"}) is None  # missing old/new

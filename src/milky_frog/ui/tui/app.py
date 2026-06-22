@@ -37,7 +37,9 @@ from milky_frog.ui.tui.messages import (
 )
 from milky_frog.ui.tui.rendering import (
     COMMANDS,
+    DiffKind,
     complete_command,
+    file_change_diff,
     format_tool_call,
     matching_commands,
     summarize_tool_result,
@@ -63,6 +65,26 @@ def _thinking(text: str) -> Text:
     if not text:
         return Text("✻ thinking", style="dim italic")
     return Text.assemble(("✻ thinking\n", "dim italic"), (text, "dim italic"))
+
+
+_DIFF_STYLE: dict[DiffKind, str] = {"add": "green", "remove": "red", "context": "dim"}
+_DIFF_SIGN: dict[DiffKind, str] = {"add": "+ ", "remove": "- ", "context": "  "}
+_MAX_DIFF_LINES = 40
+
+
+def _diff_renderable(rows: list[tuple[DiffKind, str]]) -> Text:
+    """Render diff rows as one indented, colored block (green add, red remove, dim ctx)."""
+    text = Text()
+    shown = rows[:_MAX_DIFF_LINES]
+    for index, (kind, line) in enumerate(shown):
+        if index:
+            text.append("\n")
+        text.append(f"    {_DIFF_SIGN[kind]}{line}", style=_DIFF_STYLE[kind])
+    extra = len(rows) - len(shown)
+    if extra:
+        text.append("\n" if shown else "")
+        text.append(f"    … {extra} more line{'s' if extra != 1 else ''}", style="bright_black")
+    return text
 
 
 # ── Status Widget ──────────────────────────────────────────────────────
@@ -408,13 +430,16 @@ class MilkyFrogApp(App[None]):
         self._scroll_end()
 
     def on_tool_call_msg(self, event: ToolCallMsg) -> None:
-        """Close the open assistant block, then write the tool call signature."""
+        """Write the tool call signature, plus a colored diff for file edits."""
         self._close_phase()
         signature = format_tool_call(event.name, event.arguments)
         self._append(
             Text.assemble(("  ⏺ ", "bold cyan"), (signature, "cyan")),
             spaced=False,
         )
+        diff = file_change_diff(event.name, event.arguments)
+        if diff:
+            self._append(_diff_renderable(diff), spaced=False)
 
     def on_tool_result_msg(self, event: ToolResultMsg) -> None:
         """Write the tool result as an indented summary line under its call."""
