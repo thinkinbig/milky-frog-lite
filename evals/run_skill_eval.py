@@ -55,7 +55,10 @@ def run_task(settings: Settings, task: dict[str, object]) -> dict[str, object]:
     ) as frog:
         result = frog.run(str(task["prompt"]), workspace)
 
-    reads = [_normalize(record.path, workspace) for record in collector.reads.get(result.run_id, [])]
+    reads = [
+        _normalize(record.path, workspace)
+        for record in collector.reads.get(result.run_id, [])
+    ]
     read_skill = any(expected_read in path or path.endswith("tdd/SKILL.md") for path in reads)
     mentioned = "tdd" in result.final_message.lower()
 
