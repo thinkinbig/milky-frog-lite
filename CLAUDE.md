@@ -48,15 +48,16 @@ and is safe to commit. Credentials must never be committed.
 
 ## Architecture
 
-The agent loop lives in `harness/runner.py` (`Harness.run`): a linear
+The agent loop lives in `harness/agent_loop.py` (`AgentLoop.advance`): a linear
 model → Tool → model loop bounded by `max_model_calls`, persisting a Checkpoint
 snapshot after meaningful steps and notifying lifecycle Handlers around each model and
-Tool call.
+Tool call. `harness/agent_harness.py` (`AgentHarness`) wraps the loop with run
+start, resume, and approval handling.
 
-`runtime.py` (`MilkyFrog`) assembles the concrete pieces from `Settings` and
-owns the sync→async boundary (a reused event loop). `cli/app.py` is the Typer
-command surface; `cli/advance.py` wires the interactive loop via
-`MilkyFrogAdvancer` (`RunAdvancer` protocol). `ui/` renders everything via Rich.
+`agent_session.py` (`AgentSession`) assembles the concrete pieces from `Settings`
+and owns the sync→async boundary (a reused event loop). `cli/app.py` is the Typer
+command surface and drives the foreground interactive loop. `ui/` renders
+everything via Rich.
 
 ### Three event lanes (do not unify)
 
@@ -66,15 +67,20 @@ qualifier, and never merge them into one base type:
 | Lane | Where | Lifetime | Purpose |
 |------|-------|----------|---------|
 | **Checkpoint snapshot** | `checkpoint/snapshot.py`, `runs.state_json` | Durable (SQLite) | Resume source of truth |
-| **Lifecycle signal** | `handlers/events.py`, bus in `handlers/bus.py` | Ephemeral (in-process) | UI streaming, Langfuse (`notify`) |
-| **Harness policy** | Explicit `Protocol` deps on `Harness` (future) | Per-call | Authorization, context build, etc. |
+| **Lifecycle signal** | `handlers/events.py`, dispatcher in `handlers/dispatcher.py` (`EventDispatcher`) | Ephemeral (in-process) | UI streaming, Langfuse (`notify`) |
+| **Handler control return** | `HandlerResult` in `handlers/context.py` | Per-step | Authorization, context build, token budget |
 
 RunState snapshots are serialized via Pydantic models in `checkpoint/snapshot.py` (ADR-0014).
 Lifecycle signals are frozen dataclass subclasses in `handlers/events.py`.
-Only `RunEmitter` publishes lifecycle signals. Handlers subscribe via
-`observe` / `on` / `subscribe`; most return `None`. `RunBeforeTool` and
-`RunBeforeStart` may return `HandlerResult` values that influence the next
-Harness step. Handlers do not publish signals themselves.
+Only `RunEmitter` publishes lifecycle signals; Handlers never publish. They
+subscribe via `observe` / `on` / `subscribe`; most return `None` (pure
+observation). Policy and context build are **not** a separate Harness mechanism —
+they are expressed as `HandlerResult` control returns that the emitter applies to
+the next step:
+
+- `RunBeforeStart` → `SystemPromptSection` (additive context injection; e.g. `AgentContextHandler`).
+- `RunBeforeModel` → carries the full `ModelRequest` and collects `HandlerResult`; this is the seam for per-call request shaping such as token budgeting (a reductive rewrite — needs its own result variant).
+- `RunBeforeTool` → `BlockResult` / `ApprovalResult` (authorization; `PolicyHandler`).
 
 ### Seams
 

@@ -45,7 +45,7 @@ renderer directly via `bus.subscribe` in `ui/tui/app.py`, not a `StreamingHandle
 bundle), and nothing in the roster imports `ui/`, so the factory lives safely in
 `handlers/` with no layering inversion. The roster stays explicit, not
 import-time auto-discovery — upholding ADR-0004's instance-owned registry and
-ADR-0012's notify-only bus.
+ADR-0012's single-publisher lifecycle bus.
 
 ## Consequences
 

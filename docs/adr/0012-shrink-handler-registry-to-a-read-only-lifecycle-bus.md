@@ -1,73 +1,104 @@
-# Shrink HandlerRegistry to a read-only lifecycle bus
+# Handler lifecycle bus: notify plus bounded control returns
+
+> Living doc — describes the current bus. The filename keeps its original
+> `...read-only-lifecycle-bus` slug so existing links stay valid.
 
 ADR-0004 (typed lifecycle Handlers; see [0004](0004-use-typed-event-handlers.md))
 introduced two Handler channels — `observe` and `intercept` — on a shared
-`HandlerRegistry`. In production, every bundle (UI streaming, Langfuse) registers
-only `observe` / `on` handlers; **zero** `intercept` handlers are wired. The
-intercept channel and its outcomes (`BlockTool`, `TransformContext`,
-`PatchToolResult`) were dead abstraction: they mixed **execution decisions** into
-the same bus as **ephemeral notifications**, while **persistent facts** live in the
-**Checkpoint snapshot** (`runs.state_json`; see
-[ADR-0014](0014-persist-checkpoints-as-runstate-snapshots.md)).
+`HandlerRegistry`. The original `intercept` channel and its outcomes (`BlockTool`,
+`TransformContext`, `PatchToolResult`) were a dead grab-bag: they let any handler
+mutate execution arbitrarily through the same bus that carries **ephemeral
+notifications**, while **persistent facts** live in the **Checkpoint snapshot**
+(`runs.state_json`; see [ADR-0014](0014-persist-checkpoints-as-runstate-snapshots.md)).
+That open-ended channel was removed.
+
+An earlier version of this decision went further — handlers returned **nothing**,
+and policy/context build were deferred to "future explicit `Protocol` deps on
+`Harness`" (a `ToolAuthorizer`, a `ContextBuilder`). That separate layer never
+shipped, and it turned out to be unnecessary: the single event surface already
+carries the payloads policy needs (`RunBeforeModel` holds the full `ModelRequest`),
+and handler assembly is already centralized ([ADR-0015](0015-centralize-handler-assembly-in-default-handlers.md)).
+A parallel policy-injection mechanism would have been redundant.
 
 ## Decision
 
-Keep three separate lanes:
+One bus. `EventDispatcher` (`handlers/dispatcher.py`) is the only dispatch point;
+**only `RunEmitter` publishes**, and handlers never publish. Most handlers are
+pure observation and return `None`.
 
-1. **Checkpoint snapshot** (`checkpoint/snapshot.py`, `save_state`) — durable; loaded on resume.
-2. **Lifecycle signals** (`handlers/events.py`) — ephemeral; UI and observability only.
-3. **Harness policy seams** (future) — explicit `Protocol` dependencies such as
-   `ToolAuthorizer` or `ContextBuilder`, injected into `Harness` when a real need
-   appears; not a pub/sub return-value channel.
+Policy and context build are expressed **on this bus**, as a closed, typed
+`HandlerResult` union (`handlers/context.py`) that specific `RunBefore*` handlers
+may return and that the **emitter** applies to the next step:
 
-`HandlerRegistry` is reduced to a read-only notification bus:
+- `RunBeforeStart` → `SystemPromptSection` — additive context injection (e.g. `AgentContextHandler`).
+- `RunBeforeModel` → carries the full `ModelRequest`; returns a reductive request rewrite (e.g. token budgeting). This is the per-call request-shaping seam.
+- `RunBeforeTool` → `BlockResult` / `ApprovalResult` — authorization (`PolicyHandler`).
 
-- Remove `intercept` and all intercept outcome types.
-- Rename `dispatch` → `notify`; handlers may not return values or mutate signals.
-- Make lifecycle signal models frozen.
+Four guardrails keep this from regressing into ADR-0004's open `intercept`:
 
-Execution decisions that intercept once covered (block tool, transform context,
-patch result) are **not** reimplemented yet — no production caller used them.
-Add explicit seams when authorization, memory injection, or result sanitization
-ship.
+1. Handlers still never publish signals — only observe and (at the points above) return.
+2. Only an explicit, closed set of `RunBefore*` events accept returns; each has a typed result.
+3. The **emitter**, not the handler, applies results — deterministically, in registration order.
+4. `HandlerResult` variants and lifecycle signals are frozen dataclasses; `dispatch` is named `notify`.
+
+There is **no** separate Harness-policy `Protocol` layer. Policy and context build
+live here, on the lifecycle bus.
 
 ## Consequences
 
-- UI and Langfuse bundles unchanged in spirit; they already used `on` only.
-- `Harness._execute_tool` no longer branches on `BlockTool`.
-- ADR-0004's intercept half is superseded; its observe/priority model remains.
-- Checkpoint snapshot typing is
-  [ADR-0014 checkpoint](0014-persist-checkpoints-as-runstate-snapshots.md), not part of this change.
+- The "Harness policy" lane is realized as `HandlerResult` control returns, not separate `Protocol` deps; CLAUDE.md and the ADR README describe it that way.
+- ADR-0004's open-ended `intercept` is gone; its observe/priority model remains.
+- Token budgeting will add the first **reductive** `RunBeforeModel` result variant plus its apply path in the emitter.
+- The bus is "notify + bounded control returns," not "read-only" — the `notify` name is kept for the publish side only.
+- Checkpoint snapshot typing is [ADR-0014](0014-persist-checkpoints-as-runstate-snapshots.md), unaffected by this lane.
 
 ---
 
-# 将 HandlerRegistry 收缩为只读生命周期总线
+# Handler 生命周期总线：通知 + 受限的控制返回
+
+> Living doc — 描述当前总线的实际行为。文件名保留原 `...read-only-lifecycle-bus`
+> slug，以免现有链接失效。
 
 [ADR-0004](0004-use-typed-event-handlers.md)（类型化 lifecycle Handler）在共享的
-`HandlerRegistry` 上引入了两条通道——`observe` 与 `intercept`。在生产环境中，所有
-bundle（UI 流式输出、Langfuse）仅注册 `observe` / `on` handler；**零**个 `intercept`
-handler 被接入。intercept 通道及其 outcome 是死抽象：把**执行决策**与**临时通知**混在同一总线上，而**持久化事实**存在于 Checkpoint 快照（`runs.state_json`；见
-[ADR-0014 checkpoint](0014-persist-checkpoints-as-runstate-snapshots.md)）。
+`HandlerRegistry` 上引入了两条通道——`observe` 与 `intercept`。最初的 `intercept`
+通道及其 outcome（`BlockTool`、`TransformContext`、`PatchToolResult`）是个杂物抽象：
+允许任意 handler 通过承载**临时通知**的同一条总线随意改写执行，而**持久化事实**存在于
+Checkpoint 快照（`runs.state_json`；见
+[ADR-0014](0014-persist-checkpoints-as-runstate-snapshots.md)）。这条开放通道已被移除。
+
+本决策更早的一个版本走得更远——handler **不返回任何值**，policy/context build 留给
+「未来注入 `Harness` 的显式 `Protocol` 依赖」（`ToolAuthorizer`、`ContextBuilder`）。
+那一层始终没落地，事实证明也没必要：单一事件面本身就携带 policy 所需的载荷
+（`RunBeforeModel` 持有完整 `ModelRequest`），handler 装配也已集中化
+（[ADR-0015](0015-centralize-handler-assembly-in-default-handlers.md)）。再加一套平行的
+policy 注入机制纯属冗余。
 
 ## 决策
 
-保留三条独立通道：
+一条总线。`EventDispatcher`（`handlers/dispatcher.py`）是唯一派发点；**只有
+`RunEmitter` 发布**，handler 从不发布。多数 handler 是纯观察，返回 `None`。
 
-1. **Checkpoint 快照**（`checkpoint/snapshot.py`、`save_state`）——durable；resume 时 load。
-2. **生命周期信号**（`handlers/events.py`）——临时的；仅供 UI 与可观测性。
-3. **Harness 策略 seam**（未来）——显式 `Protocol` 依赖，如 `ToolAuthorizer` 或 `ContextBuilder`，在真实需求出现时注入 `Harness`；而非带返回值的 pub/sub 通道。
+policy 与 context build **就在这条总线上**表达——通过一个封闭、类型化的
+`HandlerResult` 联合（`handlers/context.py`）：特定的 `RunBefore*` handler 可以返回它，
+由 **emitter** 应用到下一步：
 
-`HandlerRegistry` 收缩为只读通知总线：
+- `RunBeforeStart` → `SystemPromptSection`——加法式 context 注入（如 `AgentContextHandler`）。
+- `RunBeforeModel` → 携带完整 `ModelRequest`；返回削减式请求改写（如 token budget）。这是 per-call 的请求塑造 seam。
+- `RunBeforeTool` → `BlockResult` / `ApprovalResult`——授权（`PolicyHandler`）。
 
-- 删除 `intercept` 及所有 intercept outcome 类型。
-- `dispatch` 重命名为 `notify`；handler 不得返回值或修改信号。
-- 生命周期信号模型改为 frozen。
+四条护栏防止它退回 ADR-0004 那种开放 `intercept`：
 
-intercept 曾覆盖的执行决策（拦截 tool、变换 context、修正 result）**暂不**重新实现——生产代码中无调用方。待授权、记忆注入或结果清洗落地时，再以显式 seam 添加。
+1. handler 仍然从不发布信号——只观察，并（在上述点）返回。
+2. 只有一组显式、封闭的 `RunBefore*` 事件接受返回；每个都有类型化结果。
+3. 应用结果的是 **emitter** 而非 handler——确定性地、按注册顺序。
+4. `HandlerResult` 变体与生命周期信号都是 frozen dataclass；`dispatch` 命名为 `notify`。
+
+**不存在**独立的 Harness-policy `Protocol` 层。policy 与 context build 就住在这条生命周期总线上。
 
 ## 影响
 
-- UI 与 Langfuse bundle 语义不变；本就只用 `on`。
-- `Harness._execute_tool` 不再对 `BlockTool` 分支。
-- ADR-0004 的 intercept 部分被取代；其 observe/优先级模型保留。
-- Checkpoint 快照类型化见 [ADR-0014 checkpoint](0014-persist-checkpoints-as-runstate-snapshots.md)，不在本次变更范围内。
+- 「Harness policy」lane 由 `HandlerResult` 控制返回实现，而非独立 `Protocol` 依赖；CLAUDE.md 与 ADR README 据此描述。
+- ADR-0004 的开放式 `intercept` 已移除；其 observe/优先级模型保留。
+- token budget 将引入第一个**削减式** `RunBeforeModel` 结果变体，以及 emitter 中的应用路径。
+- 总线是「通知 + 受限控制返回」，不是「只读」——`notify` 之名仅指发布侧。
+- Checkpoint 快照类型化见 [ADR-0014](0014-persist-checkpoints-as-runstate-snapshots.md)，不受本 lane 影响。

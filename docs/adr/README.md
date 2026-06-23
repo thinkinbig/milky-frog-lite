@@ -15,14 +15,18 @@ Checkpoint persistence unless a newer ADR says otherwise.
 | [0008](0008-compose-handlers-via-providers-with-lifetime.md) | Handler bundles | **Factory/roster superseded by 0015** (`BaseHandler` lifetime kept) |
 | [0009](0009-resume-runs-by-folding-the-checkpoint-log.md) | Resume / `RunState` | **Partially superseded by 0014** (`seal`, validation kept) |
 | [0010](0010-continue-a-run-with-a-new-user-turn.md) | Multi-turn `resume(prompt)` | Current (persistence wording in 0014) |
-| [0012](0012-shrink-handler-registry-to-a-read-only-lifecycle-bus.md) | Read-only Handler bus | Current |
+| [0012](0012-shrink-handler-registry-to-a-read-only-lifecycle-bus.md) | Handler bus: notify + bounded control returns | Current (living doc; rewritten from "read-only") |
 | [0014](0014-persist-checkpoints-as-runstate-snapshots.md) | **`RunState` snapshot Checkpoint** | **Current source of truth for persistence** |
 | [0015](0015-centralize-handler-assembly-in-default-handlers.md) | Centralized `default_handlers` assembly | Current |
 
 ## Three lanes (post-0014)
 
 1. **Checkpoint snapshot** — `runs.state_json`, `checkpoint/snapshot.py`
-2. **Lifecycle signal** — `handlers/events.py`, notify-only bus (ADR-0012)
-3. **Harness policy** — future explicit `Protocol` deps (not Handlers)
+2. **Lifecycle signal** — `handlers/events.py`, dispatched by `EventDispatcher`
+   (`handlers/dispatcher.py`); only `RunEmitter` publishes (ADR-0012)
+3. **Handler control return** — `HandlerResult` (`handlers/context.py`) returned
+   by `RunBefore*` handlers and applied by the emitter; this is how authorization,
+   context build, and token budget are expressed (ADR-0012). There is no separate
+   Harness-policy `Protocol` layer.
 
 Do not call all three “Event” without a qualifier.

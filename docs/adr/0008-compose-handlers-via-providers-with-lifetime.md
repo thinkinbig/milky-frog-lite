@@ -1,6 +1,6 @@
 # Compose Handlers via providers with a base lifetime
 
-Settings-driven infrastructure Handlers (observability now; future policy seams such as authorization are explicit `Harness` dependencies instead) are composed through an explicit one-line roster of provider types, and share resource lifetime through a `BaseHandler` base class — rather than the runtime naming each Handler concretely.
+Settings-driven infrastructure Handlers (observability now; authorization and context build are expressed as `HandlerResult` control returns on the bus — see [ADR-0012](0012-shrink-handler-registry-to-a-read-only-lifecycle-bus.md)) are composed through an explicit one-line roster of provider types, and share resource lifetime through a `BaseHandler` base class — rather than the runtime naming each Handler concretely.
 
 Previously `MilkyFrog` imported `LangfuseHandler` directly: it read `settings.langfuse.active`, constructed and registered it, and drove its `flush`/`finalize` from inside `run()`. Every Handler that needs lifecycle beyond pure event observation forced the runtime to grow concrete knowledge of it. The streaming UI Handlers were already decoupled (the CLI builds them and injects the registry), so the coupling was specifically about *infrastructure* Handlers with a resource lifetime.
 

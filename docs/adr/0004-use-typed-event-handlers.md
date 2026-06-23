@@ -10,8 +10,10 @@ registered on an instance-owned registry with explicit priority, rather than
 
 Handlers register on one channel:
 
-- **`observe`** (and the `on` / `subscribe` aliases) — read-only inspection for
-  live UI and observability; may not return outcomes or mutate signals.
+- **`observe`** (and the `on` / `subscribe` aliases) — inspection for live UI and
+  observability; never mutates signals. Most handlers return `None`, but a closed
+  set of `RunBefore*` events now accept bounded `HandlerResult` control returns
+  (see [ADR-0012](0012-shrink-handler-registry-to-a-read-only-lifecycle-bus.md)).
 
 Wildcard `subscribe` handlers participate in the same priority ordering as
 type-specific observe handlers.
