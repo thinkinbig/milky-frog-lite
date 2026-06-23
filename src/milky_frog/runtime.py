@@ -99,10 +99,6 @@ class MilkyFrog:
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        self.close()
-
-    def close(self) -> None:
-        """Release assembled Handlers, the model client, and the reused loop, once."""
         if self._loop is None:
             self._loop = asyncio.new_event_loop()
         loop = self._loop
@@ -149,7 +145,7 @@ class MilkyFrog:
         """Start one goal synchronously."""
         config = load_project_config(workspace)
         self._cancellation = RunCancellation()
-        return self._drive(
+        return self._run_coro(
             self._harness.run(
                 RunRequest(
                     prompt,
@@ -179,7 +175,7 @@ class MilkyFrog:
             raise ResumeError(f"unknown Run: {run_id}")
         config = load_project_config(stored.workspace)
         self._cancellation = RunCancellation()
-        return self._drive(
+        return self._run_coro(
             self._harness.resume(
                 run_id,
                 max_model_calls=config.max_model_calls,
@@ -188,7 +184,7 @@ class MilkyFrog:
             )
         )
 
-    def _drive(self, coro: Awaitable[RunResult]) -> RunResult:
+    def _run_coro(self, coro: Awaitable[RunResult]) -> RunResult:
         """Run one foreground coroutine on the reused loop with SIGINT→cancel wiring."""
         if self._loop is None:
             self._loop = asyncio.new_event_loop()
@@ -219,4 +215,4 @@ class MilkyFrog:
         try:
             return loop.run_until_complete(coro)
         finally:
-            defer.run()
+            defer.run_sync(loop)

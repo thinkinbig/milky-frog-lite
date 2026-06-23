@@ -72,20 +72,12 @@ class DeferStack:
         return self.defer(resource.aclose, label=label or type(resource).__name__)
 
     def defer_shutdown_asyncgens(self, loop: asyncio.AbstractEventLoop) -> Self:
-        """Defer ``loop.shutdown_asyncgens()`` while *loop* is still running."""
-
-        def shutdown() -> object:
-            return loop.run_until_complete(loop.shutdown_asyncgens())
-
-        return self.defer(shutdown, label="shutdown_asyncgens")
+        """Defer ``loop.shutdown_asyncgens()``."""
+        return self.defer(loop.shutdown_asyncgens, label="shutdown_asyncgens")
 
     def defer_yield_loop(self, loop: asyncio.AbstractEventLoop) -> Self:
         """Defer one no-op turn so pending loop callbacks can finish."""
-
-        def yield_loop() -> object:
-            return loop.run_until_complete(asyncio.sleep(0))
-
-        return self.defer(yield_loop, label="yield_loop")
+        return self.defer(lambda: asyncio.sleep(0), label="yield_loop")
 
     def defer_signal(
         self,

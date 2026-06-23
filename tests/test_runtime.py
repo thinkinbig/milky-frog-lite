@@ -139,11 +139,11 @@ def test_milky_frog_close_allows_reuse(tmp_path: Path) -> None:
     settings = Settings(tmp_path, "test-key", None, "test-model", _NO_LANGFUSE)
     frog = MilkyFrog.from_settings(settings)
 
-    # close() must not leave a closed loop behind; the instance stays usable.
-    frog.close()
+    # __exit__ must not leave a closed loop behind; the instance stays usable.
+    frog.__exit__(None, None, None)
 
     assert frog._loop is None
-    frog.close()  # idempotent
+    frog.__exit__(None, None, None)  # idempotent
     assert frog._loop is None
 
 
