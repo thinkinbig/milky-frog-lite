@@ -41,8 +41,8 @@ A handler that returns ``None`` is pure observation; returning a
 class HandlerContext:
     """Framework-managed resources passed to every handler at notify time.
 
-    Populated by ``Session`` via ``EventDispatcher.set_context`` so handlers
-    can access mutable runtime state without being coupled to Session.
+    Populated by ``AgentSession`` via ``EventDispatcher.set_context`` so handlers
+    can access mutable runtime state without being coupled to AgentSession.
     """
 
     policy: SessionToolPolicy | None = None

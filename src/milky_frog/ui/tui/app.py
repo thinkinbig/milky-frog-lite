@@ -452,7 +452,7 @@ class MilkyFrogApp(App[None]):
 
     def __init__(self, settings: Settings) -> None:
         super().__init__()
-        # Create the async Session now (without entering it — entering happens
+        # Create the async AgentSession now (without entering it — entering happens
         # in ``run()`` so Textual's sync outer loop can bracket the lifecycle).
         self._session = AgentSession(
             settings,
@@ -481,13 +481,13 @@ class MilkyFrogApp(App[None]):
 
     @property
     def session(self) -> AgentSession:
-        """The active ``Session``; always valid while the app is running."""
+        """The active ``AgentSession``; always valid while the app is running."""
         return self._session
 
     def run(self, *args: Any, **kwargs: Any) -> Any:
-        """Run the TUI with a managed ``Session`` lifecycle.
+        """Run the TUI with a managed ``AgentSession`` lifecycle.
 
-        ``Session.__aenter__`` opens async resources (model connection, handler
+        ``AgentSession.__aenter__`` opens async resources (model connection, handler
         sessions); ``__aexit__`` releases them.  A single ``asyncio.run()`` brackets
         the session and Textual's ``run_async()`` so we never nest event loops.
         """
@@ -939,7 +939,7 @@ class MilkyFrogApp(App[None]):
 
     @work(thread=False, exit_on_error=False)
     async def _do_run(self, task: str, run_id: str | None) -> None:
-        """Thin worker: delegate to Session; UI via TuiPresentationHandler."""
+        """Thin worker: delegate to AgentSession; UI via TuiPresentationHandler."""
         try:
             if run_id is None:
                 await self.session.start_new(task)
@@ -978,7 +978,7 @@ class MilkyFrogApp(App[None]):
 
     @work(thread=False, exit_on_error=False)
     async def _do_approve(self, run_id: str, verdict: ApprovalVerdict) -> None:
-        """Thin worker: delegate to Session; UI via TuiPresentationHandler."""
+        """Thin worker: delegate to AgentSession; UI via TuiPresentationHandler."""
         try:
             await self.session.respond_approval(run_id, verdict)
         except ResumeError as error:

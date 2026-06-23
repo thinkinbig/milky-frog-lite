@@ -104,7 +104,7 @@ class BaseHandler(ABC):
     A bundle wires several callbacks onto an EventDispatcher in one place (its
     own file) via ``register``. Bundles that hold session resources override
     ``__aenter__`` to acquire them and ``aclose`` to release; the rest inherit
-    no-op defaults. ``MilkyFrog`` enters every bundle when the session opens
+    no-op defaults. ``AgentSession`` enters every bundle when the session opens
     and exits them on close.
     """
 
