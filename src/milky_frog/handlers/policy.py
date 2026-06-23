@@ -1,7 +1,8 @@
-"""Adapter that wraps a legacy ``ToolPolicy`` as a handler on ``RunBeforeTool``.
+"""Handler that enforces session-level tool policy via ``HandlerContext``.
 
-Once all callers migrate to registering handlers directly on ``RunBeforeTool``,
-this module (and ``ToolPolicy``) can be removed.
+Reads ``SessionToolPolicy`` from ``ctx.policy`` on every ``RunBeforeTool``
+event so policy changes (``allow_all()``, per-tool overrides) take effect
+without any additional wiring.
 """
 
 from __future__ import annotations
@@ -10,18 +11,14 @@ from milky_frog.domain import ToolDecision
 from milky_frog.handlers.context import ApprovalResult, BlockResult, HandlerContext, HandlerResult
 from milky_frog.handlers.dispatcher import BaseHandler, EventDispatcher
 from milky_frog.handlers.events import RunBeforeTool
-from milky_frog.harness.tools.tool_policy import DefaultToolPolicy, ToolPolicy
 
 
 class PolicyHandler(BaseHandler):
-    """Wraps a ``ToolPolicy`` as a handler on ``RunBeforeTool`` events.
+    """Enforces session-level tool policy on ``RunBeforeTool`` events.
 
-    Registers itself on the bus so the policy decision is made through
-    the same channel as every other handler — no separate gate needed.
+    The policy is always read from ``ctx.policy`` — a mutable
+    ``SessionToolPolicy`` set by ``Session`` on the dispatcher context.
     """
-
-    def __init__(self, policy: ToolPolicy | None = None) -> None:
-        self._policy: ToolPolicy = policy or DefaultToolPolicy()
 
     def register(self, registry: EventDispatcher) -> None:
         registry.on(RunBeforeTool)(self._on_before_tool)
@@ -29,8 +26,9 @@ class PolicyHandler(BaseHandler):
     async def _on_before_tool(
         self, event: RunBeforeTool, ctx: HandlerContext
     ) -> HandlerResult | None:
-        del ctx
-        decision = self._policy.decide(event.call)
+        if ctx.policy is None:
+            return None
+        decision = ctx.policy.decide(event.call)
         if decision is ToolDecision.DENY:
             return BlockResult(reason="denied by tool policy")
         if decision is ToolDecision.NEEDS_APPROVAL:

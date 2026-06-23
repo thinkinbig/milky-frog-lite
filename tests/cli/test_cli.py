@@ -58,12 +58,12 @@ def test_init_reports_filesystem_error_without_traceback(tmp_path: Path) -> None
 
 def test_require_model_config_validates_before_construction(tmp_path: Path) -> None:
     """Missing model config raises before any resource-holding object is built."""
-    from milky_frog.runtime import MilkyFrog, MissingModelConfiguration
+    from milky_frog.agent_session import AgentSession, MissingModelConfiguration
     from milky_frog.settings import Settings
 
     settings = Settings(tmp_path, api_key=None, model=None, base_url=None, langfuse=None)
     with pytest.raises(MissingModelConfiguration):
-        MilkyFrog.require_model_configuration(settings)
+        AgentSession.require_model_configuration(settings)
 
 
 def test_version_shows_version(tmp_path: Path) -> None:
@@ -85,33 +85,17 @@ def test_resume_without_task_advances_pending_work(
     cli_module = import_module("milky_frog.cli.app")
     calls: list[tuple[str, str | None]] = []
 
-    class FakeMilkyFrog:
-        @staticmethod
-        def require_model_configuration(settings: object) -> tuple[str, str]:
-            del settings
-            return "test-key", "test-model"
+    async def fake_resume(
+        settings: object,
+        run_id: str,
+        *,
+        prompt: str | None = None,
+    ) -> RunResult:
+        del settings
+        calls.append((run_id, prompt))
+        return RunResult(run_id, RunStatus.COMPLETED, "resumed", 1)
 
-        @classmethod
-        def from_settings(
-            cls,
-            settings: object,
-            handlers: object = None,
-            bundles: object = None,
-        ) -> FakeMilkyFrog:
-            del settings, handlers, bundles
-            return cls()
-
-        def __enter__(self) -> FakeMilkyFrog:
-            return self
-
-        def __exit__(self, *exc: object) -> None:
-            pass
-
-        def resume(self, run_id: str, prompt: str | None = None) -> RunResult:
-            calls.append((run_id, prompt))
-            return RunResult(run_id, RunStatus.COMPLETED, "resumed", 1)
-
-    monkeypatch.setattr(cli_module, "MilkyFrog", FakeMilkyFrog)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "_resume_cmd", fake_resume)  # type: ignore[attr-defined]
     result = runner.invoke(
         app,
         ["resume", "run-abc"],
@@ -132,33 +116,17 @@ def test_resume_with_task_continues_run(monkeypatch: pytest.MonkeyPatch, tmp_pat
     cli_module = import_module("milky_frog.cli.app")
     calls: list[tuple[str, str | None]] = []
 
-    class FakeMilkyFrog:
-        @staticmethod
-        def require_model_configuration(settings: object) -> tuple[str, str]:
-            del settings
-            return "test-key", "test-model"
+    async def fake_resume(
+        settings: object,
+        run_id: str,
+        *,
+        prompt: str | None = None,
+    ) -> RunResult:
+        del settings
+        calls.append((run_id, prompt))
+        return RunResult(run_id, RunStatus.COMPLETED, "continued", 2)
 
-        @classmethod
-        def from_settings(
-            cls,
-            settings: object,
-            handlers: object = None,
-            bundles: object = None,
-        ) -> FakeMilkyFrog:
-            del settings, handlers, bundles
-            return cls()
-
-        def __enter__(self) -> FakeMilkyFrog:
-            return self
-
-        def __exit__(self, *exc: object) -> None:
-            pass
-
-        def resume(self, run_id: str, prompt: str | None = None) -> RunResult:
-            calls.append((run_id, prompt))
-            return RunResult(run_id, RunStatus.COMPLETED, "continued", 2)
-
-    monkeypatch.setattr(cli_module, "MilkyFrog", FakeMilkyFrog)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "_resume_cmd", fake_resume)  # type: ignore[attr-defined]
     result = runner.invoke(
         app,
         ["resume", "run-abc", "follow up"],

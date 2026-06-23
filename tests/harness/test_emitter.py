@@ -9,7 +9,6 @@ from milky_frog.domain import RunResult, RunState, RunStatus
 from milky_frog.handlers import (
     CheckpointHandler,
     EventDispatcher,
-    HandlerContext,
     RunCancelled,
     RunFailed,
     RunNotice,
@@ -31,7 +30,7 @@ async def test_run_cancelled_persists_checkpoint_before_handler(tmp_path: Path) 
     checkpoint_seen = False
 
     @registry.on(RunCancelled)
-    async def record(_event: RunCancelled, _ctx: HandlerContext) -> None:
+    async def record(_event: RunCancelled, _ctx=None) -> None:
         nonlocal checkpoint_seen
         run = store.get_run(_event.run_id)
         checkpoint_seen = run is not None and run.status is RunStatus.CANCELLED
@@ -55,7 +54,7 @@ async def test_run_failed_persists_checkpoint_before_handler(tmp_path: Path) -> 
     checkpoint_seen = False
 
     @registry.on(RunFailed)
-    async def record(_event: RunFailed, _ctx: HandlerContext) -> None:
+    async def record(_event: RunFailed, _ctx=None) -> None:
         nonlocal checkpoint_seen
         run = store.get_run(_event.run_id)
         checkpoint_seen = run is not None and run.status is RunStatus.FAILED
@@ -79,7 +78,7 @@ async def test_finish_failed_returns_result_and_notifies(tmp_path: Path) -> None
     failed: list[RunFailed] = []
 
     @registry.on(RunFailed)
-    async def record(event: RunFailed, _ctx: HandlerContext) -> None:
+    async def record(event: RunFailed, _ctx=None) -> None:
         failed.append(event)
 
     emitter = _make_emitter(store, registry)
@@ -100,8 +99,7 @@ async def test_turn_started_notifies_handler(tmp_path: Path) -> None:
     seen: list[RunTurnStart] = []
 
     @registry.on(RunTurnStart)
-    async def record(event: RunTurnStart, _ctx: HandlerContext) -> None:
-        del _ctx
+    async def record(event: RunTurnStart, _ctx=None) -> None:
         seen.append(event)
 
     emitter = RunEmitter(registry)
@@ -118,8 +116,7 @@ async def test_turn_ended_notifies_handler(tmp_path: Path) -> None:
     seen: list[RunTurnEnd] = []
 
     @registry.on(RunTurnEnd)
-    async def record(event: RunTurnEnd, _ctx: HandlerContext) -> None:
-        del _ctx
+    async def record(event: RunTurnEnd, _ctx=None) -> None:
         seen.append(event)
 
     emitter = RunEmitter(registry)
@@ -136,8 +133,7 @@ async def test_run_notice_notifies_handler() -> None:
     seen: list[RunNotice] = []
 
     @registry.on(RunNotice)
-    async def record(event: RunNotice, _ctx: HandlerContext) -> None:
-        del _ctx
+    async def record(event: RunNotice, _ctx=None) -> None:
         seen.append(event)
 
     emitter = RunEmitter(registry)

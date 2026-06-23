@@ -61,34 +61,37 @@ class TuiPresentationHandler(BaseHandler):
         registry.on(RunFailed)(self._on_terminal)
         registry.on(RunCancelled)(self._on_terminal)
 
-    async def _on_started(self, event: RunStarted, ctx: HandlerContext) -> None:
-        del event, ctx
+    async def _on_started(self, event: RunStarted, ctx: HandlerContext | None = None) -> None:
         self._running = RunUsage()
 
-    async def _on_before_model(self, event: RunBeforeModel, ctx: HandlerContext) -> None:
-        del event, ctx
+    async def _on_before_model(
+        self, event: RunBeforeModel, ctx: HandlerContext | None = None
+    ) -> None:
         self._emit(AddThinking(""))
 
-    async def _on_model_chunk(self, event: RunModelChunk, ctx: HandlerContext) -> None:
-        del ctx
+    async def _on_model_chunk(
+        self, event: RunModelChunk, ctx: HandlerContext | None = None
+    ) -> None:
         self._emit(AddText(event.chunk.content))
 
-    async def _on_model_reasoning(self, event: RunModelReasoning, ctx: HandlerContext) -> None:
-        del ctx
+    async def _on_model_reasoning(
+        self, event: RunModelReasoning, ctx: HandlerContext | None = None
+    ) -> None:
         self._emit(AddThinking(event.chunk.content))
 
-    async def _on_after_model(self, event: RunAfterModel, ctx: HandlerContext) -> None:
-        del ctx
+    async def _on_after_model(
+        self, event: RunAfterModel, ctx: HandlerContext | None = None
+    ) -> None:
         self._running = self._running.record(event.response.usage)
         self._emit(UpdateUsage(self._running))
 
-    async def _on_before_tool(self, event: RunBeforeTool, ctx: HandlerContext) -> None:
-        del ctx
+    async def _on_before_tool(
+        self, event: RunBeforeTool, ctx: HandlerContext | None = None
+    ) -> None:
         call = event.call
         self._emit(ToolCallMsg(call.name, call.arguments))
 
-    async def _on_after_tool(self, event: RunAfterTool, ctx: HandlerContext) -> None:
-        del ctx
+    async def _on_after_tool(self, event: RunAfterTool, ctx: HandlerContext | None = None) -> None:
         call = event.call
         result = event.result
         self._emit(
@@ -99,24 +102,27 @@ class TuiPresentationHandler(BaseHandler):
             )
         )
 
-    async def _on_notice(self, event: RunNotice, ctx: HandlerContext) -> None:
-        del ctx
+    async def _on_notice(self, event: RunNotice, ctx: HandlerContext | None = None) -> None:
         self._emit(RunNoticeMsg(event.message, level=event.level))
 
-    async def _on_paused(self, event: RunPaused, ctx: HandlerContext) -> None:
-        del ctx
+    async def _on_paused(self, event: RunPaused, ctx: HandlerContext | None = None) -> None:
         result = event.result
         if result.status is RunStatus.WAITING_FOR_APPROVAL:
-            self._emit(ApprovalRequired(result.run_id, result.final_message))
+            # Extract tool name from the pending assistant message.
+            tool_name = ""
+            for msg in reversed(event.state.messages):
+                if msg.role.value == "assistant" and msg.tool_calls:
+                    tool_name = msg.tool_calls[0].name
+                    break
+            self._emit(ApprovalRequired(result.run_id, result.final_message, tool_name))
             return
         self._emit(_run_finished(result))
 
     async def _on_terminal(
         self,
         event: RunCompleted | RunFailed | RunCancelled,
-        ctx: HandlerContext,
+        ctx: HandlerContext | None = None,
     ) -> None:
-        del ctx
         self._emit(_run_finished(event.result))
 
 

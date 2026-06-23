@@ -18,7 +18,7 @@ from milky_frog.domain import (
 )
 from milky_frog.handlers import EventDispatcher
 from milky_frog.handlers.checkpoint import CheckpointHandler
-from milky_frog.harness.runner import Harness
+from milky_frog.harness.agent_harness import AgentHarness
 from milky_frog.harness.tools import ToolContext, ToolRegistry, ToolResult
 from milky_frog.models import Model
 
@@ -30,7 +30,7 @@ def make_harness(
     tools: ToolRegistry,
     checkpoints: CheckpointStore,
     handlers: EventDispatcher | None = None,
-) -> Harness:
+) -> AgentHarness:
     """Build a Harness with checkpointing wired, mirroring production assembly.
 
     Production wires ``CheckpointHandler`` via ``handlers.default_handlers``; the
@@ -39,7 +39,7 @@ def make_harness(
     """
     bus = handlers if handlers is not None else EventDispatcher()
     CheckpointHandler(checkpoints).register(bus)
-    return Harness(model, tools, checkpoints, bus)
+    return AgentHarness(model, tools, checkpoints, bus)
 
 
 # ── Tool stubs ────────────────────────────────────────────────────────

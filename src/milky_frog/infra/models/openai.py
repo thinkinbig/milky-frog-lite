@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import Any, cast
+from types import TracebackType
+from typing import Any, Self, cast
 
 from openai import AsyncOpenAI, AsyncStream
 from openai.types.chat import ChatCompletionChunk
@@ -20,9 +22,16 @@ from milky_frog.domain import (
     ToolCall,
 )
 
+_logger = logging.getLogger(__name__)
+
 
 class OpenAIModel:
-    """OpenAI-compatible chat-completions adapter for the Harness."""
+    """OpenAI-compatible chat-completions adapter for the Harness.
+
+    Configuration is fixed at construction; the HTTP client is acquired on
+    ``async with`` and released on exit. Pass ``client=`` only in tests to
+    inject a fake client (it is not closed by :meth:`aclose`).
+    """
 
     def __init__(
         self,
@@ -33,24 +42,48 @@ class OpenAIModel:
         client: AsyncOpenAI | None = None,
         include_stream_usage: bool | None = None,
     ) -> None:
+        self._api_key = api_key
         self._model = model
-        self._client = client or AsyncOpenAI(api_key=api_key, base_url=base_url)
+        self._base_url = base_url
+        self._injected_client = client
+        self._client: AsyncOpenAI | None = None
         # Official OpenAI supports stream usage; many compatible gateways reject it.
         self._include_stream_usage = (
             include_stream_usage if include_stream_usage is not None else base_url is None
         )
 
-    async def aclose(self) -> None:
-        """Close the underlying HTTP client and its connection pool.
+    async def __aenter__(self) -> Self:
+        if self._client is None:
+            if self._injected_client is not None:
+                self._client = self._injected_client
+            else:
+                self._client = AsyncOpenAI(api_key=self._api_key, base_url=self._base_url)
+        return self
 
-        Without this the ``AsyncOpenAI``/httpx client and its streaming async
-        generators are only finalized at interpreter shutdown — after the event
-        loop is gone — which surfaces as ``Task was destroyed but it is
-        pending!`` on a dangling ``async_generator_athrow``.
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        try:
+            await self.aclose()
+        except Exception:
+            _logger.exception("Cleanup failed: %s", type(self).__qualname__)
+
+    async def aclose(self) -> None:
+        """Close an owned HTTP client and its connection pool.
+
+        Injected test clients are left open.
         """
+        if self._client is None or self._injected_client is not None:
+            self._client = None
+            return
         await self._client.close()
+        self._client = None
 
     async def stream(self, request: ModelRequest) -> AsyncGenerator[ModelChunk, None]:
+        client = self._require_client()
         messages = [_message_payload(message) for message in request.messages]
         arguments: dict[str, Any] = {
             "model": self._model,
@@ -64,7 +97,7 @@ class OpenAIModel:
 
         stream = cast(
             AsyncStream[ChatCompletionChunk],
-            await self._client.chat.completions.create(**arguments),
+            await client.chat.completions.create(**arguments),
         )
         content_parts: list[str] = []
         reasoning_parts: list[str] = []
@@ -114,6 +147,12 @@ class OpenAIModel:
             )
         finally:
             await stream.close()
+
+    def _require_client(self) -> AsyncOpenAI:
+        if self._client is None:
+            msg = "OpenAIModel must be entered with `async with` before use"
+            raise RuntimeError(msg)
+        return self._client
 
 
 def _token_usage(usage: Any) -> TokenUsage:

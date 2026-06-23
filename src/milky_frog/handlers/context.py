@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from milky_frog.harness.tools.tool_policy import SessionToolPolicy
+
 
 @dataclass(frozen=True, slots=True)
 class BlockResult:
@@ -39,6 +41,8 @@ A handler that returns ``None`` is pure observation; returning a
 class HandlerContext:
     """Framework-managed resources passed to every handler at notify time.
 
-    Handlers receive this alongside the event. Empty today; reserved for
-    shared read-only services injected via ``EventDispatcher.set_context``.
+    Populated by ``Session`` via ``EventDispatcher.set_context`` so handlers
+    can access mutable runtime state without being coupled to Session.
     """
+
+    policy: SessionToolPolicy | None = None

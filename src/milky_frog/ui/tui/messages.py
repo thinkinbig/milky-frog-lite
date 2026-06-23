@@ -69,10 +69,11 @@ class RunFinished(Message):
 class ApprovalRequired(Message):
     """A Run paused waiting for the user to approve a pending tool call."""
 
-    def __init__(self, run_id: str, reason: str) -> None:
+    def __init__(self, run_id: str, reason: str, tool_name: str = "") -> None:
         super().__init__()
         self.run_id = run_id
         self.reason = reason
+        self.tool_name = tool_name
 
 
 class RunError(Message):
