@@ -1,8 +1,8 @@
-"""Session-level mutable tool policy and decision helpers.
+"""AgentSession-level mutable tool policy and decision helpers.
 
 Previously had a ``ToolPolicy`` Protocol, ``DefaultToolPolicy``, etc. All
 consolidated into ``SessionToolPolicy`` — the one policy class that is owned
-by ``Session``, exposed as ``session.policy``, and read by ``PolicyHandler``
+by ``AgentSession``, exposed as ``session.policy``, and read by ``PolicyHandler``
 from ``HandlerContext`` on every ``RunBeforeTool`` event.
 """
 
@@ -15,13 +15,13 @@ from milky_frog.harness.tools.base import Tool
 class SessionToolPolicy:
     """Mutable session-level tool policy.
 
-    Owned by ``Session``; exposed as ``session.policy``.  ``PolicyHandler``
+    Owned by ``AgentSession``; exposed as ``session.policy``.  ``PolicyHandler``
     reads its current state from ``HandlerContext.policy`` on every
     ``RunBeforeTool`` event, so changes take effect immediately.
 
     Default behaviour reads each tool's ``requires_approval`` attribute.
     Per-tool overrides (``allow`` / ``deny`` / ``require_approval``) and
-    ``allow_all()`` take precedence.
+    ``auto_approve()`` take precedence.
     """
 
     def __init__(self, tools: tuple[Tool, ...] | None = None) -> None:

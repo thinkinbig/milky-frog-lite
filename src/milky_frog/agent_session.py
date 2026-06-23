@@ -37,7 +37,7 @@ class MissingModelConfiguration(ValueError):
 class AgentSessionConfig:
     """All session-level policy in one place.
 
-    Passed to ``Session`` at construction time; merged with per-project
+    Passed to ``AgentSession`` at construction time; merged with per-project
     ``.milky-frog/config.toml`` for workspace-specific overrides (e.g.
     ``max_model_calls``).
     """
@@ -50,11 +50,11 @@ class AgentSession:
     """Central runtime: resources + orchestration. Pure async.
 
     Owns the full lifecycle of all async resources (model, handlers), the
-    session-level ``SessionConfig``, and the orchestration state for the
+    session-level ``AgentSessionConfig``, and the orchestration state for the
     current Run.  The caller provides the event loop — TUI uses Textual's
     own loop, CLI uses ``asyncio.run()``.
 
-        async with Session.from_settings(settings, bundles=[...]) as session:
+        async with AgentSession.from_settings(settings, bundles=[...]) as session:
             result = await session.start_new("build feature X")
 
     Orchestration methods (``start_new``, ``continue_with``, ``respond_approval``)

@@ -72,16 +72,14 @@ milky-frog resume RUN_ID          # replay pending work
 
 ```text
 src/milky_frog/
+├── agent_session.py # async runtime assembly and Run orchestration
 ├── checkpoint/   # CheckpointStore seam, RunSnapshot JSON, SQLite adapter
-├── cli/          # Typer commands, HandlerFactory, MilkyFrogAdvancer
+├── cli/          # Typer command surface
 ├── handlers/     # lifecycle signals, EventDispatcher (RunEmitter publishes)
-├── harness/      # Harness loop, state mutators, repair_transcript
+├── harness/      # Harness loop, Tool registry, state mutators, Skill catalog
+├── infra/        # SQLite, OpenAI, Local Sandbox, observability adapters
 ├── models/       # model-provider seam
-├── runtime.py    # MilkyFrog: sync boundary, assembly
-├── sandbox/      # Local Sandbox policy
-├── skills/       # progressive Skill discovery and loading
-├── tools/        # Tool interface, registry, built-ins
-└── ui/           # Rich terminal output, RunAdvancer protocols
+└── ui/           # Rich one-shot rendering and Textual interactive UI
 ```
 
 ## Development checks
@@ -108,7 +106,7 @@ MIT
 # 奶蛙（Milky Frog）
 
 奶蛙是一个轻量级本地代码 Agent CLI。它每次以前台方式执行一个任务，通过线性
-Harness 协调模型与 Tool 调用，并将 Checkpoint 保存为仅追加事件，使中断的 Run 可以安全恢复。
+Harness 协调模型与 Tool 调用，并将 Checkpoint 保存为 RunState 快照，使中断的 Run 可以安全恢复。
 
 > 当前仓库已支持兼容 OpenAI 的前台 Run、内置文件 Tool、Checkpoint 恢复（`milky-frog resume`）、
 > 多轮交互循环，以及可选的 Langfuse 可观测性。架构细节见

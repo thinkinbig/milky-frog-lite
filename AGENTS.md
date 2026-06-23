@@ -53,10 +53,10 @@ model → Tool → model loop bounded by `max_model_calls`, persisting a Checkpo
 snapshot after meaningful steps and notifying lifecycle Handlers around each model and
 Tool call.
 
-`runtime.py` (`MilkyFrog`) assembles the concrete pieces from `Settings` and
-owns the sync→async boundary (a reused event loop). `cli/app.py` is the Typer
-command surface; `cli/advance.py` wires the interactive loop via
-`MilkyFrogAdvancer` (`RunAdvancer` protocol). `ui/` renders everything via Rich.
+`agent_session.py` (`AgentSession`) assembles the concrete pieces from `Settings`
+and owns async resource lifetime plus Run orchestration. `cli/app.py` is the Typer
+command surface; `ui/tui/app.py` wires the interactive loop through Textual.
+`ui/` renders one-shot command output via Rich and interactive Runs via Textual.
 
 ### Three event lanes (do not unify)
 
@@ -66,7 +66,7 @@ qualifier, and never merge them into one base type:
 | Lane | Where | Lifetime | Purpose |
 |------|-------|----------|---------|
 | **Checkpoint snapshot** | `checkpoint/snapshot.py`, `runs.state_json` | Durable (SQLite) | Resume source of truth |
-| **Lifecycle signal** | `handlers/events.py`, bus in `handlers/bus.py` | Ephemeral (in-process) | UI streaming, Langfuse (`notify`) |
+| **Lifecycle signal** | `handlers/events.py`, bus in `handlers/dispatcher.py` | Ephemeral (in-process) | UI streaming, Langfuse (`notify`) |
 | **Harness policy** | Explicit `Protocol` deps on `Harness` (future) | Per-call | Authorization, context build, etc. |
 
 RunState snapshots are serialized via Pydantic models in `checkpoint/snapshot.py` (ADR-0014).
@@ -82,13 +82,12 @@ Everything else is a **seam** — a `Protocol` with a default adapter, or a smal
 named class — so alternatives can be swapped without touching the Harness:
 
 - `models/` — `Model` protocol, `OpenAIModel` adapter.
-- `tools/` — `Tool` protocol + `ToolRegistry` + built-in Tools.
+- `harness/tools/` — `Tool` protocol + `ToolRegistry` + built-in Tools.
 - `checkpoint/` — `CheckpointStore` protocol, `SqliteCheckpointStore`, `RunSnapshot` serialization (ADR-0014).
 - `harness/state.py` — transcript mutators and `repair_transcript` (interrupted-tool repair).
 - `handlers/` — lifecycle signals + `EventDispatcher` (ADR-0012); only `RunEmitter` publishes.
-- `ui/protocols.py` — `RunAdvancer`, `RunCanceller` for the interactive loop.
-- `skills/` — `SkillCatalog`, declarative `SKILL.md` bundles (never executable).
-- `sandbox/` — `LocalSandbox` policy (denies `.git`, `.env`, keys; path-escape
+- `harness/skills/` — `SkillCatalog`, declarative `SKILL.md` bundles (never executable).
+- `infra/sandbox/` — `LocalSandbox` policy (denies `.git`, `.env`, keys; path-escape
   guard). A policy boundary, **not** host isolation.
 
 `domain.py` holds the shared frozen dataclasses / enums (`RunStatus`, `Message`,
@@ -123,7 +122,7 @@ both):
   `typing.Protocol`s or small named classes — **no bare `lambda`** for callbacks
   or sort keys in production code.
 - Tool inputs are validated through pydantic `BaseModel`s.
-- Checkpoint events are append-only; never mutate prior events.
+- Checkpoint snapshots are replaced at durable boundaries; never reintroduce an append-only Checkpoint event log without a new ADR.
 - Tests may use named stub classes in `tests/stubs.py` instead of lambdas.
 - Keep ADR decisions in mind before changing a seam; add a new ADR for
   significant architectural shifts.

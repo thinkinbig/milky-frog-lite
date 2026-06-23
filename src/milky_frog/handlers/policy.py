@@ -1,7 +1,7 @@
 """Handler that enforces session-level tool policy via ``HandlerContext``.
 
 Reads ``SessionToolPolicy`` from ``ctx.policy`` on every ``RunBeforeTool``
-event so policy changes (``allow_all()``, per-tool overrides) take effect
+event so policy changes (``auto_approve()``, per-tool overrides) take effect
 without any additional wiring.
 """
 
@@ -17,7 +17,7 @@ class PolicyHandler(BaseHandler):
     """Enforces session-level tool policy on ``RunBeforeTool`` events.
 
     The policy is always read from ``ctx.policy`` — a mutable
-    ``SessionToolPolicy`` set by ``Session`` on the dispatcher context.
+    ``SessionToolPolicy`` set by ``AgentSession`` on the dispatcher context.
     """
 
     def register(self, registry: EventDispatcher) -> None:
