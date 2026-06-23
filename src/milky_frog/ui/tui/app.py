@@ -45,6 +45,7 @@ from milky_frog.ui.tui.rendering import (
     matching_commands,
     summarize_tool_result,
 )
+from milky_frog.ui.tui.textual_patch import patch_textual_utf8_decode
 from milky_frog.ui.usage import format_run_usage
 
 
@@ -467,6 +468,7 @@ class MilkyFrogApp(App[None]):
 
     def run(self, *args: Any, **kwargs: Any) -> Any:
         """Run the TUI inside a ``with MilkyFrog`` session so resources are released."""
+        patch_textual_utf8_decode()
         with MilkyFrog.from_settings(self._settings, bundles=[self._presentation]) as frog:
             self._session = RunAdvancer(frog)
             try:
