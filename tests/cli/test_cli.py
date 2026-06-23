@@ -95,7 +95,7 @@ def test_resume_without_task_advances_pending_work(
         calls.append((run_id, prompt))
         return RunResult(run_id, RunStatus.COMPLETED, "resumed", 1)
 
-    monkeypatch.setattr(cli_module, "_resume_cmd", fake_resume)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "_resume_run", fake_resume)  # type: ignore[attr-defined]
     result = runner.invoke(
         app,
         ["resume", "run-abc"],
@@ -126,7 +126,7 @@ def test_resume_with_task_continues_run(monkeypatch: pytest.MonkeyPatch, tmp_pat
         calls.append((run_id, prompt))
         return RunResult(run_id, RunStatus.COMPLETED, "continued", 2)
 
-    monkeypatch.setattr(cli_module, "_resume_cmd", fake_resume)  # type: ignore[attr-defined]
+    monkeypatch.setattr(cli_module, "_resume_run", fake_resume)  # type: ignore[attr-defined]
     result = runner.invoke(
         app,
         ["resume", "run-abc", "follow up"],

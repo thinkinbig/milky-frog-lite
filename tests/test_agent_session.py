@@ -9,6 +9,8 @@ import pytest
 from milky_frog.agent_session import AgentSession, MissingModelConfiguration
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import (
+    ApprovalDecision,
+    ApprovalVerdict,
     ModelChunk,
     ModelRequest,
     ModelResponse,
@@ -16,11 +18,12 @@ from milky_frog.domain import (
     RunStatus,
     StreamDone,
     TextDelta,
+    ToolCall,
 )
 from milky_frog.handlers import BaseHandler, EventDispatcher, RunCancelled
 from milky_frog.models import OpenAIModel
 from milky_frog.settings import LangfuseSettings, Settings
-from tests.checkpoint_helpers import run_status, seed_run
+from tests.checkpoint_helpers import run_status, seed_interrupted_tool_run, seed_run
 
 _NO_LANGFUSE = LangfuseSettings(
     enabled=False, public_key=None, secret_key=None, host="https://cloud.langfuse.com"
@@ -195,3 +198,49 @@ async def test_session_resume_rejects_unknown_run(tmp_path: Path) -> None:
     async with AgentSession.from_settings(settings) as session:
         with pytest.raises(ResumeError, match="unknown Run"):
             await session.continue_with("does-not-exist")
+
+
+@pytest.mark.asyncio
+async def test_session_respond_approval_executes_pending_tool(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    async def fake_stream(self: OpenAIModel, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        del self, request
+        yield StreamDone(ModelResponse(content="done"))
+
+    monkeypatch.setattr(OpenAIModel, "stream", fake_stream)
+    settings = Settings(tmp_path, "test-key", "https://example.test", "test-model", _NO_LANGFUSE)
+    (tmp_path / "note.txt").write_text("hi", encoding="utf-8")
+    store = SqliteCheckpointStore(settings.database_path)
+    run_id = "approval-run"
+    seed_interrupted_tool_run(
+        store,
+        run_id,
+        tmp_path,
+        tool_call=ToolCall("call-1", "read_file", {"path": "note.txt"}),
+        status=RunStatus.WAITING_FOR_APPROVAL,
+        final_message="approval needed",
+    )
+
+    async with AgentSession.from_settings(settings) as session:
+        result = await session.respond_approval(
+            run_id, ApprovalVerdict(ApprovalDecision.APPROVE)
+        )
+
+    assert result.run_id == run_id
+    assert result.status is RunStatus.COMPLETED
+    assert result.final_message == "done"
+
+
+@pytest.mark.asyncio
+async def test_session_respond_approval_rejects_non_waiting_run(tmp_path: Path) -> None:
+    settings = Settings(tmp_path, "test-key", "https://example.test", "test-model", _NO_LANGFUSE)
+    store = SqliteCheckpointStore(settings.database_path)
+    run_id = "completed-run"
+    seed_run(store, run_id, tmp_path, status=RunStatus.COMPLETED, final_message="done")
+
+    async with AgentSession.from_settings(settings) as session:
+        with pytest.raises(ResumeError, match="not waiting for tool approval"):
+            await session.respond_approval(
+                run_id, ApprovalVerdict(ApprovalDecision.APPROVE)
+            )

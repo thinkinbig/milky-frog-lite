@@ -6,6 +6,7 @@ from pathlib import Path
 from types import TracebackType
 
 from milky_frog.checkpoint import SqliteCheckpointStore
+from milky_frog.checkpoint.base import StoredRun
 from milky_frog.domain import (
     DEFAULT_MAX_MODEL_CALLS,
     ApprovalVerdict,
@@ -56,9 +57,10 @@ class AgentSession:
         async with Session.from_settings(settings, bundles=[...]) as session:
             result = await session.start_new("build feature X")
 
-    Orchestration methods (``start_new``, ``continue_with``) handle the
-    decision about whether to call ``Harness.run`` vs ``Harness.resume``,
-    manage the busy flag, and mint cancellation tokens.
+    Orchestration methods (``start_new``, ``continue_with``, ``respond_approval``)
+    handle the decision about whether to call ``Harness.run``, ``Harness.resume``,
+    or ``Harness.respond_approval``, manage the busy flag, and mint cancellation
+    tokens.
     """
 
     def __init__(
@@ -201,8 +203,8 @@ class AgentSession:
     async def continue_with(
         self,
         run_id: str,
+        *,
         prompt: str | None = None,
-        approval: ApprovalVerdict | None = None,
     ) -> RunResult:
         """Advance an existing Run.
 
@@ -210,11 +212,55 @@ class AgentSession:
         store first.
 
         Without ``prompt``, picks up pending work (PAUSED_LIMIT / CANCELLED).
-        With ``prompt``, appends a new user turn.  With ``approval``, releases
-        a Run paused on ``WAITING_FOR_APPROVAL``.
+        With ``prompt``, appends a new user turn.
 
         Raises ``ResumeError`` if the Run is unknown or cannot be resolved.
         """
+        stored = self._resolve_stored_run(run_id)
+        project_cfg = load_project_config(stored.workspace)
+        self.busy = True
+        self._cancellation = RunCancellation()
+        self.run_id = stored.run_id
+        try:
+            result = await self._harness.resume(
+                stored.run_id,
+                max_model_calls=project_cfg.max_model_calls,
+                cancellation=self._cancellation,
+                prompt=prompt,
+            )
+            self.run_id = result.run_id
+            return result
+        finally:
+            self.busy = False
+            self._cancellation = None
+
+    async def respond_approval(self, run_id: str, verdict: ApprovalVerdict) -> RunResult:
+        """Release a Run paused on ``WAITING_FOR_APPROVAL`` with the user's verdict.
+
+        Raises ``ResumeError`` if the Run is unknown, ambiguous, or not awaiting
+        approval.
+        """
+        stored = self._resolve_stored_run(run_id)
+        if stored.status is not RunStatus.WAITING_FOR_APPROVAL:
+            raise ResumeError(f"Run {stored.run_id} is not waiting for tool approval")
+        project_cfg = load_project_config(stored.workspace)
+        self.busy = True
+        self._cancellation = RunCancellation()
+        self.run_id = stored.run_id
+        try:
+            result = await self._harness.respond_approval(
+                stored.run_id,
+                max_model_calls=project_cfg.max_model_calls,
+                cancellation=self._cancellation,
+                approval=verdict,
+            )
+            self.run_id = result.run_id
+            return result
+        finally:
+            self.busy = False
+            self._cancellation = None
+
+    def _resolve_stored_run(self, run_id: str) -> StoredRun:
         try:
             resolved = self._checkpoints.resolve_run_id(run_id)
         except LookupError as error:
@@ -224,23 +270,7 @@ class AgentSession:
         stored = self._checkpoints.get_run(resolved)
         if stored is None:
             raise ResumeError(f"unknown Run: {resolved}")
-        project_cfg = load_project_config(stored.workspace)
-        self.busy = True
-        self._cancellation = RunCancellation()
-        self.run_id = resolved
-        try:
-            result = await self._harness.resume(
-                resolved,
-                max_model_calls=project_cfg.max_model_calls,
-                cancellation=self._cancellation,
-                prompt=prompt,
-                approval=approval,
-            )
-            self.run_id = result.run_id
-            return result
-        finally:
-            self.busy = False
-            self._cancellation = None
+        return stored
 
     # ── Helpers ───────────────────────────────────────────────────────
 

@@ -49,13 +49,13 @@ async def _run_cmd(settings: Settings, task: str) -> RunResult:
         return await session.start_new(task, Path.cwd())
 
 
-async def _resume_cmd(
+async def _resume_run(
     settings: Settings,
     run_id: str,
     *,
     prompt: str | None = None,
 ) -> RunResult:
-    """Async: create a session and continue an existing Run."""
+    """Async: advance an existing Run, optionally with a new user turn."""
     async with AgentSession.from_settings(settings) as session:
         return await session.continue_with(run_id, prompt=prompt)
 
@@ -235,7 +235,10 @@ def resume(
             )
             raise typer.Exit(code=1)
     try:
-        result = asyncio.run(_resume_cmd(settings, run_id, prompt=task))
+        if task is None:
+            result = asyncio.run(_resume_run(settings, run_id))
+        else:
+            result = asyncio.run(_resume_run(settings, run_id, prompt=task))
     except ResumeError as error:
         render_error(str(error), hint="List available Runs with: milky-frog runs")
         raise typer.Exit(code=1) from error

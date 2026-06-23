@@ -32,7 +32,7 @@ class ToolDecision(StrEnum):
 class ApprovalDecision(StrEnum):
     """User's verdict on a Run paused for tool approval.
 
-    Threaded into ``Harness.resume`` to release pending tool calls:
+    Threaded into ``Harness.respond_approval`` to release pending tool calls:
     ``APPROVE`` executes them, ``DENY`` seals them with a refusal result.
     """
 

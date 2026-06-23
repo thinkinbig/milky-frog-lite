@@ -93,30 +93,71 @@ class AgentHarness:
         max_model_calls: int,
         cancellation: RunCancellation | None = None,
         prompt: str | None = None,
-        approval: ApprovalVerdict | None = None,
     ) -> RunResult:
-        """Advance an existing Run: load snapshot, repair, resolve approvals,
-        then advance."""
+        """Advance an existing Run: load snapshot, repair, then advance."""
         try:
             with self._checkpoints.claim(run_id):
                 stored = self._checkpoints.get_run(run_id)
                 if stored is None:
                     raise ResumeError(f"unknown Run: {run_id}")
+                if stored.status is RunStatus.WAITING_FOR_APPROVAL:
+                    raise ResumeError(
+                        f"Run {run_id} is waiting for tool approval; "
+                        "use respond_approval instead"
+                    )
 
                 sandbox = self._sandbox_factory(stored.workspace)
 
                 await self._emitter.before_resume(run_id, prompt, stored.status)
 
                 state = self._checkpoints.load_state(run_id)
-                if stored.status is not RunStatus.WAITING_FOR_APPROVAL:
-                    state, _ = seal(state)
+                state, _ = seal(state)
                 if prompt is not None:
                     state = append_user_message(state, prompt)
                 self._checkpoints.prepare_resume(run_id, stored.updated_at, state)
 
                 plan = PreparedRun(state=state, sandbox=sandbox)
                 resolved = await self._apply_approvals(
-                    plan, run_id, sandbox, cancellation, approval
+                    plan, run_id, sandbox, cancellation, approval=None
+                )
+                if isinstance(resolved, RunResult):
+                    return resolved
+                return await self._agent_loop.advance(
+                    resolved.state,
+                    resolved.sandbox,
+                    cancellation=cancellation,
+                    max_calls=max_model_calls,
+                )
+        except RunClaimError as error:
+            raise ResumeError(str(error)) from error
+
+    async def respond_approval(
+        self,
+        run_id: str,
+        *,
+        max_model_calls: int,
+        approval: ApprovalVerdict,
+        cancellation: RunCancellation | None = None,
+    ) -> RunResult:
+        """Release a Run paused on ``WAITING_FOR_APPROVAL`` with the user's verdict."""
+        try:
+            with self._checkpoints.claim(run_id):
+                stored = self._checkpoints.get_run(run_id)
+                if stored is None:
+                    raise ResumeError(f"unknown Run: {run_id}")
+                if stored.status is not RunStatus.WAITING_FOR_APPROVAL:
+                    raise ResumeError(f"Run {run_id} is not waiting for tool approval")
+
+                sandbox = self._sandbox_factory(stored.workspace)
+
+                await self._emitter.before_resume(run_id, None, stored.status)
+
+                state = self._checkpoints.load_state(run_id)
+                self._checkpoints.prepare_resume(run_id, stored.updated_at, state)
+
+                plan = PreparedRun(state=state, sandbox=sandbox)
+                resolved = await self._apply_approvals(
+                    plan, run_id, sandbox, cancellation, approval=approval
                 )
                 if isinstance(resolved, RunResult):
                     return resolved

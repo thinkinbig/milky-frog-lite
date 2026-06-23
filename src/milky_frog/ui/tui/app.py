@@ -944,7 +944,7 @@ class MilkyFrogApp(App[None]):
     async def _do_approve(self, run_id: str, verdict: ApprovalVerdict) -> None:
         """Thin worker: delegate to Session; UI via TuiPresentationHandler."""
         try:
-            await self.session.continue_with(run_id, approval=verdict)
+            await self.session.respond_approval(run_id, verdict)
         except ResumeError as error:
             self.post_message(RunError(str(error)))
         except asyncio.CancelledError:
