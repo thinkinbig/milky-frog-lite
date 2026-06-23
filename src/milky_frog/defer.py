@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Protocol, Self
 
@@ -14,6 +15,7 @@ class _HasClose(Protocol):
 
 class _HasAclose(Protocol):
     def aclose(self) -> Awaitable[object]: ...
+
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +30,12 @@ class DeferStack:
     """Register cleanups to run LIFO on exit, like Go ``defer``.
 
     Each callback runs in isolation: one failure is logged and the rest still
-    run. Callbacks may return ``None`` or an awaitable; use ``run_sync(loop)``
-    or ``await run_async()`` when any callback is async.
+    run. Callbacks may return ``None`` or an awaitable; use ``sync_on(loop)``,
+    ``run_sync(loop)``, or ``await run_async()`` when any callback is async.
 
     Prefer the named ``defer_*`` helpers over raw callbacks at call sites.
+    Use ``with stack`` only for sync-only cleanups; ``with stack.sync_on(loop)``
+    when ``defer_aclose`` or other async callbacks are registered.
     """
 
     def __init__(self, *, logger: logging.Logger | None = None) -> None:
@@ -134,6 +138,14 @@ class DeferStack:
                     self._logger.exception("Defer failed: %s", deferred.label)
                 else:
                     raise
+
+    @contextmanager
+    def sync_on(self, loop: asyncio.AbstractEventLoop) -> Iterator[Self]:
+        """Defer cleanups until exit, then run them via ``run_sync(loop)``."""
+        try:
+            yield self
+        finally:
+            self.run_sync(loop)
 
     def __enter__(self) -> DeferStack:
         return self

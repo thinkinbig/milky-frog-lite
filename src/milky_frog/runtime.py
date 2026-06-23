@@ -93,26 +93,27 @@ class MilkyFrog:
     def __enter__(self) -> MilkyFrog:
         return self
 
+    def close(self) -> None:
+        """Release handlers, model, and the reused event loop."""
+        if self._loop is None:
+            self._loop = asyncio.new_event_loop()
+        loop = self._loop
+        with DeferStack(logger=logger).sync_on(loop) as defer:
+            defer.defer_set(self, "_handlers", [])
+            defer.defer_set(self, "_loop", None)
+            defer.defer_close(loop, label="event_loop")
+            defer.defer_shutdown_asyncgens(loop)
+            defer.defer_aclose(self._model, label="OpenAIModel")
+            for handler in self._handlers:
+                defer.defer_aclose(handler)
+
     def __exit__(
         self,
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        if self._loop is None:
-            self._loop = asyncio.new_event_loop()
-        loop = self._loop
-        defer = (
-            DeferStack(logger=logger)
-            .defer_set(self, "_handlers", [])
-            .defer_set(self, "_loop", None)
-            .defer_close(loop, label="event_loop")
-            .defer_shutdown_asyncgens(loop)
-            .defer_aclose(self._model, label="OpenAIModel")
-        )
-        for handler in self._handlers:
-            defer.defer_aclose(handler)
-        defer.run_sync(loop)
+        self.close()
 
     @property
     def model_name(self) -> str:
@@ -200,19 +201,13 @@ class MilkyFrog:
             elif previous_sigint is signal.SIG_DFL:
                 signal.default_int_handler(signum, frame)
 
-        defer = (
-            DeferStack()
-            .defer_yield_loop(loop)
-            .defer_set(self, "_cancellation", None)
-            .defer_signal(
+        with DeferStack().sync_on(loop) as defer:
+            defer.defer_yield_loop(loop)
+            defer.defer_set(self, "_cancellation", None)
+            defer.defer_signal(
                 signal.SIGINT,
                 cast(signal.Handlers, previous_sigint),
                 label="restore_sigint",
             )
-        )
-
-        signal.signal(signal.SIGINT, _request_cancel)
-        try:
+            signal.signal(signal.SIGINT, _request_cancel)
             return loop.run_until_complete(coro)
-        finally:
-            defer.run_sync(loop)

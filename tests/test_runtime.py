@@ -72,6 +72,7 @@ def test_milky_frog_cancel_stops_foreground_run(
         cancelled.append(event)
 
     with MilkyFrog.from_settings(settings, handlers=registry) as frog:
+
         def request_cancel() -> None:
             time.sleep(0.01)
             frog.cancel()
@@ -139,11 +140,11 @@ def test_milky_frog_close_allows_reuse(tmp_path: Path) -> None:
     settings = Settings(tmp_path, "test-key", None, "test-model", _NO_LANGFUSE)
     frog = MilkyFrog.from_settings(settings)
 
-    # __exit__ must not leave a closed loop behind; the instance stays usable.
-    frog.__exit__(None, None, None)
+    # close() must not leave a closed loop behind; the instance stays usable.
+    frog.close()
 
     assert frog._loop is None
-    frog.__exit__(None, None, None)  # idempotent
+    frog.close()  # idempotent
     assert frog._loop is None
 
 

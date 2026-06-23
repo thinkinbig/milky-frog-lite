@@ -102,6 +102,23 @@ def test_defer_aclose_awaits_resource() -> None:
     assert closed == ["done"]
 
 
+def test_defer_sync_on_runs_on_exit_and_awaits_async() -> None:
+    order: list[str] = []
+
+    async def async_cleanup() -> None:
+        order.append("async")
+
+    loop = asyncio.new_event_loop()
+    try:
+        with DeferStack().sync_on(loop) as stack:
+            stack.defer(async_cleanup)
+            stack.defer(order.append, "sync")
+    finally:
+        loop.close()
+
+    assert order == ["sync", "async"]
+
+
 def test_defer_run_rejects_awaitable_without_loop() -> None:
     async def async_cleanup() -> None:
         return None
