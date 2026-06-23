@@ -30,9 +30,7 @@ class BashRenderHandler(BaseHandler):
     def register(self, registry: EventDispatcher) -> None:
         registry.on(RunAfterTool)(self._on_after_tool)
 
-    async def _on_after_tool(
-        self, event: RunAfterTool, ctx: HandlerContext | None = None
-    ) -> None:
+    async def _on_after_tool(self, event: RunAfterTool, ctx: HandlerContext | None = None) -> None:
         if event.call.name != "bash":
             return
         command = str(event.call.arguments.get("command", ""))

@@ -11,7 +11,6 @@ from milky_frog.harness.tools.builtins import (
     WriteFileTool,
     default_tools,
 )
-from milky_frog.harness.tools.registry import DuplicateToolError, ToolRegistry, UnknownToolError
 
 
 def _context(workspace: Path) -> ToolContext:

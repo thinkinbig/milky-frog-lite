@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import pty
 
@@ -23,9 +24,7 @@ class BashInput(BaseModel):
     )
 
 
-async def _read_pty(
-    loop: asyncio.AbstractEventLoop, master_fd: int, max_bytes: int
-) -> bytes:
+async def _read_pty(loop: asyncio.AbstractEventLoop, master_fd: int, max_bytes: int) -> bytes:
     """Read from a PTY master fd until EIO (slave closed).
 
     Accumulates up to ``max_bytes`` bytes, then drains (reads and discards)
@@ -126,10 +125,8 @@ class BashTool:
                 process.kill()
                 await process.wait()
                 read_task.cancel()
-                try:
+                with contextlib.suppress(asyncio.CancelledError):
                     await read_task
-                except asyncio.CancelledError:
-                    pass
                 read_task = None
                 return ToolResult(
                     f"command timed out after {_BASH_TIMEOUT_SECONDS}s", is_error=True
@@ -140,20 +137,16 @@ class BashTool:
                 raw = await asyncio.wait_for(read_task, timeout=_PTY_DRAIN_SECONDS)
             except TimeoutError:
                 read_task.cancel()
-                try:
+                with contextlib.suppress(asyncio.CancelledError):
                     await read_task
-                except asyncio.CancelledError:
-                    pass
                 raw = b""
             read_task = None
 
         finally:
             if read_task is not None:
                 read_task.cancel()
-                try:
+                with contextlib.suppress(asyncio.CancelledError, Exception):
                     await read_task
-                except (asyncio.CancelledError, Exception):
-                    pass
             os.close(master_fd)
             if slave_fd >= 0:
                 os.close(slave_fd)
