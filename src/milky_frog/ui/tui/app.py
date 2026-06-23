@@ -19,16 +19,18 @@ from textual.timer import Timer
 from textual.widgets import Footer, Header, Input, ListItem, ListView, Static
 from textual.worker import Worker
 
+from milky_frog.agent_session import AgentSession
 from milky_frog.domain import ApprovalDecision, ApprovalVerdict, ResumeError, RunStatus, RunUsage
-from milky_frog.runtime import MilkyFrog
 from milky_frog.settings import Settings
 from milky_frog.ui.logo import pixel_frog_logo
-from milky_frog.ui.tui.advancer import PreRunError, RunAdvancer
 from milky_frog.ui.tui.assembly import tui_presentation_bundle
 from milky_frog.ui.tui.messages import (
     AddText,
     AddThinking,
     ApprovalRequired,
+    BashOutputMsg,
+    GitOutputMsg,
+    GrepOutputMsg,
     RunError,
     RunFinished,
     RunNoticeMsg,
@@ -39,11 +41,13 @@ from milky_frog.ui.tui.messages import (
 from milky_frog.ui.tui.rendering import (
     COMMANDS,
     DiffKind,
+    bash_output_renderable,
     complete_command,
     file_change_diff,
     format_tool_call,
     matching_commands,
     summarize_tool_result,
+    tool_result_renderable,
 )
 from milky_frog.ui.tui.textual_patch import patch_textual_utf8_decode
 from milky_frog.ui.usage import format_run_usage
@@ -245,16 +249,16 @@ class PromptInput(Input):
 # ── Main App ───────────────────────────────────────────────────────────
 
 
-class ApprovalDialog(ModalScreen[ApprovalVerdict]):
-    """Modal dialog for tool call approval with a selectable list.
+class ApprovalDialog(ModalScreen[ApprovalVerdict | str]):
+    """Modal dialog for tool call approval with session-policy quick actions.
 
     Multi-phase interaction:
-      1. SELECT — choose from Yes / No / No, provide reason
+      1. SELECT — choose from Yes / No / No, provide reason / Always allow
       2. INPUT_REASON — when "No, provide reason" is selected, show a text
          input for the denial reason, then dismiss with the full verdict.
 
-    Matches the interactive permission dialog pattern from pi's permission
-    system.
+    Returns ``ApprovalVerdict`` for Yes/No, or ``"allow_tool"`` / ``"allow_all"``
+    to apply a session-level policy override before approving.
     """
 
     CSS = """
@@ -311,9 +315,10 @@ class ApprovalDialog(ModalScreen[ApprovalVerdict]):
     }
     """
 
-    def __init__(self, reason: str) -> None:
+    def __init__(self, reason: str, tool_name: str = "") -> None:
         super().__init__()
         self.message = reason
+        self.tool_name = tool_name
 
     def compose(self) -> ComposeResult:
         with Vertical(id="approval-dialog"), Vertical(id="approval-dialog-box"):
@@ -322,11 +327,13 @@ class ApprovalDialog(ModalScreen[ApprovalVerdict]):
                 ListItem(Static("  1. Yes"), name="approve"),
                 ListItem(Static("  2. No"), name="deny"),
                 ListItem(Static("  3. No, provide reason"), name="deny_with_reason"),
+                ListItem(Static("  4. Always allow this tool"), name="allow_tool"),
+                ListItem(Static("  5. Don\u2019t ask again this session"), name="allow_all"),
                 initial_index=0,
                 id="option-list",
             )
             yield Static(
-                "Enter to select \u00b7 1-3 to choose \u00b7 Esc to deny",
+                "Enter to select \u00b7 1-5 to choose \u00b7 Esc to deny",
                 id="approval-help",
             )
             yield Input(
@@ -339,10 +346,15 @@ class ApprovalDialog(ModalScreen[ApprovalVerdict]):
             )
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
-        if event.item.name == "approve":
+        name = event.item.name
+        if name == "approve":
             self.dismiss(ApprovalVerdict(ApprovalDecision.APPROVE))
-        elif event.item.name == "deny_with_reason":
+        elif name == "deny_with_reason":
             self._show_reason_input()
+        elif name == "allow_tool":
+            self.dismiss("allow_tool")
+        elif name == "allow_all":
+            self.dismiss("allow_all")
         else:
             self.dismiss(ApprovalVerdict(ApprovalDecision.DENY))
 
@@ -356,6 +368,12 @@ class ApprovalDialog(ModalScreen[ApprovalVerdict]):
         elif event.key == "3":
             event.stop()
             self._show_reason_input()
+        elif event.key == "4":
+            event.stop()
+            self.dismiss("allow_tool")
+        elif event.key == "5":
+            event.stop()
+            self.dismiss("allow_all")
         elif event.key == "escape":
             event.stop()
             self.dismiss(ApprovalVerdict(ApprovalDecision.DENY))
@@ -434,10 +452,14 @@ class MilkyFrogApp(App[None]):
 
     def __init__(self, settings: Settings) -> None:
         super().__init__()
-        self._settings = settings
-        self._presentation = tui_presentation_bundle(self.post_message)
-        self._session: RunAdvancer | None = None
+        # Create the async Session now (without entering it — entering happens
+        # in ``run()`` so Textual's sync outer loop can bracket the lifecycle).
+        self._session = AgentSession(
+            settings,
+            bundles=tui_presentation_bundle(self.post_message),
+        )
         self._worker: Worker[None] | None = None
+        self._approval_event: ApprovalRequired | None = None
 
         # Streaming render state: buffers plus the live widget updated in place.
         self._thinking_buf: list[str] = []
@@ -458,23 +480,24 @@ class MilkyFrogApp(App[None]):
         self._thinking_frame_idx: int = 0
 
     @property
-    def session(self) -> RunAdvancer:
-        """The active Run advancer; only valid while the app is running."""
-        advancer = self._session
-        if advancer is None:
-            msg = "Milky Frog session is not active"
-            raise RuntimeError(msg)
-        return advancer
+    def session(self) -> AgentSession:
+        """The active ``Session``; always valid while the app is running."""
+        return self._session
 
     def run(self, *args: Any, **kwargs: Any) -> Any:
-        """Run the TUI inside a ``with MilkyFrog`` session so resources are released."""
+        """Run the TUI with a managed ``Session`` lifecycle.
+
+        ``Session.__aenter__`` opens async resources (model connection, handler
+        sessions); ``__aexit__`` releases them.  A single ``asyncio.run()`` brackets
+        the session and Textual's ``run_async()`` so we never nest event loops.
+        """
         patch_textual_utf8_decode()
-        with MilkyFrog.from_settings(self._settings, bundles=[self._presentation]) as frog:
-            self._session = RunAdvancer(frog)
-            try:
-                return super().run(*args, **kwargs)
-            finally:
-                self._session = None
+
+        async def _run_with_session() -> Any:
+            async with self._session:
+                return await self.run_async(*args, **kwargs)
+
+        return asyncio.run(_run_with_session())
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -485,7 +508,7 @@ class MilkyFrogApp(App[None]):
             Static(id="command-hints"),
             PromptInput(id="prompt-input", placeholder="Type a task and press Enter..."),
             RunStatusBar(
-                model=self.session.frog.model_name or "unknown",
+                model=self.session.model_name or "unknown",
                 workspace=Path.cwd(),
             ),
         )
@@ -665,22 +688,53 @@ class MilkyFrogApp(App[None]):
         if diff:
             self._append(_diff_renderable(diff), spaced=False)
 
-    def on_tool_result_msg(self, event: ToolResultMsg) -> None:
-        """Write the tool result as an indented summary line under its call."""
+    def _finalize_tool_call(self, *, is_error: bool) -> None:
+        """Stop the tool spinner and update the call-site widget with the final mark."""
         if self._tool_spinner_timer is not None:
             self._tool_spinner_timer.stop()
             self._tool_spinner_timer = None
-
         if self._active_tool_widget is not None:
-            mark, style = ("✗", "bold red") if event.is_error else ("⏺", "bold cyan")
+            mark, style = ("✗", "bold red") if is_error else ("⏺", "bold cyan")
             self._active_tool_widget.update(
                 Text.assemble((f"  {mark} ", style), (self._active_tool_signature, "cyan"))
             )
             self._active_tool_widget = None
 
-        summary = summarize_tool_result(event.content, is_error=event.is_error)
-        mark, style = ("✗", "red") if event.is_error else ("⎿", "bright_black")
-        self._append(Text.assemble((f"    {mark} ", style), (summary, "dim")))
+    def _render_command_output(self, content: str, *, is_error: bool) -> None:
+        """Render bash-family output: full inline block when non-empty, summary otherwise."""
+        renderable = bash_output_renderable(content, is_error=is_error)
+        if renderable is not None:
+            self._append(renderable, spaced=False)
+        else:
+            summary = summarize_tool_result(content, is_error=is_error)
+            mark, style = ("✗", "red") if is_error else ("⎿", "bright_black")
+            self._append(Text.assemble((f"    {mark} ", style), (summary, "dim")), spaced=False)
+
+    def on_tool_result_msg(self, event: ToolResultMsg) -> None:
+        """Non-bash tool result: stop spinner and show a compact summary line."""
+        self._finalize_tool_call(is_error=event.is_error)
+        renderable = tool_result_renderable(event.name, event.content, is_error=event.is_error)
+        if renderable is not None:
+            self._append(renderable, spaced=False)
+        else:
+            summary = summarize_tool_result(event.content, is_error=event.is_error)
+            mark, style = ("✗", "red") if event.is_error else ("⎿", "bright_black")
+            self._append(Text.assemble((f"    {mark} ", style), (summary, "dim")), spaced=False)
+
+    def on_git_output_msg(self, event: GitOutputMsg) -> None:
+        """git command result: stop spinner and render with ANSI colors."""
+        self._finalize_tool_call(is_error=event.is_error)
+        self._render_command_output(event.content, is_error=event.is_error)
+
+    def on_grep_output_msg(self, event: GrepOutputMsg) -> None:
+        """grep/rg result: stop spinner and render matches inline."""
+        self._finalize_tool_call(is_error=event.is_error)
+        self._render_command_output(event.content, is_error=event.is_error)
+
+    def on_bash_output_msg(self, event: BashOutputMsg) -> None:
+        """Generic bash result: stop spinner and render output inline."""
+        self._finalize_tool_call(is_error=event.is_error)
+        self._render_command_output(event.content, is_error=event.is_error)
 
     def on_update_usage(self, event: UpdateUsage) -> None:
         self.query_one(RunStatusBar).set_usage(event.usage)
@@ -730,14 +784,33 @@ class MilkyFrogApp(App[None]):
         self._close_phase()
         self.session.pending_approval = event.run_id
         self.query_one("#prompt-input", PromptInput).disabled = True
+        self._approval_event = event
+        self.push_screen(
+            ApprovalDialog(event.reason, event.tool_name),
+            self._handle_approval_verdict,
+        )
 
-        def handle_verdict(verdict: ApprovalVerdict | None) -> None:
-            if verdict is None:
-                return  # Dialog dismissed without decision — no-op
-            self.session.pending_approval = None
+    def _handle_approval_verdict(
+        self,
+        verdict: ApprovalVerdict | str | None,
+    ) -> None:
+        """Process the approval dialog result and optionally apply session policy."""
+        event = self._approval_event
+        if event is None or verdict is None:
+            self._approval_event = None
+            return
+        self.session.pending_approval = None
+        if isinstance(verdict, str):
+            if verdict == "allow_tool":
+                if event.tool_name:
+                    self._session.policy.allow(event.tool_name)
+                self._start_approval(event.run_id, ApprovalVerdict(ApprovalDecision.APPROVE))
+            elif verdict == "allow_all":
+                self._session.policy.auto_approve()
+                self._start_approval(event.run_id, ApprovalVerdict(ApprovalDecision.APPROVE))
+        else:
             self._start_approval(event.run_id, verdict)
-
-        self.push_screen(ApprovalDialog(event.reason), handle_verdict)
+        self._approval_event = None
 
     # ── Input handling ────────────────────────────────────────────────
 
@@ -817,12 +890,12 @@ class MilkyFrogApp(App[None]):
 
         if head:
             try:
-                run_id = self.session.frog.checkpoints.resolve_run_id(head)
+                run_id = self.session.checkpoints.resolve_run_id(head)
             except (LookupError, ValueError) as error:
                 self._render_error(f"unknown Run: {error}")
                 return
         else:
-            runs = self.session.frog.checkpoints.list_runs(limit=1)
+            runs = self.session.checkpoints.list_runs(limit=1)
             if not runs:
                 self._render_error(
                     "No runs found to resume.",
@@ -849,7 +922,9 @@ class MilkyFrogApp(App[None]):
 
     def _start_run(self, task: str, *, run_id: str | None = None) -> None:
         """Kick off a Run as a Textual worker."""
-        self.session.begin()
+        # Set the busy guard synchronously so on_input_submitted rejects
+        # double-submits before the worker's first yield point.
+        self.session.busy = True
         self._phase = None
         self._thinking_buf.clear()
         self._answer_buf.clear()
@@ -864,13 +939,16 @@ class MilkyFrogApp(App[None]):
 
     @work(thread=False, exit_on_error=False)
     async def _do_run(self, task: str, run_id: str | None) -> None:
-        """Thin worker: delegate to RunAdvancer; UI via TuiPresentationHandler."""
+        """Thin worker: delegate to Session; UI via TuiPresentationHandler."""
         try:
-            await self.session.do_run(task, run_id)
-        except (PreRunError, ResumeError) as error:
+            if run_id is None:
+                await self.session.start_new(task)
+            else:
+                await self.session.continue_with(run_id, prompt=task)
+        except ResumeError as error:
             self.post_message(RunError(str(error)))
         except asyncio.CancelledError:
-            result = RunAdvancer.cancelled_result(self.session.run_id)
+            result = AgentSession.cancelled_result(self.session.run_id)
             self.post_message(
                 RunFinished(
                     result=result,
@@ -882,7 +960,7 @@ class MilkyFrogApp(App[None]):
 
     def _start_approval(self, run_id: str, verdict: ApprovalVerdict) -> None:
         """Resume a paused Run with the user's approval verdict."""
-        self.session.begin()
+        self.session.busy = True
         self._phase = None
         self._thinking_buf.clear()
         self._answer_buf.clear()
@@ -900,13 +978,13 @@ class MilkyFrogApp(App[None]):
 
     @work(thread=False, exit_on_error=False)
     async def _do_approve(self, run_id: str, verdict: ApprovalVerdict) -> None:
-        """Thin worker: delegate to RunAdvancer; UI via TuiPresentationHandler."""
+        """Thin worker: delegate to Session; UI via TuiPresentationHandler."""
         try:
-            await self.session.do_approve(run_id, verdict)
-        except (PreRunError, ResumeError) as error:
+            await self.session.respond_approval(run_id, verdict)
+        except ResumeError as error:
             self.post_message(RunError(str(error)))
         except asyncio.CancelledError:
-            result = RunAdvancer.cancelled_result(run_id)
+            result = AgentSession.cancelled_result(run_id)
             self.post_message(
                 RunFinished(
                     result=result,
@@ -932,7 +1010,6 @@ class MilkyFrogApp(App[None]):
         if not self.session.busy:
             return
         self.query_one(RunStatusBar).set_cancelling()
-        if self.session.cancellation is not None:
-            self.session.cancel()
+        self.session.cancel()
         if self._worker is not None:
             self._worker.cancel()

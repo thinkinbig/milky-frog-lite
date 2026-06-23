@@ -38,19 +38,15 @@ class CheckpointHandler(BaseHandler):
         registry.on(RunFailed, priority=_PRIORITY)(self._on_terminal)
 
     async def _on_run_started(self, event: RunStarted, ctx: HandlerContext) -> None:
-        del ctx
         self._store.save_state(event.run_id, event.state, status=RunStatus.RUNNING)
 
     async def _on_after_model(self, event: RunAfterModel, ctx: HandlerContext) -> None:
-        del ctx
         self._store.save_state(event.run_id, event.state)
 
     async def _on_after_tool(self, event: RunAfterTool, ctx: HandlerContext) -> None:
-        del ctx
         self._store.save_state(event.run_id, event.state)
 
     async def _on_terminal(self, event: TerminalRunEvent, ctx: HandlerContext) -> None:
-        del ctx
         self._store.save_state(
             event.run_id,
             event.state,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Annotated
@@ -7,12 +8,12 @@ from typing import Annotated
 import typer
 
 from milky_frog import __version__
+from milky_frog.agent_session import AgentSession, MissingModelConfiguration
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.checkpoint.snapshot import dump_run_state
 from milky_frog.diagnostics import CheckStatus, Diagnostic
 from milky_frog.domain import ResumeError, RunResult, RunStatus
 from milky_frog.project import CONFIG_FILENAME, CONFIG_TEMPLATE, PROJECT_DIRNAME
-from milky_frog.runtime import MilkyFrog, MissingModelConfiguration
 from milky_frog.settings import Settings
 from milky_frog.ui import MilkyFrogApp
 from milky_frog.ui.cli import (
@@ -39,19 +40,27 @@ def _render_result(result: RunResult) -> None:
         raise typer.Exit(code=1)
 
 
-def _resume_run(
-    frog: MilkyFrog,
+# ── Async helpers (called via asyncio.run) ────────────────────────────
+
+
+async def _run_cmd(settings: Settings, task: str) -> RunResult:
+    """Async: create a session and start a new Run."""
+    async with AgentSession.from_settings(settings) as session:
+        return await session.start_new(task, Path.cwd())
+
+
+async def _resume_run(
+    settings: Settings,
     run_id: str,
     *,
     prompt: str | None = None,
 ) -> RunResult:
-    try:
-        result = frog.resume(run_id, prompt)
-    except ResumeError as error:
-        render_error(str(error), hint="List available Runs with: milky-frog runs")
-        raise typer.Exit(code=1) from error
-    _render_result(result)
-    return result
+    """Async: advance an existing Run, optionally with a new user turn."""
+    async with AgentSession.from_settings(settings) as session:
+        return await session.continue_with(run_id, prompt=prompt)
+
+
+# ── Typer app ─────────────────────────────────────────────────────────
 
 
 app = typer.Typer(
@@ -84,7 +93,7 @@ def interactive() -> None:
     """Run the foreground interactive loop in full-screen TUI mode."""
     settings = Settings.from_environment()
     try:
-        MilkyFrog.require_model_configuration(settings)
+        AgentSession.require_model_configuration(settings)
     except MissingModelConfiguration:
         _render_configuration_error()
         raise typer.Exit(code=2) from None
@@ -191,12 +200,11 @@ def run(task: Annotated[str, typer.Argument()]) -> None:
     """Start one foreground Run."""
     settings = Settings.from_environment()
     try:
-        MilkyFrog.require_model_configuration(settings)
+        AgentSession.require_model_configuration(settings)
     except MissingModelConfiguration:
         _render_configuration_error()
         raise typer.Exit(code=2) from None
-    with MilkyFrog.from_settings(settings) as frog:
-        result = frog.run(task, Path.cwd())
+    result = asyncio.run(_run_cmd(settings, task))
     _render_result(result)
 
 
@@ -213,7 +221,7 @@ def resume(
     """
     settings = Settings.from_environment()
     try:
-        MilkyFrog.require_model_configuration(settings)
+        AgentSession.require_model_configuration(settings)
     except MissingModelConfiguration:
         _render_configuration_error()
         raise typer.Exit(code=2) from None
@@ -226,5 +234,12 @@ def resume(
                 hint='Start a new Run with: milky-frog run "your task"',
             )
             raise typer.Exit(code=1)
-    with MilkyFrog.from_settings(settings) as frog:
-        _resume_run(frog, run_id, prompt=task)
+    try:
+        if task is None:
+            result = asyncio.run(_resume_run(settings, run_id))
+        else:
+            result = asyncio.run(_resume_run(settings, run_id, prompt=task))
+    except ResumeError as error:
+        render_error(str(error), hint="List available Runs with: milky-frog runs")
+        raise typer.Exit(code=1) from error
+    _render_result(result)

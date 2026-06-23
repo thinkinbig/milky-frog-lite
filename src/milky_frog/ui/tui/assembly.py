@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+from milky_frog.handlers.dispatcher import BaseHandler
+from milky_frog.ui.tui.bash_render import BashRenderHandler
 from milky_frog.ui.tui.presentation import Emit, TuiPresentationHandler
 
 
-def tui_presentation_bundle(emit: Emit) -> TuiPresentationHandler:
-    """Build the TUI lifecycle bundle for ``MilkyFrog.from_settings(..., bundles=[...])``.
+def tui_presentation_bundle(emit: Emit) -> list[BaseHandler]:
+    """Build the TUI lifecycle handlers for ``AgentSession(..., bundles=[...])``.
 
-    Presentation is not listed in ``handlers.default_handlers`` (no ``ui/`` import
-    there), but it registers on the same dispatcher via the runtime ``extra``
-    seam — alongside checkpointing, policy, and observability.
+    Returns two handlers registered on the shared dispatcher alongside
+    checkpointing, policy, and observability:
+    - ``TuiPresentationHandler`` — maps all lifecycle signals to Textual messages.
+    - ``BashRenderHandler`` — routes bash results to command-specific messages.
     """
-    return TuiPresentationHandler(emit)
+    return [TuiPresentationHandler(emit), BashRenderHandler(emit)]

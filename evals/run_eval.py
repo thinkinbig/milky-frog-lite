@@ -21,11 +21,12 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from milky_frog.runtime import MilkyFrog
+
 from evals.read_collector import ReadCollector, ReadRecord
 from evals.scoring import TaskScore, score_run
 from milky_frog.handlers import EventDispatcher
 from milky_frog.harness.tools import PermissivePolicy
-from milky_frog.runtime import MilkyFrog
 from milky_frog.settings import Settings
 
 REPO_ROOT = Path(__file__).resolve().parent.parent

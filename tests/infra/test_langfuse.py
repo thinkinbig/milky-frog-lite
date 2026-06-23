@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
@@ -71,7 +72,9 @@ class FakeLangfuseClient:
 
 
 @pytest.fixture
-def langfuse_handler(monkeypatch: pytest.MonkeyPatch) -> tuple[LangfuseHandler, FakeLangfuseClient]:
+async def langfuse_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> AsyncIterator[tuple[LangfuseHandler, FakeLangfuseClient]]:
     client = FakeLangfuseClient()
     monkeypatch.setattr(
         "milky_frog.infra.observability.langfuse.Langfuse",
@@ -83,7 +86,10 @@ def langfuse_handler(monkeypatch: pytest.MonkeyPatch) -> tuple[LangfuseHandler, 
         secret_key="secret",
         host="https://langfuse.test",
     )
-    return LangfuseHandler(settings), client
+    handler = LangfuseHandler(settings)
+    await handler.__aenter__()
+    yield handler, client
+    await handler.__aexit__(None, None, None)
 
 
 def _run_request() -> RunRequest:

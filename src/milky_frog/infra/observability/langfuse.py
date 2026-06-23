@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 from langfuse import Langfuse
 from langfuse.types import TraceContext
@@ -52,11 +52,8 @@ class LangfuseHandler(BaseHandler):
         return cls(settings.langfuse)
 
     def __init__(self, settings: LangfuseSettings) -> None:
-        self._client = Langfuse(
-            public_key=settings.public_key,
-            secret_key=settings.secret_key,
-            base_url=settings.host,
-        )
+        self._settings = settings
+        self._client: Langfuse | None = None
         self._trace_ids: dict[str, str] = {}
         self._generations: dict[str, Any] = {}
         self._tool_spans: dict[str, Any] = {}
@@ -82,20 +79,41 @@ class LangfuseHandler(BaseHandler):
         registry.on(RunTurnEnd)(self._turn_end)
         registry.on(RunNotice)(self._run_notice)
 
+    async def __aenter__(self) -> Self:
+        if self._client is None:
+            self._client = Langfuse(
+                public_key=self._settings.public_key,
+                secret_key=self._settings.secret_key,
+                base_url=self._settings.host,
+            )
+        return self
+
     async def aclose(self) -> None:
+        if self._client is None:
+            return
         with contextlib.suppress(Exception):
             self._client.flush()
         shutdown = getattr(self._client, "shutdown", None)
         if callable(shutdown):
             with contextlib.suppress(Exception):
                 shutdown()
+        self._client = None
+
+    @property
+    def _langfuse_client(self) -> Langfuse:
+        if self._client is None:
+            msg = "LangfuseHandler must be entered before use"
+            raise RuntimeError(msg)
+        return self._client
 
     # ── Run lifecycle ────────────────────────────────────────────────
 
-    async def _before_start(self, event: RunBeforeStart, ctx: HandlerContext) -> None:
+    async def _before_start(self, event: RunBeforeStart, ctx: HandlerContext | None = None) -> None:
         try:
-            trace_id = self._trace_ids.setdefault(event.run_id, self._client.create_trace_id())
-            self._client.start_observation(
+            trace_id = self._trace_ids.setdefault(
+                event.run_id, self._langfuse_client.create_trace_id()
+            )
+            self._langfuse_client.start_observation(
                 trace_context=TraceContext(trace_id=trace_id),
                 name="run_before_start",
                 as_type="span",
@@ -107,10 +125,14 @@ class LangfuseHandler(BaseHandler):
         except Exception:
             logger.exception("Langfuse before_start error")
 
-    async def _before_resume(self, event: RunBeforeResume, ctx: HandlerContext) -> None:
+    async def _before_resume(
+        self, event: RunBeforeResume, ctx: HandlerContext | None = None
+    ) -> None:
         try:
-            trace_id = self._trace_ids.setdefault(event.run_id, self._client.create_trace_id())
-            self._client.start_observation(
+            trace_id = self._trace_ids.setdefault(
+                event.run_id, self._langfuse_client.create_trace_id()
+            )
+            self._langfuse_client.start_observation(
                 trace_context=TraceContext(trace_id=trace_id),
                 name="run_before_resume",
                 as_type="span",
@@ -122,13 +144,13 @@ class LangfuseHandler(BaseHandler):
         except Exception:
             logger.exception("Langfuse before_resume error")
 
-    async def _run_started(self, event: RunStarted, ctx: HandlerContext) -> None:
+    async def _run_started(self, event: RunStarted, ctx: HandlerContext | None = None) -> None:
         try:
-            self._trace_ids.setdefault(event.run_id, self._client.create_trace_id())
+            self._trace_ids.setdefault(event.run_id, self._langfuse_client.create_trace_id())
         except Exception:
             logger.exception("Langfuse run_started error")
 
-    async def _on_terminal(self, event: BaseEvent, ctx: HandlerContext) -> None:
+    async def _on_terminal(self, event: BaseEvent, ctx: HandlerContext | None = None) -> None:
         try:
             self._end_run(event)
         except Exception:
@@ -136,7 +158,7 @@ class LangfuseHandler(BaseHandler):
         finally:
             self._cleanup_run(event.run_id)
             with contextlib.suppress(Exception):
-                self._client.flush()
+                self._langfuse_client.flush()
 
     def _end_run(self, event: BaseEvent) -> None:
         trace_id = self._trace_ids.get(event.run_id)
@@ -144,14 +166,14 @@ class LangfuseHandler(BaseHandler):
             return
         ctx = TraceContext(trace_id=trace_id)
         if isinstance(event, RunCompleted):
-            self._client.start_observation(
+            self._langfuse_client.start_observation(
                 trace_context=ctx,
                 name="run_completed",
                 as_type="span",
                 output=event.result.final_message,
             ).end()
         elif isinstance(event, RunFailed):
-            self._client.start_observation(
+            self._langfuse_client.start_observation(
                 trace_context=ctx,
                 name="run_failed",
                 as_type="span",
@@ -159,7 +181,7 @@ class LangfuseHandler(BaseHandler):
                 status_message=event.result.final_message,
             ).end()
         elif isinstance(event, RunCancelled):
-            self._client.start_observation(
+            self._langfuse_client.start_observation(
                 trace_context=ctx,
                 name="run_cancelled",
                 as_type="span",
@@ -167,7 +189,7 @@ class LangfuseHandler(BaseHandler):
                 status_message=event.result.final_message,
             ).end()
         elif isinstance(event, RunPaused):
-            self._client.start_observation(
+            self._langfuse_client.start_observation(
                 trace_context=ctx,
                 name="run_paused",
                 as_type="span",
@@ -177,11 +199,11 @@ class LangfuseHandler(BaseHandler):
 
     # ── Turn lifecycle ─────────────────────────────────────────────
 
-    async def _turn_start(self, event: RunTurnStart, ctx: HandlerContext) -> None:
+    async def _turn_start(self, event: RunTurnStart, ctx: HandlerContext | None = None) -> None:
         try:
             trace_id = self._trace_ids.get(event.run_id)
             if trace_id:
-                self._turn_spans[event.run_id] = self._client.start_observation(
+                self._turn_spans[event.run_id] = self._langfuse_client.start_observation(
                     trace_context=TraceContext(trace_id=trace_id),
                     name=f"turn_{event.model_call}",
                     as_type="span",
@@ -189,7 +211,7 @@ class LangfuseHandler(BaseHandler):
         except Exception:
             logger.exception("Langfuse turn_start error")
 
-    async def _turn_end(self, event: RunTurnEnd, ctx: HandlerContext) -> None:
+    async def _turn_end(self, event: RunTurnEnd, ctx: HandlerContext | None = None) -> None:
         try:
             span = self._turn_spans.pop(event.run_id, None)
             if span:
@@ -199,7 +221,7 @@ class LangfuseHandler(BaseHandler):
 
     # ── Model calls ──────────────────────────────────────────────────
 
-    async def _model_chunk(self, event: RunModelChunk, ctx: HandlerContext) -> None:
+    async def _model_chunk(self, event: RunModelChunk, ctx: HandlerContext | None = None) -> None:
         try:
             accumulated = self._stream_text.get(event.run_id, "") + event.chunk.content
             self._stream_text[event.run_id] = accumulated
@@ -209,7 +231,9 @@ class LangfuseHandler(BaseHandler):
         except Exception:
             logger.exception("Langfuse model_chunk error")
 
-    async def _model_reasoning(self, event: RunModelReasoning, ctx: HandlerContext) -> None:
+    async def _model_reasoning(
+        self, event: RunModelReasoning, ctx: HandlerContext | None = None
+    ) -> None:
         try:
             accumulated = self._stream_reasoning.get(event.run_id, "") + event.chunk.content
             self._stream_reasoning[event.run_id] = accumulated
@@ -219,10 +243,12 @@ class LangfuseHandler(BaseHandler):
         except Exception:
             logger.exception("Langfuse model_reasoning error")
 
-    async def _before_model(self, event: RunBeforeModel, ctx: HandlerContext) -> None:
+    async def _before_model(self, event: RunBeforeModel, ctx: HandlerContext | None = None) -> None:
         try:
-            trace_id = self._trace_ids.setdefault(event.run_id, self._client.create_trace_id())
-            self._generations[event.run_id] = self._client.start_observation(
+            trace_id = self._trace_ids.setdefault(
+                event.run_id, self._langfuse_client.create_trace_id()
+            )
+            self._generations[event.run_id] = self._langfuse_client.start_observation(
                 trace_context=TraceContext(trace_id=trace_id),
                 name="model_call",
                 as_type="generation",
@@ -233,7 +259,7 @@ class LangfuseHandler(BaseHandler):
         except Exception:
             logger.exception("Langfuse before_model error")
 
-    async def _after_model(self, event: RunAfterModel, ctx: HandlerContext) -> None:
+    async def _after_model(self, event: RunAfterModel, ctx: HandlerContext | None = None) -> None:
         try:
             gen = self._generations.pop(event.run_id, None)
             self._stream_text.pop(event.run_id, None)
@@ -253,12 +279,12 @@ class LangfuseHandler(BaseHandler):
         except Exception:
             logger.exception("Langfuse after_model error")
 
-    async def _run_notice(self, event: RunNotice, ctx: HandlerContext) -> None:
+    async def _run_notice(self, event: RunNotice, ctx: HandlerContext | None = None) -> None:
         try:
             trace_id = self._trace_ids.get(event.run_id)
             if trace_id is None:
                 return
-            self._client.start_observation(
+            self._langfuse_client.start_observation(
                 trace_context=TraceContext(trace_id=trace_id),
                 name="run_notice",
                 as_type="span",
@@ -270,12 +296,12 @@ class LangfuseHandler(BaseHandler):
 
     # ── Tool calls ───────────────────────────────────────────────────
 
-    async def _before_tool(self, event: RunBeforeTool, ctx: HandlerContext) -> None:
+    async def _before_tool(self, event: RunBeforeTool, ctx: HandlerContext | None = None) -> None:
         try:
             trace_id = self._trace_ids.get(event.run_id)
             if trace_id:
                 key = f"{event.run_id}:{event.call.id}"
-                self._tool_spans[key] = self._client.start_observation(
+                self._tool_spans[key] = self._langfuse_client.start_observation(
                     trace_context=TraceContext(trace_id=trace_id),
                     name=event.call.name,
                     as_type="tool",
@@ -284,7 +310,7 @@ class LangfuseHandler(BaseHandler):
         except Exception:
             logger.exception("Langfuse before_tool error")
 
-    async def _after_tool(self, event: RunAfterTool, ctx: HandlerContext) -> None:
+    async def _after_tool(self, event: RunAfterTool, ctx: HandlerContext | None = None) -> None:
         try:
             key = f"{event.run_id}:{event.call.id}"
             span = self._tool_spans.pop(key, None)

@@ -23,7 +23,6 @@ from milky_frog.domain import (
 )
 from milky_frog.handlers import (
     EventDispatcher,
-    HandlerContext,
     RunBeforeTool,
     RunCancelled,
     RunFailed,
@@ -43,8 +42,7 @@ async def test_dispatches_run_lifecycle_events(tmp_path: Path) -> None:
     seen: list[str] = []
 
     @registry.subscribe
-    async def record(event: object, ctx: HandlerContext) -> None:
-        del ctx
+    async def record(event: object, _ctx=None) -> None:
         seen.append(type(event).__name__)
 
     harness = make_harness(
@@ -70,8 +68,7 @@ async def test_dispatches_run_paused_event(tmp_path: Path) -> None:
     paused: list[RunPaused] = []
 
     @registry.on(RunPaused)
-    async def record(event: RunPaused, ctx: HandlerContext) -> None:
-        del ctx
+    async def record(event: RunPaused, _ctx=None) -> None:
         paused.append(event)
 
     class NoToolModel:
@@ -101,8 +98,7 @@ async def test_cancellation_stops_run(tmp_path: Path) -> None:
     cancelled: list[RunCancelled] = []
 
     @registry.on(RunCancelled)
-    async def record(event: RunCancelled, ctx: HandlerContext) -> None:
-        del ctx
+    async def record(event: RunCancelled, _ctx=None) -> None:
         cancelled.append(event)
 
     cancellation = RunCancellation()
@@ -191,8 +187,7 @@ async def test_cancelled_handler_runs_after_checkpoint(tmp_path: Path) -> None:
     checkpoint_seen = False
 
     @registry.on(RunCancelled)
-    async def record(event: RunCancelled, ctx: HandlerContext) -> None:
-        del ctx
+    async def record(event: RunCancelled, _ctx=None) -> None:
         nonlocal checkpoint_seen
         run = store.get_run(event.run_id)
         checkpoint_seen = run is not None and run.status is RunStatus.CANCELLED
@@ -278,8 +273,7 @@ async def test_dispatches_run_failed_event(tmp_path: Path) -> None:
     failed: list[RunFailed] = []
 
     @registry.on(RunFailed)
-    async def record(event: RunFailed, ctx: HandlerContext) -> None:
-        del ctx
+    async def record(event: RunFailed, _ctx=None) -> None:
         failed.append(event)
 
     class BrokenModel:
@@ -311,8 +305,7 @@ async def test_before_tool_handler_cannot_mutate_executed_call(tmp_path: Path) -
     handlers = EventDispatcher()
 
     @handlers.observe(RunBeforeTool)
-    async def mutate_handler_copy(event: RunBeforeTool, ctx: HandlerContext) -> None:
-        del ctx
+    async def mutate_handler_copy(event: RunBeforeTool, _ctx=None) -> None:
         event.call.arguments["text"] = "tampered"
 
     store = SqliteCheckpointStore(tmp_path / "state.db")
@@ -329,8 +322,7 @@ async def test_run_started_handler_cannot_control_live_run(tmp_path: Path) -> No
     handlers = EventDispatcher()
 
     @handlers.observe(RunStarted)
-    async def mutate_handler_snapshot(event: RunStarted, ctx: HandlerContext) -> None:
-        del ctx
+    async def mutate_handler_snapshot(event: RunStarted, _ctx=None) -> None:
         assert event.request.cancellation is not None
         event.request.cancellation.cancel()
 
@@ -358,13 +350,11 @@ async def test_dispatches_run_turn_events(tmp_path: Path) -> None:
     ends: list[RunTurnEnd] = []
 
     @registry.on(RunTurnStart)
-    async def on_start(event: RunTurnStart, ctx: HandlerContext) -> None:
-        del ctx
+    async def on_start(event: RunTurnStart, _ctx=None) -> None:
         starts.append(event)
 
     @registry.on(RunTurnEnd)
-    async def on_end(event: RunTurnEnd, ctx: HandlerContext) -> None:
-        del ctx
+    async def on_end(event: RunTurnEnd, _ctx=None) -> None:
         ends.append(event)
 
     harness = make_harness(
@@ -393,8 +383,7 @@ async def test_turn_events_fire_before_complete(tmp_path: Path) -> None:
     order: list[str] = []
 
     @registry.subscribe
-    async def record(event: object, ctx: HandlerContext) -> None:
-        del ctx
+    async def record(event: object, _ctx=None) -> None:
         order.append(type(event).__name__)
 
     class ContentModel:

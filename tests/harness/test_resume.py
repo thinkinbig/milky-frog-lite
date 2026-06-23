@@ -9,6 +9,8 @@ import pytest
 
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import (
+    ApprovalDecision,
+    ApprovalVerdict,
     MessageRole,
     ModelChunk,
     ModelRequest,
@@ -245,3 +247,58 @@ async def test_resume_with_prompt_continues_completed_run(tmp_path: Path) -> Non
     assert result.final_message == "ack"
     loaded = store.load_state(done.run_id)
     assert user_messages(loaded) == ("echo hello", "follow up")
+
+
+@pytest.mark.asyncio
+async def test_resume_rejects_waiting_for_approval(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    run_id = "approval-run"
+    seed_interrupted_tool_run(
+        store,
+        run_id,
+        tmp_path,
+        status=RunStatus.WAITING_FOR_APPROVAL,
+        final_message="approval needed",
+    )
+    harness = make_harness(FakeModel(), ToolRegistry((EchoTool(),)), store, EventDispatcher())
+
+    with pytest.raises(ResumeError, match="waiting for tool approval"):
+        await harness.resume(run_id, max_model_calls=30)
+
+
+@pytest.mark.asyncio
+async def test_respond_approval_executes_pending_tool(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    run_id = "approval-run"
+    seed_interrupted_tool_run(
+        store,
+        run_id,
+        tmp_path,
+        status=RunStatus.WAITING_FOR_APPROVAL,
+        final_message="approval needed",
+    )
+    harness = make_harness(FakeModel(), ToolRegistry((EchoTool(),)), store, EventDispatcher())
+
+    result = await harness.respond_approval(
+        run_id,
+        max_model_calls=30,
+        approval=ApprovalVerdict(ApprovalDecision.APPROVE),
+    )
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.final_message == "done"
+
+
+@pytest.mark.asyncio
+async def test_respond_approval_rejects_non_waiting_run(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    run_id = "completed-run"
+    seed_run(store, run_id, tmp_path, status=RunStatus.COMPLETED, final_message="done")
+    harness = make_harness(FakeModel(), ToolRegistry(), store, EventDispatcher())
+
+    with pytest.raises(ResumeError, match="not waiting for tool approval"):
+        await harness.respond_approval(
+            run_id,
+            max_model_calls=30,
+            approval=ApprovalVerdict(ApprovalDecision.APPROVE),
+        )

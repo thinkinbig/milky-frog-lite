@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, TypeVar, cast
+from types import TracebackType
+from typing import Any, Self, TypeVar, cast
 
 from milky_frog.handlers.context import HandlerContext, HandlerResult
 from milky_frog.handlers.events import BaseEvent
@@ -12,6 +14,8 @@ from milky_frog.handlers.events import BaseEvent
 EventT = TypeVar("EventT", bound=BaseEvent)
 NotifyHandler = Callable[[EventT, HandlerContext], Awaitable[HandlerResult | None]]
 Handler = Callable[[Any, HandlerContext], Awaitable[HandlerResult | None]]
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,9 +33,7 @@ class EventDispatcher:
     events accept control returns — see ``RunBeforeTool`` and
     ``RunBeforeStart``.
 
-    A ``HandlerContext`` may be set (via ``set_context``) so that
-    every handler receives shared framework-managed resources without wiring
-    them through constructors.
+
     """
 
     def __init__(self) -> None:
@@ -100,14 +102,29 @@ class BaseHandler(ABC):
     """A cross-cutting bundle of Handlers with an optional resource lifetime.
 
     A bundle wires several callbacks onto an EventDispatcher in one place (its
-    own file) via ``register``. Bundles that hold resources for the process's
-    lifetime (clients, connections) override ``aclose``; the rest inherit the
-    no-op default so the runtime can release every bundle uniformly.
+    own file) via ``register``. Bundles that hold session resources override
+    ``__aenter__`` to acquire them and ``aclose`` to release; the rest inherit
+    no-op defaults. ``MilkyFrog`` enters every bundle when the session opens
+    and exits them on close.
     """
 
     @abstractmethod
     def register(self, registry: EventDispatcher) -> None:
         """Wire this bundle's callbacks onto the registry."""
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        try:
+            await self.aclose()
+        except Exception:
+            _logger.exception("Cleanup failed: %s", type(self).__qualname__)
 
     async def aclose(self) -> None:  # noqa: B027 - intentional no-op default; resource-holding bundles override
         """Release resources held for the bundle's lifetime. Default: no-op."""

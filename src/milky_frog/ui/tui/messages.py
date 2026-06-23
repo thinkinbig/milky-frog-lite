@@ -69,10 +69,11 @@ class RunFinished(Message):
 class ApprovalRequired(Message):
     """A Run paused waiting for the user to approve a pending tool call."""
 
-    def __init__(self, run_id: str, reason: str) -> None:
+    def __init__(self, run_id: str, reason: str, tool_name: str = "") -> None:
         super().__init__()
         self.run_id = run_id
         self.reason = reason
+        self.tool_name = tool_name
 
 
 class RunError(Message):
@@ -90,3 +91,32 @@ class RunNoticeMsg(Message):
         super().__init__()
         self.message = message
         self.level = level
+
+
+class GitOutputMsg(Message):
+    """git command output, routed for ANSI-color rendering."""
+
+    def __init__(self, command: str, *, content: str, is_error: bool) -> None:
+        super().__init__()
+        self.command = command
+        self.content = content
+        self.is_error = is_error
+
+
+class GrepOutputMsg(Message):
+    """grep/rg output, routed for match-line rendering."""
+
+    def __init__(self, command: str, *, content: str, is_error: bool) -> None:
+        super().__init__()
+        self.command = command
+        self.content = content
+        self.is_error = is_error
+
+
+class BashOutputMsg(Message):
+    """Generic bash output fallback."""
+
+    def __init__(self, *, content: str, is_error: bool) -> None:
+        super().__init__()
+        self.content = content
+        self.is_error = is_error

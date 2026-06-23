@@ -1,56 +1,76 @@
-"""Tool-approval policy: the Protocol, adapters, and decision helpers.
+"""Session-level mutable tool policy and decision helpers.
 
-Previously split across ``gates/tool.py`` (policy adapters) and
-``harness/tools/registry.py`` (``approval_free_tool_names`` /
-``call_needs_approval``). Consolidated here so the policy and the tool
-attributes it reads live in one module.
+Previously had a ``ToolPolicy`` Protocol, ``DefaultToolPolicy``, etc. All
+consolidated into ``SessionToolPolicy`` — the one policy class that is owned
+by ``Session``, exposed as ``session.policy``, and read by ``PolicyHandler``
+from ``HandlerContext`` on every ``RunBeforeTool`` event.
 """
 
 from __future__ import annotations
-
-from typing import Protocol
 
 from milky_frog.domain import ToolCall, ToolDecision
 from milky_frog.harness.tools.base import Tool
 
 
-class ToolPolicy(Protocol):
-    """Decide whether a tool call is allowed, denied, or needs approval."""
+class SessionToolPolicy:
+    """Mutable session-level tool policy.
 
-    def decide(self, call: ToolCall) -> ToolDecision: ...
+    Owned by ``Session``; exposed as ``session.policy``.  ``PolicyHandler``
+    reads its current state from ``HandlerContext.policy`` on every
+    ``RunBeforeTool`` event, so changes take effect immediately.
 
-
-class DefaultToolPolicy:
-    """Built-in policy: read-only Tools allowed; mutating calls need approval."""
+    Default behaviour reads each tool's ``requires_approval`` attribute.
+    Per-tool overrides (``allow`` / ``deny`` / ``require_approval``) and
+    ``allow_all()`` take precedence.
+    """
 
     def __init__(self, tools: tuple[Tool, ...] | None = None) -> None:
         if tools is None:
-            from milky_frog.harness.tools.builtins import default_tools  # avoid circular import
+            from milky_frog.harness.tools.builtins import (
+                default_tools,
+            )
 
             tools = default_tools()
-        self._tools = {tool.name: tool for tool in tools}
+        self._tools_by_name: dict[str, Tool] = {tool.name: tool for tool in tools}
+        self._mode: str = "default"  # "default" | "permissive"
+        self._overrides: dict[str, ToolDecision] = {}
+
+    def auto_approve(self) -> None:
+        """Auto-approve any tool that would normally require approval.
+
+        Tools with explicit ``deny()`` overrides are still denied.
+        ``reset()`` restores per-tool prompting.
+        """
+        self._mode = "auto_approve"
+
+    def reset(self) -> None:
+        self._mode = "default"
+        self._overrides.clear()
+
+    def require_approval(self, tool_name: str) -> None:
+        self._overrides[tool_name] = ToolDecision.NEEDS_APPROVAL
+
+    def deny(self, tool_name: str) -> None:
+        self._overrides[tool_name] = ToolDecision.DENY
+
+    def allow(self, tool_name: str) -> None:
+        self._overrides[tool_name] = ToolDecision.ALLOW
 
     def decide(self, call: ToolCall) -> ToolDecision:
-        tool = self._tools.get(call.name)
+        # Explicit overrides always win.
+        if call.name in self._overrides:
+            return self._overrides[call.name]
+        # Auto-approve: skip NEEDS_APPROVAL, fall through to baseline.
+        if self._mode == "auto_approve":
+            tool = self._tools_by_name.get(call.name)
+            if tool is not None and not call_needs_approval(tool, call):
+                return ToolDecision.ALLOW
+            return ToolDecision.ALLOW
+        # Default: prompt for any tool that needs approval.
+        tool = self._tools_by_name.get(call.name)
         if tool is None or call_needs_approval(tool, call):
             return ToolDecision.NEEDS_APPROVAL
         return ToolDecision.ALLOW
-
-
-class PermissivePolicy:
-    """Policy that allows every tool call — useful in tests."""
-
-    def decide(self, call: ToolCall) -> ToolDecision:
-        del call
-        return ToolDecision.ALLOW
-
-
-class DenyAllPolicy:
-    """Policy that denies every tool call."""
-
-    def decide(self, call: ToolCall) -> ToolDecision:
-        del call
-        return ToolDecision.DENY
 
 
 # ── decision helpers ──────────────────────────────────────────────────────

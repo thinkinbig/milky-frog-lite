@@ -26,9 +26,8 @@ class AgentContextHandler(BaseHandler):
         registry.on(RunBeforeStart)(self._on_before_start)
 
     async def _on_before_start(
-        self, event: RunBeforeStart, ctx: HandlerContext
+        self, event: RunBeforeStart, ctx: HandlerContext | None = None
     ) -> SystemPromptSection | None:
-        del ctx
         content = agent_context_section(event.workspace, self._home)
         if content is None:
             return None

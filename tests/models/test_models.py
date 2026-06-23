@@ -85,12 +85,13 @@ async def test_stream_forwards_text_and_assembles_response() -> None:
 
     deltas: list[str] = []
     done: StreamDone | None = None
-    async for chunk in model.stream(request):
-        if isinstance(chunk, TextDelta):
-            deltas.append(chunk.content)
-        else:
-            assert isinstance(chunk, StreamDone)
-            done = chunk
+    async with model:
+        async for chunk in model.stream(request):
+            if isinstance(chunk, TextDelta):
+                deltas.append(chunk.content)
+            else:
+                assert isinstance(chunk, StreamDone)
+                done = chunk
 
     assert deltas == ["Hel", "lo"]
     assert done is not None
@@ -115,13 +116,14 @@ async def test_stream_surfaces_reasoning_before_answer() -> None:
     reasoning: list[str] = []
     text: list[str] = []
     done: StreamDone | None = None
-    async for chunk in model.stream(ModelRequest((Message(MessageRole.USER, "hi"),), ())):
-        if isinstance(chunk, ReasoningDelta):
-            reasoning.append(chunk.content)
-        elif isinstance(chunk, TextDelta):
-            text.append(chunk.content)
-        else:
-            done = chunk
+    async with model:
+        async for chunk in model.stream(ModelRequest((Message(MessageRole.USER, "hi"),), ())):
+            if isinstance(chunk, ReasoningDelta):
+                reasoning.append(chunk.content)
+            elif isinstance(chunk, TextDelta):
+                text.append(chunk.content)
+            else:
+                done = chunk
 
     assert reasoning == ["let me ", "think"]
     assert text == ["answer"]
@@ -140,8 +142,9 @@ async def test_stream_omits_stream_options_for_compatible_base_url() -> None:
         client=client,  # type: ignore[arg-type]
     )
 
-    async for _ in model.stream(ModelRequest((Message(MessageRole.USER, "hi"),), ())):
-        pass
+    async with model:
+        async for _ in model.stream(ModelRequest((Message(MessageRole.USER, "hi"),), ())):
+            pass
 
     assert "stream_options" not in client.captured
 
@@ -159,9 +162,10 @@ async def test_stream_captures_cached_and_reasoning_subtotals() -> None:
     model = OpenAIModel(api_key="k", model="m", client=client)  # type: ignore[arg-type]
 
     done: StreamDone | None = None
-    async for chunk in model.stream(ModelRequest((Message(MessageRole.USER, "hi"),), ())):
-        if isinstance(chunk, StreamDone):
-            done = chunk
+    async with model:
+        async for chunk in model.stream(ModelRequest((Message(MessageRole.USER, "hi"),), ())):
+            if isinstance(chunk, StreamDone):
+                done = chunk
 
     assert done is not None
     assert done.response.usage == TokenUsage(
@@ -178,9 +182,12 @@ async def test_stream_closes_underlying_response_when_consumer_breaks_early() ->
     client = _FakeClient(chunks)
     model = OpenAIModel(api_key="k", model="m", client=client)  # type: ignore[arg-type]
 
-    async with contextlib.aclosing(
-        model.stream(ModelRequest((Message(MessageRole.USER, "hi"),), ()))
-    ) as model_stream:
+    async with (
+        model,
+        contextlib.aclosing(
+            model.stream(ModelRequest((Message(MessageRole.USER, "hi"),), ()))
+        ) as model_stream,
+    ):
         async for chunk in model_stream:
             if isinstance(chunk, StreamDone):
                 break
@@ -194,7 +201,8 @@ async def test_stream_omits_tools_when_none_requested() -> None:
     client = _FakeClient([_chunk(content="ok")])
     model = OpenAIModel(api_key="k", model="m", client=client)  # type: ignore[arg-type]
 
-    async for _ in model.stream(ModelRequest((Message(MessageRole.USER, "hi"),), ())):
-        pass
+    async with model:
+        async for _ in model.stream(ModelRequest((Message(MessageRole.USER, "hi"),), ())):
+            pass
 
     assert "tools" not in client.captured
