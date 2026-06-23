@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import fnmatch
-import os
 from pathlib import Path
 
 
@@ -22,7 +21,6 @@ class LocalSandbox:
         "**/.aws/**",
         "**/.ssh/**",
     )
-    ENV_ALLOWLIST = ("HOME", "LANG", "LC_ALL", "PATH", "SHELL", "TERM", "TMPDIR")
 
     def __init__(self, workspace: Path) -> None:
         self.workspace = workspace.resolve(strict=True)
@@ -40,9 +38,6 @@ class LocalSandbox:
         if not allow_sensitive and self._is_denied(normalized_text):
             raise SandboxViolation(f"sensitive path requires approval: {relative_path}")
         return candidate
-
-    def command_environment(self) -> dict[str, str]:
-        return {name: os.environ[name] for name in self.ENV_ALLOWLIST if name in os.environ}
 
     def _is_denied(self, normalized_path: str) -> bool:
         return any(fnmatch.fnmatch(normalized_path, pattern) for pattern in self._deny_patterns)

@@ -14,6 +14,24 @@ _BASH_TIMEOUT_SECONDS = 30.0
 _MAX_OUTPUT_BYTES = 128 * 1024
 # Grace period to drain PTY output after the process exits.
 _PTY_DRAIN_SECONDS = 2.0
+# Host env vars passed through to a spawned local command (never secrets).
+_COMMAND_ENV_ALLOWLIST = ("HOME", "LANG", "LC_ALL", "PATH", "SHELL", "TERM", "TMPDIR")
+
+
+def local_command_environment() -> dict[str, str]:
+    """Build the final environment for a spawned local command.
+
+    Passes through only an allowlist of host env vars and ensures
+    ``/usr/local/bin`` is on ``PATH``.  This is execution-mechanism config, not
+    a Sandbox/Workspace policy — a future Docker runner would supply env
+    differently (e.g. ``docker exec -e``), so it lives with command execution
+    rather than on the Sandbox.
+    """
+    env = {name: os.environ[name] for name in _COMMAND_ENV_ALLOWLIST if name in os.environ}
+    path = env.get("PATH", "")
+    if "/usr/local/bin" not in path:
+        env["PATH"] = f"/usr/local/bin:{path}" if path else "/usr/local/bin"
+    return env
 
 
 class BashInput(BaseModel):
@@ -92,10 +110,7 @@ class BashTool:
             return ToolResult("empty command", is_error=True)
 
         sandbox = context.require_sandbox()
-        env = sandbox.command_environment()
-        path = env.get("PATH", "")
-        if "/usr/local/bin" not in path:
-            env["PATH"] = f"/usr/local/bin:{path}" if path else "/usr/local/bin"
+        env = local_command_environment()
 
         loop = asyncio.get_running_loop()
         master_fd, slave_fd = pty.openpty()
