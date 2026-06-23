@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from rich.console import RenderableType
 from rich.markdown import Markdown
@@ -14,10 +14,12 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Vertical, VerticalScroll
 from textual.reactive import reactive
-from textual.widgets import Footer, Header, Input, Static
+from textual.screen import ModalScreen
+from textual.timer import Timer
+from textual.widgets import Footer, Header, Input, ListItem, ListView, Static
 from textual.worker import Worker
 
-from milky_frog.domain import ApprovalDecision, ResumeError, RunStatus, RunUsage
+from milky_frog.domain import ApprovalDecision, ApprovalVerdict, ResumeError, RunStatus, RunUsage
 from milky_frog.runtime import MilkyFrog
 from milky_frog.settings import Settings
 from milky_frog.ui.logo import pixel_frog_logo
@@ -59,11 +61,12 @@ def _row(marker: Text, body: RenderableType) -> Table:
     return row
 
 
-def _thinking(text: str) -> Text:
-    """Render the reasoning block: a ``✻ thinking`` header with the body below."""
+def _thinking(text: str, spinner: str) -> Text:
+    """Render the reasoning block: braille spinner frame plus ``thinking``."""
+    header = f"{spinner} thinking"
     if not text:
-        return Text("✻ thinking", style="dim italic")
-    return Text.assemble(("✻ thinking\n", "dim italic"), (text, "dim italic"))
+        return Text(header, style="dim italic")
+    return Text.assemble((f"{header}\n", "dim italic"), (text, "dim italic"))
 
 
 # Full-row styles (foreground on background) so each diff line is highlighted
@@ -108,9 +111,23 @@ class RunStatusBar(Static):
         self._workspace = _short_workspace(workspace)
         self._usage: RunUsage = RunUsage()
         self._run_id: str | None = None
+        self._spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        self._frame_idx = 0
+        self._timer: Timer | None = None
 
     def watch_status_text(self, value: str) -> None:
+        if value in {"working", "cancelling"}:
+            if self._timer is None:
+                self._timer = self.set_interval(0.1, self._tick)
+        else:
+            if self._timer is not None:
+                self._timer.stop()
+                self._timer = None
         self.update(self._format(value))
+
+    def _tick(self) -> None:
+        self._frame_idx = (self._frame_idx + 1) % len(self._spinner_frames)
+        self.update(self._format(self.status_text))
 
     def set_usage(self, usage: RunUsage) -> None:
         self._usage = usage
@@ -126,6 +143,9 @@ class RunStatusBar(Static):
     def set_ready(self) -> None:
         self.status_text = "ready"
 
+    def set_cancelling(self) -> None:
+        self.status_text = "cancelling"
+
     def _format(self, state: str) -> Text:
         parts: list[Text] = []
         parts.append(Text(f" {self._model}", style="dim"))
@@ -139,7 +159,12 @@ class RunStatusBar(Static):
             parts.append(Text("  ·  ", style="bright_black"))
             parts.append(Text(usage_str, style="dim"))
         parts.append(Text("  ·  ", style="bright_black"))
-        parts.append(Text(state, style="green" if state == "ready" else "yellow"))
+        if state in {"working", "cancelling"}:
+            spinner = self._spinner_frames[self._frame_idx]
+            style = "yellow" if state == "working" else "bright_yellow"
+            parts.append(Text(f"{spinner} {state}", style=style))
+        else:
+            parts.append(Text(state, style="green"))
         return Text.assemble(*parts)
 
 
@@ -219,6 +244,142 @@ class PromptInput(Input):
 # ── Main App ───────────────────────────────────────────────────────────
 
 
+class ApprovalDialog(ModalScreen[ApprovalVerdict]):
+    """Modal dialog for tool call approval with a selectable list.
+
+    Multi-phase interaction:
+      1. SELECT — choose from Yes / No / No, provide reason
+      2. INPUT_REASON — when "No, provide reason" is selected, show a text
+         input for the denial reason, then dismiss with the full verdict.
+
+    Matches the interactive permission dialog pattern from pi's permission
+    system.
+    """
+
+    CSS = """
+    ApprovalDialog {
+        align: center middle;
+    }
+
+    #approval-dialog-box {
+        width: 60;
+        height: auto;
+        padding: 1 2;
+        border: thick $secondary;
+        background: $surface;
+    }
+
+    #approval-message {
+        margin-bottom: 1;
+    }
+
+    ListView {
+        height: auto;
+        margin: 0 1;
+        border: none;
+    }
+
+    ListItem {
+        padding: 0 1;
+    }
+
+    ListItem:focus {
+        background: $accent;
+    }
+
+    #approval-help {
+        margin-top: 1;
+        color: $text-muted;
+    }
+
+    #reason-input {
+        display: none;
+        margin: 0 1;
+    }
+    #reason-input.-visible {
+        display: block;
+    }
+
+    #reason-help {
+        display: none;
+        margin-top: 1;
+        color: $text-muted;
+    }
+    #reason-help.-visible {
+        display: block;
+    }
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__()
+        self.message = reason
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="approval-dialog"), Vertical(id="approval-dialog-box"):
+            yield Static(self.message, id="approval-message")
+            yield ListView(
+                ListItem(Static("  1. Yes"), name="approve"),
+                ListItem(Static("  2. No"), name="deny"),
+                ListItem(Static("  3. No, provide reason"), name="deny_with_reason"),
+                initial_index=0,
+                id="option-list",
+            )
+            yield Static(
+                "Enter to select \u00b7 1-3 to choose \u00b7 Esc to deny",
+                id="approval-help",
+            )
+            yield Input(
+                placeholder="Reason shown back to the agent (optional)...",
+                id="reason-input",
+            )
+            yield Static(
+                "Type reason and press Enter, or Esc to go back",
+                id="reason-help",
+            )
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        if event.item.name == "approve":
+            self.dismiss(ApprovalVerdict(ApprovalDecision.APPROVE))
+        elif event.item.name == "deny_with_reason":
+            self._show_reason_input()
+        else:
+            self.dismiss(ApprovalVerdict(ApprovalDecision.DENY))
+
+    def on_key(self, event: events.Key) -> None:
+        if event.key == "1":
+            event.stop()
+            self.dismiss(ApprovalVerdict(ApprovalDecision.APPROVE))
+        elif event.key == "2":
+            event.stop()
+            self.dismiss(ApprovalVerdict(ApprovalDecision.DENY))
+        elif event.key == "3":
+            event.stop()
+            self._show_reason_input()
+        elif event.key == "escape":
+            event.stop()
+            self.dismiss(ApprovalVerdict(ApprovalDecision.DENY))
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        reason = event.value.strip()
+        self.dismiss(
+            ApprovalVerdict(
+                ApprovalDecision.DENY,
+                denial_reason=reason or None,
+            )
+        )
+
+    def _show_reason_input(self) -> None:
+        """Transition to the reason-input phase."""
+        self.query_one("#option-list", ListView).display = False
+        self.query_one("#approval-help", Static).display = False
+        reason_input = self.query_one("#reason-input", Input)
+        reason_input.display = True
+        reason_input.add_class("-visible")
+        self.query_one("#reason-help", Static).display = True
+        self.query_one("#reason-help", Static).add_class("-visible")
+        reason_input.focus()
+
+
 class MilkyFrogApp(App[None]):
     """Textual TUI for Milky Frog local coding agent.
 
@@ -265,14 +426,16 @@ class MilkyFrogApp(App[None]):
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("ctrl+c", "request_exit", "Exit"),
         Binding("ctrl+d", "request_exit", "Exit"),
-        Binding("escape", "cancel_run", "Interrupt"),
+        # priority=True: Input keeps focus during Runs; without this, Esc may never
+        # reach the App action while the prompt is focused (Textual 8.x).
+        Binding("escape", "cancel_run", "Interrupt", priority=True),
     ]
 
     def __init__(self, settings: Settings) -> None:
         super().__init__()
+        self._settings = settings
         self._presentation = tui_presentation_bundle(self.post_message)
-        self._frog = MilkyFrog.from_settings(settings, bundles=[self._presentation])
-        self._session = RunAdvancer(self._frog)
+        self._session: RunAdvancer | None = None
         self._worker: Worker[None] | None = None
 
         # Streaming render state: buffers plus the live widget updated in place.
@@ -281,6 +444,35 @@ class MilkyFrogApp(App[None]):
         self._phase: str | None = None  # None | "thinking" | "answer"
         self._thinking_widget: Static | None = None
         self._answer_widget: Static | None = None
+
+        # Spinner frames and states
+        self._spinner_frames: list[str] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+        self._active_tool_widget: Static | None = None
+        self._active_tool_signature: str = ""
+        self._tool_spinner_timer: Timer | None = None
+        self._tool_frame_idx: int = 0
+
+        self._thinking_spinner_timer: Timer | None = None
+        self._thinking_frame_idx: int = 0
+
+    @property
+    def session(self) -> RunAdvancer:
+        """The active Run advancer; only valid while the app is running."""
+        advancer = self._session
+        if advancer is None:
+            msg = "Milky Frog session is not active"
+            raise RuntimeError(msg)
+        return advancer
+
+    def run(self, *args: Any, **kwargs: Any) -> Any:
+        """Run the TUI inside a ``with MilkyFrog`` session so resources are released."""
+        with MilkyFrog.from_settings(self._settings, bundles=[self._presentation]) as frog:
+            self._session = RunAdvancer(frog)
+            try:
+                return super().run(*args, **kwargs)
+            finally:
+                self._session = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -291,7 +483,7 @@ class MilkyFrogApp(App[None]):
             Static(id="command-hints"),
             PromptInput(id="prompt-input", placeholder="Type a task and press Enter..."),
             RunStatusBar(
-                model=self._session.frog.model_name or "unknown",
+                model=self.session.frog.model_name or "unknown",
                 workspace=Path.cwd(),
             ),
         )
@@ -340,11 +532,38 @@ class MilkyFrogApp(App[None]):
     def _render_user_message(self, text: str) -> None:
         self._append(_row(Text("▸", style="bold cyan"), Text(text)))
 
+    def _tick_tool_spinner(self) -> None:
+        if self._active_tool_widget is not None:
+            self._tool_frame_idx = (self._tool_frame_idx + 1) % len(self._spinner_frames)
+            spinner = self._spinner_frames[self._tool_frame_idx]
+            self._active_tool_widget.update(
+                Text.assemble(
+                    (f"  {spinner} ", "bold yellow"), (self._active_tool_signature, "cyan")
+                )
+            )
+
+    def _tick_thinking_spinner(self) -> None:
+        if self._thinking_widget is not None:
+            self._thinking_frame_idx = (self._thinking_frame_idx + 1) % len(self._spinner_frames)
+            spinner = self._spinner_frames[self._thinking_frame_idx]
+            self._thinking_widget.update(
+                _thinking("".join(self._thinking_buf).strip(), spinner=spinner)
+            )
+
     def _flush_thinking(self) -> None:
         """Finalize the live reasoning widget (it already holds the streamed body)."""
+        if self._thinking_spinner_timer is not None:
+            self._thinking_spinner_timer.stop()
+            self._thinking_spinner_timer = None
+
         widget = self._thinking_widget
         self._thinking_widget = None
         has_text = bool("".join(self._thinking_buf).strip())
+
+        if widget is not None and has_text:
+            spinner = self._spinner_frames[self._thinking_frame_idx]
+            widget.update(_thinking("".join(self._thinking_buf).strip(), spinner))
+
         self._thinking_buf.clear()
         if widget is not None and not has_text:
             widget.remove()  # no reasoning was produced; drop the bare header
@@ -402,10 +621,17 @@ class MilkyFrogApp(App[None]):
         if self._phase != "thinking":
             self._close_phase()
             self._phase = "thinking"
-            self._thinking_widget = self._append(_thinking(""))
-        self._thinking_buf.append(event.text)
+            self._thinking_frame_idx = 0
+            self._thinking_widget = self._append(_thinking("", spinner=self._spinner_frames[0]))
+            if self._thinking_spinner_timer is None:
+                self._thinking_spinner_timer = self.set_interval(0.1, self._tick_thinking_spinner)
+        if event.text:
+            self._thinking_buf.append(event.text)
         if self._thinking_widget is not None:
-            self._thinking_widget.update(_thinking("".join(self._thinking_buf).strip()))
+            spinner = self._spinner_frames[self._thinking_frame_idx]
+            self._thinking_widget.update(
+                _thinking("".join(self._thinking_buf).strip(), spinner=spinner)
+            )
         self._scroll_end()
 
     def on_add_text(self, event: AddText) -> None:
@@ -424,16 +650,32 @@ class MilkyFrogApp(App[None]):
         """Write the tool call signature, plus a colored diff for file edits."""
         self._close_phase()
         signature = format_tool_call(event.name, event.arguments)
-        self._append(
-            Text.assemble(("  ⏺ ", "bold cyan"), (signature, "cyan")),
+        self._active_tool_signature = signature
+        self._tool_frame_idx = 0
+        self._active_tool_widget = self._append(
+            Text.assemble((f"  {self._spinner_frames[0]} ", "bold yellow"), (signature, "cyan")),
             spaced=False,
         )
+        if self._tool_spinner_timer is None:
+            self._tool_spinner_timer = self.set_interval(0.1, self._tick_tool_spinner)
+
         diff = file_change_diff(event.name, event.arguments)
         if diff:
             self._append(_diff_renderable(diff), spaced=False)
 
     def on_tool_result_msg(self, event: ToolResultMsg) -> None:
         """Write the tool result as an indented summary line under its call."""
+        if self._tool_spinner_timer is not None:
+            self._tool_spinner_timer.stop()
+            self._tool_spinner_timer = None
+
+        if self._active_tool_widget is not None:
+            mark, style = ("✗", "bold red") if event.is_error else ("⏺", "bold cyan")
+            self._active_tool_widget.update(
+                Text.assemble((f"  {mark} ", style), (self._active_tool_signature, "cyan"))
+            )
+            self._active_tool_widget = None
+
         summary = summarize_tool_result(event.content, is_error=event.is_error)
         mark, style = ("✗", "red") if event.is_error else ("⎿", "bright_black")
         self._append(Text.assemble((f"    {mark} ", style), (summary, "dim")))
@@ -445,6 +687,11 @@ class MilkyFrogApp(App[None]):
         """Run finished: commit any buffered content and show the footer."""
         self._worker = None
         self._close_phase()
+
+        if self._tool_spinner_timer is not None:
+            self._tool_spinner_timer.stop()
+            self._tool_spinner_timer = None
+        self._active_tool_widget = None
 
         status_bar = self.query_one(RunStatusBar)
 
@@ -477,20 +724,18 @@ class MilkyFrogApp(App[None]):
         self._render_notification(event.message, event.level)
 
     def on_approval_required(self, event: ApprovalRequired) -> None:
-        """A tool call needs the user's verdict: render an inline y/n prompt."""
+        """A tool call needs the user's verdict: show an approval dialog."""
         self._close_phase()
-        self._session.pending_approval = event.run_id
-        self._append(
-            _row(
-                Text("⚠", style="bold yellow"),
-                Text.assemble(
-                    (f"{event.reason}\n", "yellow"),
-                    ("Approve this tool call? ", "bold yellow"),
-                    ("[y]es / [n]o", "bright_black"),
-                ),
-            )
-        )
-        self._scroll_end()
+        self.session.pending_approval = event.run_id
+        self.query_one("#prompt-input", PromptInput).disabled = True
+
+        def handle_verdict(verdict: ApprovalVerdict | None) -> None:
+            if verdict is None:
+                return  # Dialog dismissed without decision — no-op
+            self.session.pending_approval = None
+            self._start_approval(event.run_id, verdict)
+
+        self.push_screen(ApprovalDialog(event.reason), handle_verdict)
 
     # ── Input handling ────────────────────────────────────────────────
 
@@ -523,7 +768,7 @@ class MilkyFrogApp(App[None]):
 
     def on_input_submitted(self, message: Input.Submitted) -> None:
         """Handle a user prompt submission."""
-        if self._session.busy:
+        if self.session.busy:
             return
         task = message.value.strip()
         if not task:
@@ -539,16 +784,12 @@ class MilkyFrogApp(App[None]):
             self.exit()
             return
 
-        if self._session.pending_approval is not None:
-            self._resolve_approval(command)
-            return
-
         if command in {"?", "/help"}:
             self._render_help()
             return
         if command == "/clear":
             self._conversation().remove_children()
-            self._session.run_id = None
+            self.session.run_id = None
             return
 
         if command.startswith("/resume"):
@@ -558,38 +799,55 @@ class MilkyFrogApp(App[None]):
         self._start_run(task)
 
     def _handle_resume(self, task: str) -> None:
-        """Parse ``/resume`` and either attach to a Run or continue it."""
-        rest = task[len("/resume") :].strip()
-        if not rest:
-            self._render_error(
-                "Usage: /resume RUN_ID [prompt]",
-                hint="List available Runs with: milky-frog runs",
-            )
-            return
-        head, _, tail = rest.partition(" ")
-        run_id = head.strip()
-        prompt = tail.strip() or None
+        """Parse ``/resume`` and either attach to a Run or continue it.
 
-        try:
-            run_id = self._session.frog.checkpoints.resolve_run_id(run_id)
-        except (LookupError, ValueError) as error:
-            self._render_error(f"unknown Run: {error}")
-            return
+        Without a run_id, defaults to the most recently updated run:
+
+          ``/resume``               — attach to the latest run
+          ``/resume RUN_ID``         — attach to a specific run
+          ``/resume prompt``         — continue the latest run with a prompt
+          ``/resume RUN_ID prompt``  — continue a specific run with a prompt
+        """
+        rest = task[len("/resume") :].strip()
+        head, _, tail = rest.partition(" ")
+        head = head.strip()
+        tail = tail.strip()
+
+        if head:
+            try:
+                run_id = self.session.frog.checkpoints.resolve_run_id(head)
+            except (LookupError, ValueError) as error:
+                self._render_error(f"unknown Run: {error}")
+                return
+        else:
+            runs = self.session.frog.checkpoints.list_runs(limit=1)
+            if not runs:
+                self._render_error(
+                    "No runs found to resume.",
+                    hint="Start a new task to create a run first.",
+                )
+                return
+            run_id = runs[0].run_id
+
+        prompt = tail or None
 
         if prompt is None:
-            self._session.run_id = run_id
+            self.session.run_id = run_id
             self.query_one(RunStatusBar).set_run_id(run_id)
             self._append(
-                Text(f"Attached to run {run_id[:8]} · next prompt continues it", style="dim")
+                Text(
+                    f"Attached to run {run_id[:8]} · next prompt continues it",
+                    style="dim",
+                )
             )
             return
 
-        self._session.run_id = run_id
+        self.session.run_id = run_id
         self._start_run(prompt, run_id=run_id)
 
     def _start_run(self, task: str, *, run_id: str | None = None) -> None:
         """Kick off a Run as a Textual worker."""
-        self._session.begin()
+        self.session.begin()
         self._phase = None
         self._thinking_buf.clear()
         self._answer_buf.clear()
@@ -606,11 +864,11 @@ class MilkyFrogApp(App[None]):
     async def _do_run(self, task: str, run_id: str | None) -> None:
         """Thin worker: delegate to RunAdvancer; UI via TuiPresentationHandler."""
         try:
-            await self._session.do_run(task, run_id)
+            await self.session.do_run(task, run_id)
         except (PreRunError, ResumeError) as error:
             self.post_message(RunError(str(error)))
         except asyncio.CancelledError:
-            result = RunAdvancer.cancelled_result(self._session.run_id)
+            result = RunAdvancer.cancelled_result(self.session.run_id)
             self.post_message(
                 RunFinished(
                     result=result,
@@ -620,27 +878,29 @@ class MilkyFrogApp(App[None]):
             )
             raise
 
-    def _start_approval(self, run_id: str, decision: ApprovalDecision) -> None:
+    def _start_approval(self, run_id: str, verdict: ApprovalVerdict) -> None:
         """Resume a paused Run with the user's approval verdict."""
-        self._session.begin()
+        self.session.begin()
         self._phase = None
         self._thinking_buf.clear()
         self._answer_buf.clear()
         self._thinking_widget = None
         self._answer_widget = None
 
-        verb = "Approved" if decision is ApprovalDecision.APPROVE else "Denied"
+        verb = "Approved" if verdict.decision is ApprovalDecision.APPROVE else "Denied"
+        if verdict.denial_reason:
+            verb += f" (reason: {verdict.denial_reason})"
         self._append(_row(Text("▸", style="bold cyan"), Text(verb, style="dim")))
         self.query_one(RunStatusBar).set_working()
         self.query_one("#prompt-input", PromptInput).disabled = True
 
-        self._worker = self._do_approve(run_id, decision)
+        self._worker = self._do_approve(run_id, verdict)
 
     @work(thread=False, exit_on_error=False)
-    async def _do_approve(self, run_id: str, decision: ApprovalDecision) -> None:
+    async def _do_approve(self, run_id: str, verdict: ApprovalVerdict) -> None:
         """Thin worker: delegate to RunAdvancer; UI via TuiPresentationHandler."""
         try:
-            await self._session.do_approve(run_id, decision)
+            await self.session.do_approve(run_id, verdict)
         except (PreRunError, ResumeError) as error:
             self.post_message(RunError(str(error)))
         except asyncio.CancelledError:
@@ -654,21 +914,6 @@ class MilkyFrogApp(App[None]):
             )
             raise
 
-    def _resolve_approval(self, answer: str) -> None:
-        """Interpret the user's y/n reply to a pending approval prompt."""
-        run_id = self._session.pending_approval
-        if run_id is None:
-            return
-        decision = self._session.resolve_approval(answer)
-        if decision is None:
-            self._append(
-                Text("Please answer y (approve) or n (deny).", style="dim"),
-                spaced=False,
-            )
-            return
-        self._session.pending_approval = None
-        self._start_approval(run_id, decision)
-
     # ── Key bindings ──────────────────────────────────────────────────
 
     def action_request_exit(self) -> None:
@@ -677,14 +922,15 @@ class MilkyFrogApp(App[None]):
     def action_cancel_run(self) -> None:
         """Interrupt the in-flight Run, if any (Esc).
 
-        Cooperative cancel first: signalling the token lets the Harness stop the
-        model stream and reach ``finish_cancelled`` (persisting CANCELLED with the
-        real run_id). ``worker.cancel()`` is a hard fallback if the token is
-        somehow not wired.
+        Signal cooperative cancellation first so the Harness can reach
+        ``finish_cancelled`` (persisting CANCELLED with the real run_id), then
+        hard-cancel the Textual worker so Esc still works when the stream or a
+        Tool is slow to honour the token.
         """
-        if not self._session.busy:
+        if not self.session.busy:
             return
-        if self._session.cancellation is not None:
-            self._session.cancel()
-        elif self._worker is not None:
+        self.query_one(RunStatusBar).set_cancelling()
+        if self.session.cancellation is not None:
+            self.session.cancel()
+        if self._worker is not None:
             self._worker.cancel()

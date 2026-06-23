@@ -40,6 +40,19 @@ class ApprovalDecision(StrEnum):
     DENY = "deny"
 
 
+@dataclass(frozen=True, slots=True)
+class ApprovalVerdict:
+    """User's verdict on a Run paused for tool approval, optionally with a
+    denial reason that is fed back to the agent.
+
+    Used in place of a bare ``ApprovalDecision`` so the user can provide a
+    reason when denying a tool call.
+    """
+
+    decision: ApprovalDecision
+    denial_reason: str | None = None
+
+
 class MessageRole(StrEnum):
     SYSTEM = "system"
     USER = "user"

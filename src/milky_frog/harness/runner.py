@@ -12,6 +12,7 @@ from uuid import uuid4
 from milky_frog.checkpoint import CheckpointStore, RunClaimError
 from milky_frog.domain import (
     ApprovalDecision,
+    ApprovalVerdict,
     ModelRequest,
     ModelResponse,
     ReasoningDelta,
@@ -108,7 +109,7 @@ class Harness:
         max_model_calls: int,
         cancellation: RunCancellation | None = None,
         prompt: str | None = None,
-        approval: ApprovalDecision | None = None,
+        approval: ApprovalVerdict | None = None,
     ) -> RunResult:
         """Advance an existing Run: load its snapshot, repair interrupted
         Tools, optionally append a new user turn, then advance.
@@ -192,7 +193,7 @@ class Harness:
                     if blocked:
                         result = ToolResult(blocked[0].reason, is_error=True)
                     elif approvals:
-                        return await self._emitter.finish_approval_needed(state, [call.name])
+                        return await self._emitter.finish_approval_needed(state, call)
                     else:
                         try:
                             result = await self._execute_tool(
@@ -221,16 +222,15 @@ class Harness:
         run_id: str,
         sandbox: Sandbox,
         cancellation: RunCancellation | None,
-        approval: ApprovalDecision | None,
+        approval: ApprovalVerdict | None,
     ) -> PreparedRun | RunResult:
         """Resolve tool calls that were pending approval on resume.
 
         ``approval`` is the user's verdict: ``DENY`` seals each pending call
-        with a refusal, ``APPROVE`` executes it, and ``None`` re-checks it
-        against the tool policy (which may re-pause).  Returns an updated
-        ``PreparedRun`` when all pending calls are resolved, or a ``RunResult``
-        when the Run terminates (re-pause, denial-as-cancel, or cancellation).
-        """
+        with a refusal (including any denial reason), ``APPROVE`` executes it,
+        and ``None`` re-checks it against the tool policy (which may re-pause).
+        Returns an updated ``PreparedRun`` when all pending calls are resolved,
+        or a ``RunResult`` when the Run terminates."""
         pending = unmatched_tool_calls(plan.state.messages)
         if not pending:
             return plan
@@ -257,12 +257,15 @@ class Harness:
         sandbox: Sandbox,
         call: ToolCall,
         cancellation: RunCancellation | None,
-        approval: ApprovalDecision | None,
+        approval: ApprovalVerdict | None,
     ) -> ToolResult | RunResult:
         """Decide one pending call's fate; ``RunResult`` ends the Run."""
-        if approval is ApprovalDecision.DENY:
-            return ToolResult("denied by user", is_error=True)
-        if approval is ApprovalDecision.APPROVE:
+        if approval is not None and approval.decision is ApprovalDecision.DENY:
+            msg = "denied by user"
+            if approval.denial_reason:
+                msg += f" (reason: {approval.denial_reason})"
+            return ToolResult(msg, is_error=True)
+        if approval is not None and approval.decision is ApprovalDecision.APPROVE:
             try:
                 return await self._execute_tool(
                     run_id, plan.state.workspace, sandbox, call, cancellation
@@ -277,7 +280,7 @@ class Harness:
         if blocked:
             return ToolResult(blocked[0].reason, is_error=True)
         if approvals:
-            return await self._emitter.finish_approval_needed(plan.state, [call.name])
+            return await self._emitter.finish_approval_needed(plan.state, call)
         try:
             return await self._execute_tool(
                 run_id, plan.state.workspace, sandbox, call, cancellation

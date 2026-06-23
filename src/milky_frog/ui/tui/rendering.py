@@ -23,7 +23,7 @@ class SlashCommand:
 COMMANDS: tuple[SlashCommand, ...] = (
     SlashCommand("/help", "Show available commands"),
     SlashCommand("/clear", "Clear the conversation and start fresh"),
-    SlashCommand("/resume", "Attach to or continue a Run", usage="/resume RUN_ID [prompt]"),
+    SlashCommand("/resume", "Attach to or continue a Run", usage="/resume [RUN_ID] [prompt]"),
     SlashCommand("/exit", "Leave Milky Frog"),
 )
 

@@ -10,6 +10,7 @@ from milky_frog.handlers.dispatcher import BaseHandler, EventDispatcher
 from milky_frog.handlers.events import (
     RunAfterModel,
     RunAfterTool,
+    RunBeforeModel,
     RunBeforeTool,
     RunCancelled,
     RunCompleted,
@@ -48,6 +49,7 @@ class TuiPresentationHandler(BaseHandler):
 
     def register(self, registry: EventDispatcher) -> None:
         registry.on(RunStarted)(self._on_started)
+        registry.on(RunBeforeModel)(self._on_before_model)
         registry.on(RunModelChunk)(self._on_model_chunk)
         registry.on(RunModelReasoning)(self._on_model_reasoning)
         registry.on(RunAfterModel)(self._on_after_model)
@@ -62,6 +64,10 @@ class TuiPresentationHandler(BaseHandler):
     async def _on_started(self, event: RunStarted, ctx: HandlerContext) -> None:
         del event, ctx
         self._running = RunUsage()
+
+    async def _on_before_model(self, event: RunBeforeModel, ctx: HandlerContext) -> None:
+        del event, ctx
+        self._emit(AddThinking(""))
 
     async def _on_model_chunk(self, event: RunModelChunk, ctx: HandlerContext) -> None:
         del ctx

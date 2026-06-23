@@ -40,6 +40,16 @@ class OpenAIModel:
             include_stream_usage if include_stream_usage is not None else base_url is None
         )
 
+    async def aclose(self) -> None:
+        """Close the underlying HTTP client and its connection pool.
+
+        Without this the ``AsyncOpenAI``/httpx client and its streaming async
+        generators are only finalized at interpreter shutdown — after the event
+        loop is gone — which surfaces as ``Task was destroyed but it is
+        pending!`` on a dangling ``async_generator_athrow``.
+        """
+        await self._client.close()
+
     async def stream(self, request: ModelRequest) -> AsyncGenerator[ModelChunk, None]:
         messages = [_message_payload(message) for message in request.messages]
         arguments: dict[str, Any] = {

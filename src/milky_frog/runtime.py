@@ -6,8 +6,10 @@ import signal
 from collections.abc import Awaitable
 from pathlib import Path
 from types import FrameType, TracebackType
+from typing import cast
 
 from milky_frog.checkpoint import SqliteCheckpointStore
+from milky_frog.defer import DeferStack
 from milky_frog.domain import ResumeError, RunCancellation, RunRequest, RunResult
 from milky_frog.handlers import BaseHandler, EventDispatcher, default_handlers
 from milky_frog.harness.runner import Harness
@@ -60,8 +62,9 @@ class MilkyFrog:
         for bundle in self._handlers:
             bundle.register(self._dispatcher)
 
+        self._model = OpenAIModel(api_key=api_key, model=model, base_url=settings.base_url)
         self._harness = Harness(
-            model=OpenAIModel(api_key=api_key, model=model, base_url=settings.base_url),
+            model=self._model,
             tools=ToolRegistry(default_tools()),
             checkpoints=self._checkpoints,
             handlers=self._dispatcher,
@@ -90,6 +93,20 @@ class MilkyFrog:
     def __enter__(self) -> MilkyFrog:
         return self
 
+    def close(self) -> None:
+        """Release handlers, model, and the reused event loop."""
+        if self._loop is None:
+            self._loop = asyncio.new_event_loop()
+        loop = self._loop
+        with DeferStack(logger=logger).sync_on(loop) as defer:
+            defer.defer_set(self, "_handlers", [])
+            defer.defer_set(self, "_loop", None)
+            defer.defer_close(loop, label="event_loop")
+            defer.defer_shutdown_asyncgens(loop)
+            defer.defer_aclose(self._model, label="OpenAIModel")
+            for handler in self._handlers:
+                defer.defer_aclose(handler)
+
     def __exit__(
         self,
         exc_type: type[BaseException] | None,
@@ -97,21 +114,6 @@ class MilkyFrog:
         traceback: TracebackType | None,
     ) -> None:
         self.close()
-
-    def close(self) -> None:
-        """Release assembled Handlers and the reused event loop, once."""
-        if self._loop is None:
-            self._loop = asyncio.new_event_loop()
-        try:
-            for handler in self._handlers:
-                try:
-                    self._loop.run_until_complete(handler.aclose())
-                except Exception:
-                    logger.exception("Handler aclose failed: %s", type(handler).__name__)
-        finally:
-            self._handlers = []
-            self._loop.close()
-            self._loop = None
 
     @property
     def model_name(self) -> str:
@@ -144,7 +146,7 @@ class MilkyFrog:
         """Start one goal synchronously."""
         config = load_project_config(workspace)
         self._cancellation = RunCancellation()
-        return self._drive(
+        return self._run_coro(
             self._harness.run(
                 RunRequest(
                     prompt,
@@ -174,7 +176,7 @@ class MilkyFrog:
             raise ResumeError(f"unknown Run: {run_id}")
         config = load_project_config(stored.workspace)
         self._cancellation = RunCancellation()
-        return self._drive(
+        return self._run_coro(
             self._harness.resume(
                 run_id,
                 max_model_calls=config.max_model_calls,
@@ -183,10 +185,11 @@ class MilkyFrog:
             )
         )
 
-    def _drive(self, coro: Awaitable[RunResult]) -> RunResult:
+    def _run_coro(self, coro: Awaitable[RunResult]) -> RunResult:
         """Run one foreground coroutine on the reused loop with SIGINT→cancel wiring."""
         if self._loop is None:
             self._loop = asyncio.new_event_loop()
+        loop = self._loop
         previous_sigint = signal.getsignal(signal.SIGINT)
 
         def _request_cancel(signum: int, frame: FrameType | None) -> None:
@@ -198,11 +201,13 @@ class MilkyFrog:
             elif previous_sigint is signal.SIG_DFL:
                 signal.default_int_handler(signum, frame)
 
-        signal.signal(signal.SIGINT, _request_cancel)
-        try:
-            result = self._loop.run_until_complete(coro)
-        finally:
-            signal.signal(signal.SIGINT, previous_sigint)
-            self._cancellation = None
-            self._loop.run_until_complete(asyncio.sleep(0))
-        return result
+        with DeferStack().sync_on(loop) as defer:
+            defer.defer_yield_loop(loop)
+            defer.defer_set(self, "_cancellation", None)
+            defer.defer_signal(
+                signal.SIGINT,
+                cast(signal.Handlers, previous_sigint),
+                label="restore_sigint",
+            )
+            signal.signal(signal.SIGINT, _request_cancel)
+            return loop.run_until_complete(coro)

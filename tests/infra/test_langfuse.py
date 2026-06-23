@@ -185,9 +185,7 @@ async def test_langfuse_run_failed_records_error_span_and_cleans_up(
     await registry.notify(RunStarted(run_id="run-1", request=_run_request(), state=_run_state()))
 
     failed_result = RunResult("run-1", RunStatus.FAILED, "RuntimeError: boom", 0)
-    await registry.notify(
-        RunFailed(run_id="run-1", result=failed_result, state=_run_state())
-    )
+    await registry.notify(RunFailed(run_id="run-1", result=failed_result, state=_run_state()))
 
     failed = client.observations[-1]
     assert failed.start_kwargs["name"] == "run_failed"

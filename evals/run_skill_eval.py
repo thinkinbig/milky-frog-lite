@@ -12,10 +12,9 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from milky_frog.gates import PermissivePolicy
-
 from evals.read_collector import ReadCollector
-from milky_frog.handlers import LifecycleBus
+from milky_frog.handlers import EventDispatcher
+from milky_frog.harness.tools import PermissivePolicy
 from milky_frog.project import PROJECT_DIRNAME
 from milky_frog.runtime import MilkyFrog
 from milky_frog.settings import Settings
@@ -48,7 +47,7 @@ def run_task(settings: Settings, task: dict[str, object]) -> dict[str, object]:
     skill_path = _install_skill(workspace)
     expected_read = str(task["expect_skill_read"])
 
-    bus = LifecycleBus()
+    bus = EventDispatcher()
     collector = ReadCollector()
     collector.register(bus)
     with MilkyFrog.from_settings(
@@ -57,8 +56,7 @@ def run_task(settings: Settings, task: dict[str, object]) -> dict[str, object]:
         result = frog.run(str(task["prompt"]), workspace)
 
     reads = [
-        _normalize(record.path, workspace)
-        for record in collector.reads.get(result.run_id, [])
+        _normalize(record.path, workspace) for record in collector.reads.get(result.run_id, [])
     ]
     read_skill = any(expected_read in path or path.endswith("tdd/SKILL.md") for path in reads)
     mentioned = "tdd" in result.final_message.lower()
