@@ -12,11 +12,12 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from milky_frog.runtime import MilkyFrog
+
 from evals.read_collector import ReadCollector
 from milky_frog.handlers import EventDispatcher
 from milky_frog.harness.tools import PermissivePolicy
 from milky_frog.project import PROJECT_DIRNAME
-from milky_frog.runtime import MilkyFrog
 from milky_frog.settings import Settings
 
 REPO_ROOT = Path(__file__).resolve().parent.parent

@@ -43,6 +43,7 @@ from milky_frog.ui.tui.rendering import (
     format_tool_call,
     matching_commands,
     summarize_tool_result,
+    tool_result_renderable,
 )
 from milky_frog.ui.tui.textual_patch import patch_textual_utf8_decode
 from milky_frog.ui.usage import format_run_usage
@@ -684,7 +685,7 @@ class MilkyFrogApp(App[None]):
             self._append(_diff_renderable(diff), spaced=False)
 
     def on_tool_result_msg(self, event: ToolResultMsg) -> None:
-        """Write the tool result as an indented summary line under its call."""
+        """Write the tool result: full output for bash, summary for others."""
         if self._tool_spinner_timer is not None:
             self._tool_spinner_timer.stop()
             self._tool_spinner_timer = None
@@ -696,9 +697,13 @@ class MilkyFrogApp(App[None]):
             )
             self._active_tool_widget = None
 
-        summary = summarize_tool_result(event.content, is_error=event.is_error)
-        mark, style = ("✗", "red") if event.is_error else ("⎿", "bright_black")
-        self._append(Text.assemble((f"    {mark} ", style), (summary, "dim")))
+        renderable = tool_result_renderable(event.name, event.content, is_error=event.is_error)
+        if renderable is not None:
+            self._append(renderable, spaced=False)
+        else:
+            summary = summarize_tool_result(event.content, is_error=event.is_error)
+            mark, style = ("✗", "red") if event.is_error else ("⎿", "bright_black")
+            self._append(Text.assemble((f"    {mark} ", style), (summary, "dim")), spaced=False)
 
     def on_update_usage(self, event: UpdateUsage) -> None:
         self.query_one(RunStatusBar).set_usage(event.usage)

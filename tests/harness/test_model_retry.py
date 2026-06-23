@@ -108,3 +108,21 @@ async def test_non_retriable_model_errors_do_not_retry(tmp_path: Path) -> None:
     assert result.status is RunStatus.FAILED
     assert model.calls == 1
     assert notices == []
+
+
+# ── retry_sleep ──────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_retry_sleep_awaits_without_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    from milky_frog.harness.model_retry import retry_sleep
+
+    slept: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        slept.append(delay)
+
+    monkeypatch.setattr("asyncio.sleep", fake_sleep)
+
+    await retry_sleep(1.5)
+    assert slept == [1.5]

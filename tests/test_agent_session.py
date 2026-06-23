@@ -223,9 +223,7 @@ async def test_session_respond_approval_executes_pending_tool(
     )
 
     async with AgentSession.from_settings(settings) as session:
-        result = await session.respond_approval(
-            run_id, ApprovalVerdict(ApprovalDecision.APPROVE)
-        )
+        result = await session.respond_approval(run_id, ApprovalVerdict(ApprovalDecision.APPROVE))
 
     assert result.run_id == run_id
     assert result.status is RunStatus.COMPLETED
@@ -241,6 +239,4 @@ async def test_session_respond_approval_rejects_non_waiting_run(tmp_path: Path) 
 
     async with AgentSession.from_settings(settings) as session:
         with pytest.raises(ResumeError, match="not waiting for tool approval"):
-            await session.respond_approval(
-                run_id, ApprovalVerdict(ApprovalDecision.APPROVE)
-            )
+            await session.respond_approval(run_id, ApprovalVerdict(ApprovalDecision.APPROVE))

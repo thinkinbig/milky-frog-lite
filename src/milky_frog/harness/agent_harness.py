@@ -102,8 +102,7 @@ class AgentHarness:
                     raise ResumeError(f"unknown Run: {run_id}")
                 if stored.status is RunStatus.WAITING_FOR_APPROVAL:
                     raise ResumeError(
-                        f"Run {run_id} is waiting for tool approval; "
-                        "use respond_approval instead"
+                        f"Run {run_id} is waiting for tool approval; use respond_approval instead"
                     )
 
                 sandbox = self._sandbox_factory(stored.workspace)
