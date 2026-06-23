@@ -3,6 +3,8 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 
+from pydantic import JsonValue
+
 from milky_frog.domain import (
     ModelRequest,
     ModelResponse,
@@ -37,6 +39,77 @@ from milky_frog.handlers import (
     SystemPromptSection,
 )
 from milky_frog.handlers.events import NoticeLevel
+
+
+def _format_approval_message(call: ToolCall) -> str:
+    """Build a user-facing message for a tool call that needs approval.
+
+    Shows the tool name and a concise preview of its arguments,
+    matching the rich context pattern from pi's permission system.
+    """
+    tool_name = call.name
+
+    if tool_name == "bash":
+        command = call.arguments.get("command", "")
+        if command:
+            return (
+                "approval needed for: bash"
+                f"\n\nAgent requested bash command '{command}'."
+                " Allow this command?"
+            )
+        return "approval needed for: bash\n\nAllow this bash command?"
+
+    if tool_name == "read":
+        path = call.arguments.get("path", "")
+        if path:
+            return (
+                f"approval needed for: read\n\nAgent requested to read '{path}'. Allow this read?"
+            )
+        return "approval needed for: read\n\nAllow this file read?"
+
+    if tool_name == "write":
+        path = call.arguments.get("path", "")
+        if path:
+            return (
+                "approval needed for: write"
+                f"\n\nAgent requested to write to '{path}'."
+                " Allow this write?"
+            )
+        return "approval needed for: write\n\nAllow this file write?"
+
+    if tool_name == "edit":
+        path = call.arguments.get("path", "")
+        if path:
+            return (
+                f"approval needed for: edit\n\nAgent requested to edit '{path}'. Allow this edit?"
+            )
+        return "approval needed for: edit\n\nAllow this edit?"
+
+    # Generic tool: show first few string arguments as preview.
+    preview = _tool_arg_preview(call.arguments)
+    if preview:
+        return (
+            f"approval needed for: {tool_name}"
+            f"\n\nAgent requested tool '{tool_name}' {preview}."
+            " Allow this call?"
+        )
+    return (
+        f"approval needed for: {tool_name}\n\nAgent requested tool '{tool_name}'. Allow this call?"
+    )
+
+
+def _tool_arg_preview(arguments: dict[str, JsonValue]) -> str:
+    """Return a compact preview of the first few relevant arguments."""
+    parts: list[str] = []
+    for key in ("path", "pattern", "target", "url", "command"):
+        value = arguments.get(key)
+        if isinstance(value, str) and value:
+            parts.append(f"{key}: '{value}'")
+            if len(parts) >= 2:
+                break
+    if parts:
+        return "(" + ", ".join(parts) + ")"
+    return ""
 
 
 class RunEmitter:
@@ -216,8 +289,8 @@ class RunEmitter:
         await self.run_cancelled(state, result)
         return result
 
-    async def finish_approval_needed(self, state: RunState, tool_names: list[str]) -> RunResult:
-        message = f"approval needed for: {', '.join(tool_names)}"
+    async def finish_approval_needed(self, state: RunState, call: ToolCall) -> RunResult:
+        message = _format_approval_message(call)
         result = RunResult(
             state.run_id,
             RunStatus.WAITING_FOR_APPROVAL,

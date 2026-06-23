@@ -4,6 +4,7 @@ from pathlib import Path
 
 from milky_frog.domain import (
     ApprovalDecision,
+    ApprovalVerdict,
     RunCancellation,
     RunRequest,
     RunResult,
@@ -84,7 +85,7 @@ class RunAdvancer:
             self.busy = False
             self.cancellation = None
 
-    async def do_approve(self, run_id: str, decision: ApprovalDecision) -> RunResult:
+    async def do_approve(self, run_id: str, verdict: ApprovalVerdict) -> RunResult:
         """Resume a paused Run with the user's approval verdict."""
         cancellation = self.cancellation
         frog = self.frog
@@ -96,7 +97,7 @@ class RunAdvancer:
             result = await frog.harness.resume(
                 run_id,
                 max_model_calls=config.max_model_calls,
-                approval=decision,
+                approval=verdict,
                 cancellation=cancellation,
             )
             self.run_id = result.run_id

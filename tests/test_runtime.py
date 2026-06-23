@@ -42,7 +42,8 @@ def test_milky_frog_runs_through_configured_runtime(
     monkeypatch.setattr(OpenAIModel, "stream", fake_stream)
     settings = Settings(tmp_path, "test-key", "https://example.test", "test-model", _NO_LANGFUSE)
 
-    result = MilkyFrog.from_settings(settings).run("build it", tmp_path)
+    with MilkyFrog.from_settings(settings) as frog:
+        result = frog.run("build it", tmp_path)
 
     assert result.status is RunStatus.COMPLETED
     assert result.final_message == "done"
@@ -70,16 +71,15 @@ def test_milky_frog_cancel_stops_foreground_run(
         del ctx
         cancelled.append(event)
 
-    frog = MilkyFrog.from_settings(settings, handlers=registry)
+    with MilkyFrog.from_settings(settings, handlers=registry) as frog:
+        def request_cancel() -> None:
+            time.sleep(0.01)
+            frog.cancel()
 
-    def request_cancel() -> None:
-        time.sleep(0.01)
-        frog.cancel()
-
-    cancel_thread = threading.Thread(target=request_cancel)
-    cancel_thread.start()
-    result = frog.run("slow task", tmp_path)
-    cancel_thread.join(timeout=5.0)
+        cancel_thread = threading.Thread(target=request_cancel)
+        cancel_thread.start()
+        result = frog.run("slow task", tmp_path)
+        cancel_thread.join(timeout=5.0)
 
     assert result.status is RunStatus.CANCELLED
     assert len(cancelled) == 1
@@ -178,7 +178,8 @@ def test_milky_frog_resume_advances_stored_run(
     run_id = "paused-run"
     seed_run(store, run_id, tmp_path, status=RunStatus.PAUSED_LIMIT, final_message="limit")
 
-    result = MilkyFrog.from_settings(settings).resume(run_id)
+    with MilkyFrog.from_settings(settings) as frog:
+        result = frog.resume(run_id)
 
     assert result.run_id == run_id
     assert result.status is RunStatus.COMPLETED
@@ -188,5 +189,5 @@ def test_milky_frog_resume_advances_stored_run(
 def test_milky_frog_resume_rejects_unknown_run(tmp_path: Path) -> None:
     settings = Settings(tmp_path, "test-key", "https://example.test", "test-model", _NO_LANGFUSE)
 
-    with pytest.raises(ResumeError, match="unknown Run"):
-        MilkyFrog.from_settings(settings).resume("does-not-exist")
+    with MilkyFrog.from_settings(settings) as frog, pytest.raises(ResumeError, match="unknown Run"):
+        frog.resume("does-not-exist")

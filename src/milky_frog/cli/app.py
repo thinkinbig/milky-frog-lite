@@ -195,8 +195,8 @@ def run(task: Annotated[str, typer.Argument()]) -> None:
     except MissingModelConfiguration:
         _render_configuration_error()
         raise typer.Exit(code=2) from None
-    frog = MilkyFrog.from_settings(settings)
-    result = frog.run(task, Path.cwd())
+    with MilkyFrog.from_settings(settings) as frog:
+        result = frog.run(task, Path.cwd())
     _render_result(result)
 
 
@@ -226,4 +226,5 @@ def resume(
                 hint='Start a new Run with: milky-frog run "your task"',
             )
             raise typer.Exit(code=1)
-    _resume_run(MilkyFrog.from_settings(settings), run_id, prompt=task)
+    with MilkyFrog.from_settings(settings) as frog:
+        _resume_run(frog, run_id, prompt=task)
