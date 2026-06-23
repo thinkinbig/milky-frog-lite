@@ -120,15 +120,12 @@ def summarize_tool_result(content: str, *, is_error: bool) -> str:
     return first
 
 
-def tool_result_renderable(tool_name: str, content: str, *, is_error: bool) -> Text | None:
-    """Render a tool's result as a full inline block, or ``None`` for one-line summary.
+def bash_output_renderable(content: str, *, is_error: bool) -> Text | None:
+    """Render bash command output as a full inline block, or ``None`` if empty.
 
-    Returns a rich renderable for tools whose output is meaningful to see
-    in full (bash).  Other tools fall back to the compact summary line.
+    Shared by git, grep, and generic bash handlers; each can wrap or replace
+    this for command-specific formatting in the future.
     """
-    if tool_name != "bash":
-        return None
-
     stripped = content.strip()
     if not stripped:
         return None
@@ -149,8 +146,18 @@ def tool_result_renderable(tool_name: str, content: str, *, is_error: bool) -> T
         extra = len(lines) - MAX_RESULT_LINES
         body = f"{shown}\n({extra} more line{'s' if extra != 1 else ''})"
 
-    style = "red" if is_error else "default"
-    return Text(body, style=style)
+    if is_error:
+        return Text(body, style="red")
+    return Text.from_ansi(body)
+
+
+def tool_result_renderable(tool_name: str, content: str, *, is_error: bool) -> Text | None:
+    """Render a non-bash tool's result as a full inline block, or ``None`` for summary.
+
+    Bash results are routed through ``BashRenderHandler`` and never reach here.
+    This hook remains for future non-bash tools that need inline rendering.
+    """
+    return None
 
 
 # ── File-change diffs ──────────────────────────────────────────────────
@@ -183,8 +190,11 @@ def file_change_diff(
     """Derive a colored diff from a file-editing tool's call arguments, or ``None``.
 
     ``edit_file`` carries ``old``/``new`` and renders as a unified diff.
+    ``write_file`` carries ``content`` and renders as all-additions (empty → content).
     Other tools return ``None`` (no inline diff preview).
     """
     if name == "edit_file" and "old" in arguments and "new" in arguments:
         return build_diff_lines(_stringify(arguments["old"]), _stringify(arguments["new"]))
+    if name == "write_file" and "content" in arguments:
+        return [("add", line) for line in _stringify(arguments["content"]).splitlines()] or None
     return None

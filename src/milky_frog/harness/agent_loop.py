@@ -219,18 +219,34 @@ class AgentLoop:
         return result
 
     @staticmethod
+    async def _wait_for_cancellation(cancellation: RunCancellation) -> None:
+        while not cancellation.is_cancelled:
+            await asyncio.sleep(0.05)
+
+    @staticmethod
     async def _run_cancellable(
         coro: Coroutine[Any, Any, Any],
         cancellation: RunCancellation | None,
     ) -> Any:
         task: asyncio.Task[Any] = asyncio.create_task(coro)
+        poll: asyncio.Task[None] | None = None
+        if cancellation is not None:
+            poll = asyncio.create_task(AgentLoop._wait_for_cancellation(cancellation))
         try:
-            while not task.done():
-                if is_cancelled(cancellation):
-                    raise ToolRunCancelled
-                await asyncio.sleep(0)
-            return await task
+            if poll is None:
+                return await task
+            done, _pending = await asyncio.wait(
+                {task, poll},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if poll in done:
+                raise ToolRunCancelled
+            return task.result()
         finally:
+            if poll is not None and not poll.done():
+                poll.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await poll
             if not task.done():
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):

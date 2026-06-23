@@ -92,15 +92,11 @@ class TuiPresentationHandler(BaseHandler):
         self._emit(ToolCallMsg(call.name, call.arguments))
 
     async def _on_after_tool(self, event: RunAfterTool, ctx: HandlerContext | None = None) -> None:
+        if event.call.name == "bash":
+            return  # BashRenderHandler handles bash results
         call = event.call
         result = event.result
-        self._emit(
-            ToolResultMsg(
-                call.name,
-                content=result.content,
-                is_error=result.is_error,
-            )
-        )
+        self._emit(ToolResultMsg(call.name, content=result.content, is_error=result.is_error))
 
     async def _on_notice(self, event: RunNotice, ctx: HandlerContext | None = None) -> None:
         self._emit(RunNoticeMsg(event.message, level=event.level))

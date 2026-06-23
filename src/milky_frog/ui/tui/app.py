@@ -28,6 +28,9 @@ from milky_frog.ui.tui.messages import (
     AddText,
     AddThinking,
     ApprovalRequired,
+    BashOutputMsg,
+    GitOutputMsg,
+    GrepOutputMsg,
     RunError,
     RunFinished,
     RunNoticeMsg,
@@ -38,6 +41,7 @@ from milky_frog.ui.tui.messages import (
 from milky_frog.ui.tui.rendering import (
     COMMANDS,
     DiffKind,
+    bash_output_renderable,
     complete_command,
     file_change_diff,
     format_tool_call,
@@ -452,7 +456,7 @@ class MilkyFrogApp(App[None]):
         # in ``run()`` so Textual's sync outer loop can bracket the lifecycle).
         self._session = AgentSession(
             settings,
-            bundles=[tui_presentation_bundle(self.post_message)],
+            bundles=tui_presentation_bundle(self.post_message),
         )
         self._worker: Worker[None] | None = None
         self._approval_event: ApprovalRequired | None = None
@@ -684,19 +688,31 @@ class MilkyFrogApp(App[None]):
         if diff:
             self._append(_diff_renderable(diff), spaced=False)
 
-    def on_tool_result_msg(self, event: ToolResultMsg) -> None:
-        """Write the tool result: full output for bash, summary for others."""
+    def _finalize_tool_call(self, *, is_error: bool) -> None:
+        """Stop the tool spinner and update the call-site widget with the final mark."""
         if self._tool_spinner_timer is not None:
             self._tool_spinner_timer.stop()
             self._tool_spinner_timer = None
-
         if self._active_tool_widget is not None:
-            mark, style = ("✗", "bold red") if event.is_error else ("⏺", "bold cyan")
+            mark, style = ("✗", "bold red") if is_error else ("⏺", "bold cyan")
             self._active_tool_widget.update(
                 Text.assemble((f"  {mark} ", style), (self._active_tool_signature, "cyan"))
             )
             self._active_tool_widget = None
 
+    def _render_command_output(self, content: str, *, is_error: bool) -> None:
+        """Render bash-family output: full inline block when non-empty, summary otherwise."""
+        renderable = bash_output_renderable(content, is_error=is_error)
+        if renderable is not None:
+            self._append(renderable, spaced=False)
+        else:
+            summary = summarize_tool_result(content, is_error=is_error)
+            mark, style = ("✗", "red") if is_error else ("⎿", "bright_black")
+            self._append(Text.assemble((f"    {mark} ", style), (summary, "dim")), spaced=False)
+
+    def on_tool_result_msg(self, event: ToolResultMsg) -> None:
+        """Non-bash tool result: stop spinner and show a compact summary line."""
+        self._finalize_tool_call(is_error=event.is_error)
         renderable = tool_result_renderable(event.name, event.content, is_error=event.is_error)
         if renderable is not None:
             self._append(renderable, spaced=False)
@@ -704,6 +720,21 @@ class MilkyFrogApp(App[None]):
             summary = summarize_tool_result(event.content, is_error=event.is_error)
             mark, style = ("✗", "red") if event.is_error else ("⎿", "bright_black")
             self._append(Text.assemble((f"    {mark} ", style), (summary, "dim")), spaced=False)
+
+    def on_git_output_msg(self, event: GitOutputMsg) -> None:
+        """git command result: stop spinner and render with ANSI colors."""
+        self._finalize_tool_call(is_error=event.is_error)
+        self._render_command_output(event.content, is_error=event.is_error)
+
+    def on_grep_output_msg(self, event: GrepOutputMsg) -> None:
+        """grep/rg result: stop spinner and render matches inline."""
+        self._finalize_tool_call(is_error=event.is_error)
+        self._render_command_output(event.content, is_error=event.is_error)
+
+    def on_bash_output_msg(self, event: BashOutputMsg) -> None:
+        """Generic bash result: stop spinner and render output inline."""
+        self._finalize_tool_call(is_error=event.is_error)
+        self._render_command_output(event.content, is_error=event.is_error)
 
     def on_update_usage(self, event: UpdateUsage) -> None:
         self.query_one(RunStatusBar).set_usage(event.usage)
