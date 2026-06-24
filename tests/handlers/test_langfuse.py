@@ -15,7 +15,7 @@ from milky_frog.domain import (
     RunStatus,
     TextDelta,
 )
-from milky_frog.handlers.events import (
+from milky_frog.events.events import (
     RunBeforeModel,
     RunBeforeResume,
     RunBeforeStart,
@@ -30,8 +30,8 @@ from milky_frog.handlers.events import (
     RunTurnEnd,
     RunTurnStart,
 )
-from milky_frog.handlers.hub import EventHub
-from milky_frog.infra.observability.langfuse import LangfuseHandler
+from milky_frog.events.hub import EventHub
+from milky_frog.handlers.langfuse import LangfuseHandler
 from milky_frog.settings import LangfuseSettings
 from tests.stubs import LangfuseClientFactory
 
@@ -77,7 +77,7 @@ async def langfuse_handler(
 ) -> AsyncIterator[tuple[LangfuseHandler, FakeLangfuseClient]]:
     client = FakeLangfuseClient()
     monkeypatch.setattr(
-        "milky_frog.infra.observability.langfuse.Langfuse",
+        "milky_frog.handlers.langfuse.Langfuse",
         LangfuseClientFactory(client),
     )
     settings = LangfuseSettings(

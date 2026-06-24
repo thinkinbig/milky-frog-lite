@@ -23,8 +23,8 @@ Checkpoint persistence unless a newer ADR says otherwise.
 ## Three lanes (post-0014)
 
 1. **Checkpoint snapshot** — `runs.state_json`, `checkpoint/snapshot.py`
-2. **Lifecycle signal** — `handlers/events.py`, broadcast by `EventHub`
-   (`handlers/hub.py`); only the Harness publishes (ADR-0012)
+2. **Lifecycle signal** — `events/events.py`, broadcast by `EventHub`
+   (`events/hub.py`); only the Harness publishes (ADR-0012)
 3. **Handler control return** — `HandlerResult` (`handlers/context.py`) returned
    by `RunBefore*` handlers and applied by the emitter; this is how authorization,
    context build, and token budget are expressed (ADR-0012). There is no separate

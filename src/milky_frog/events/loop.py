@@ -21,7 +21,8 @@ from milky_frog.domain import (
     ToolRunCancelled,
     is_cancelled,
 )
-from milky_frog.handlers import EventHub
+from milky_frog.events.hub import EventHub
+from milky_frog.handlers.context import ApprovalResult, BlockResult, BudgetedRequest
 from milky_frog.harness.model_retry import (
     MODEL_RETRY_BASE_DELAY_S,
     MODEL_RETRY_MAX_ATTEMPTS,
@@ -76,8 +77,6 @@ class AgentLoop:
                 await self._hub.turn_started(run_id, model_call=model_call)
                 before_model_results = await self._hub.before_model(run_id, request)
 
-                from milky_frog.handlers import BudgetedRequest
-
                 budgeted_requests = [
                     r for r in before_model_results if isinstance(r, BudgetedRequest)
                 ]
@@ -104,8 +103,6 @@ class AgentLoop:
                         return await self._hub.finish_cancelled(state)
 
                     check_results = await self._hub.before_tool(run_id, call)
-
-                    from milky_frog.handlers import ApprovalResult, BlockResult
 
                     blocked = [r for r in check_results if isinstance(r, BlockResult)]
                     approvals = [r for r in check_results if isinstance(r, ApprovalResult)]

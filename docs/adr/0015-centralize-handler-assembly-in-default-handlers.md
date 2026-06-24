@@ -22,7 +22,7 @@ three inherit the no-op default).
 ## Decision
 
 Assemble every lifecycle handler bundle in **one module-level factory**,
-`handlers/assembly.py::session_handler_bundles(settings, checkpoints, *, tool_policy,
+`handlers/bundles.py::session_handler_bundles(settings, checkpoints, *, tool_policy,
 extra)`. It returns the full ordered bundle list — `CheckpointHandler`,
 `PolicyHandler`, `SkillCatalogHandler`, caller-supplied `extra`, then
 `LangfuseHandler` (via its own `from_settings`, which owns the `active` check).
@@ -82,7 +82,7 @@ ADR-0012's single-publisher lifecycle bus.
 ## 决策
 
 把每个 lifecycle handler bundle 集中到**单一模块级工厂**
-`handlers/assembly.py::session_handler_bundles(settings, checkpoints, *, tool_policy,
+`handlers/bundles.py::session_handler_bundles(settings, checkpoints, *, tool_policy,
 extra)`。它返回完整有序的 bundle 列表——`CheckpointHandler`、`PolicyHandler`、
 `SkillCatalogHandler`、调用方传入的 `extra`，最后是 `LangfuseHandler`（经其自身的
 `from_settings`，由它负责 `active` 检查）。

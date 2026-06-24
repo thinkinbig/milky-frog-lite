@@ -11,8 +11,8 @@ from milky_frog.domain import (
     TextDelta,
     TokenUsage,
 )
-from milky_frog.handlers import EventHub
-from milky_frog.handlers.events import (
+from milky_frog.events import EventHub
+from milky_frog.events.events import (
     RunAfterModel,
     RunModelChunk,
     RunNotice,

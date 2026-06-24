@@ -20,7 +20,7 @@ from milky_frog.domain import (
     TextDelta,
     ToolCall,
 )
-from milky_frog.handlers import BaseHandler, EventHub, RunCancelled
+from milky_frog.events import BaseHandler, EventHub, RunCancelled
 from milky_frog.harness.agent_harness import AgentHarness
 from milky_frog.models import OpenAIModel
 from milky_frog.settings import LangfuseSettings, Settings

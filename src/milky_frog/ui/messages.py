@@ -4,7 +4,7 @@ from pydantic import JsonValue
 from textual.message import Message
 
 from milky_frog.domain import RunResult, RunStatus, RunUsage
-from milky_frog.handlers.events import NoticeLevel
+from milky_frog.events.events import NoticeLevel
 
 
 class AddThinking(Message):

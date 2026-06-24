@@ -3,8 +3,8 @@ from dataclasses import dataclass
 import pytest
 
 from milky_frog.domain import ToolCall
-from milky_frog.handlers.events import BaseEvent, RunBeforeTool, RunNotice
-from milky_frog.handlers.hub import EventHub
+from milky_frog.events.events import BaseEvent, RunBeforeTool, RunNotice
+from milky_frog.events.hub import EventHub
 
 
 @dataclass(frozen=True)

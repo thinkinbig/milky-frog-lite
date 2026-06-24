@@ -25,7 +25,7 @@ from milky_frog.domain import ApprovalDecision, ApprovalVerdict, ResumeError, Ru
 from milky_frog.harness.state import unmatched_tool_calls
 from milky_frog.project import load_project_config
 from milky_frog.settings import Settings
-from milky_frog.ui.assembly import tui_presentation_bundle
+from milky_frog.ui.bundles import tui_presentation_bundle
 from milky_frog.ui.cli import runs_table
 from milky_frog.ui.logo import welcome_banner
 from milky_frog.ui.messages import (

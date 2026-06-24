@@ -6,7 +6,7 @@ from textual.message import Message
 
 from milky_frog.domain import RunResult, RunStatus, RunUsage
 from milky_frog.handlers.context import HandlerContext
-from milky_frog.handlers.events import (
+from milky_frog.events.events import (
     RunAfterModel,
     RunAfterTool,
     RunBeforeModel,
@@ -20,7 +20,7 @@ from milky_frog.handlers.events import (
     RunPaused,
     RunStarted,
 )
-from milky_frog.handlers.hub import BaseHandler, EventHub
+from milky_frog.events.hub import BaseHandler, EventHub
 from milky_frog.ui.messages import (
     AddText,
     AddThinking,

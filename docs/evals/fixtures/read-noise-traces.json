@@ -573,7 +573,7 @@
       },
       {
         "name": "read_file",
-        "path": "src/milky_frog/handlers/assembly.py",
+        "path": "src/milky_frog/handlers/bundles.py",
         "error": false
       },
       {
@@ -671,7 +671,7 @@
       },
       {
         "name": "read_file",
-        "path": "src/milky_frog/handlers/events.py",
+        "path": "src/milky_frog/events/events.py",
         "error": false
       },
       {
@@ -1173,7 +1173,7 @@
       },
       {
         "name": "read_file",
-        "path": "src/milky_frog/handlers/events.py",
+        "path": "src/milky_frog/events/events.py",
         "error": false
       },
       {

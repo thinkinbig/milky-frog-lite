@@ -6,7 +6,7 @@ import pytest
 
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import RunRequest, RunStatus
-from milky_frog.handlers import EventHub, RunFailed, RunNotice
+from milky_frog.events import EventHub, RunFailed, RunNotice
 from milky_frog.harness.model_retry import is_retriable_model_error
 from milky_frog.harness.tools import ToolRegistry
 from tests.stubs import FlakyConnectionModel, ImmediateErrorModel, make_harness
@@ -20,7 +20,7 @@ def instant_retry_sleep(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     async def instant_sleep(delay: float) -> None:
         delays.append(delay)
 
-    monkeypatch.setattr("milky_frog.harness.agent_loop.retry_sleep", instant_sleep)
+    monkeypatch.setattr("milky_frog.events.loop.retry_sleep", instant_sleep)
     return delays
 
 

@@ -20,7 +20,7 @@ from milky_frog.domain import (
     RunStatus,
     StreamDone,
 )
-from milky_frog.handlers import EventHub
+from milky_frog.events import EventHub
 from milky_frog.harness.state import (
     INTERRUPTED_TOOL_RESULT,
 )

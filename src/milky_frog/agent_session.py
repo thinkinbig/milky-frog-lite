@@ -17,7 +17,8 @@ from milky_frog.domain import (
     RunResult,
     RunStatus,
 )
-from milky_frog.handlers import BaseHandler, EventHub, session_handler_bundles
+from milky_frog.events import BaseHandler, EventHub
+from milky_frog.handlers.bundles import session_handler_bundles
 from milky_frog.handlers.context import HandlerContext
 from milky_frog.harness.agent_harness import AgentHarness
 from milky_frog.harness.sandbox import LocalSandbox, SandboxFactory

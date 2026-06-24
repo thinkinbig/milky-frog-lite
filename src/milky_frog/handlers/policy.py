@@ -8,9 +8,9 @@ without any additional wiring.
 from __future__ import annotations
 
 from milky_frog.domain import ToolDecision
+from milky_frog.events.events import RunBeforeTool
+from milky_frog.events.hub import BaseHandler, EventHub
 from milky_frog.handlers.context import ApprovalResult, BlockResult, HandlerContext, HandlerResult
-from milky_frog.handlers.events import RunBeforeTool
-from milky_frog.handlers.hub import BaseHandler, EventHub
 
 
 class PolicyHandler(BaseHandler):

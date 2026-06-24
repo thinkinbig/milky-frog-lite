@@ -6,8 +6,7 @@ import pytest
 
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import RunResult, RunState, RunStatus, ToolCall
-from milky_frog.handlers import (
-    CheckpointHandler,
+from milky_frog.events import (
     EventHub,
     RunCancelled,
     RunFailed,
@@ -15,6 +14,7 @@ from milky_frog.handlers import (
     RunTurnEnd,
     RunTurnStart,
 )
+from milky_frog.handlers.checkpoint import CheckpointHandler
 
 
 def _make_dispatcher(store: SqliteCheckpointStore, registry: EventHub) -> EventHub:
@@ -152,7 +152,7 @@ async def test_run_before_start_collects_system_prompt_sections(
 ) -> None:
     from milky_frog.domain import RunRequest
     from milky_frog.handlers.context import SystemPromptSection
-    from milky_frog.handlers.events import RunBeforeStart
+    from milky_frog.events.events import RunBeforeStart
 
     registry = EventHub()
     dispatcher = registry
@@ -175,7 +175,7 @@ async def test_run_before_start_collects_system_prompt_sections(
 @pytest.mark.asyncio
 async def test_run_started_notifies_handlers(tmp_path: Path) -> None:
     from milky_frog.domain import RunRequest, RunState
-    from milky_frog.handlers.events import RunStarted
+    from milky_frog.events.events import RunStarted
 
     registry = EventHub()
     dispatcher = registry
@@ -198,7 +198,7 @@ async def test_run_started_notifies_handlers(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_before_resume_notifies_handlers(tmp_path: Path) -> None:
     from milky_frog.domain import RunStatus
-    from milky_frog.handlers.events import RunBeforeResume
+    from milky_frog.events.events import RunBeforeResume
 
     registry = EventHub()
     dispatcher = registry
@@ -222,7 +222,7 @@ async def test_before_resume_notifies_handlers(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_before_model_notifies_handlers() -> None:
     from milky_frog.domain import Message, MessageRole, ModelRequest
-    from milky_frog.handlers.events import RunBeforeModel
+    from milky_frog.events.events import RunBeforeModel
 
     registry = EventHub()
     dispatcher = registry
@@ -246,7 +246,7 @@ async def test_before_model_notifies_handlers() -> None:
 @pytest.mark.asyncio
 async def test_on_model_chunk_notifies_handlers() -> None:
     from milky_frog.domain import Message, MessageRole, ModelRequest, TextDelta
-    from milky_frog.handlers.events import RunModelChunk
+    from milky_frog.events.events import RunModelChunk
 
     registry = EventHub()
     dispatcher = registry
@@ -269,7 +269,7 @@ async def test_on_model_chunk_notifies_handlers() -> None:
 @pytest.mark.asyncio
 async def test_on_model_reasoning_notifies_handlers() -> None:
     from milky_frog.domain import Message, MessageRole, ModelRequest, ReasoningDelta
-    from milky_frog.handlers.events import RunModelReasoning
+    from milky_frog.events.events import RunModelReasoning
 
     registry = EventHub()
     dispatcher = registry
@@ -299,7 +299,7 @@ async def test_after_model_notifies_handlers(tmp_path: Path) -> None:
         RunState,
         TokenUsage,
     )
-    from milky_frog.handlers.events import RunAfterModel
+    from milky_frog.events.events import RunAfterModel
 
     registry = EventHub()
     dispatcher = registry
@@ -324,7 +324,7 @@ async def test_after_model_notifies_handlers(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_before_tool_notifies_handlers() -> None:
-    from milky_frog.handlers.events import RunBeforeTool
+    from milky_frog.events.events import RunBeforeTool
 
     registry = EventHub()
     dispatcher = registry
@@ -344,7 +344,7 @@ async def test_before_tool_notifies_handlers() -> None:
 @pytest.mark.asyncio
 async def test_after_tool_notifies_handlers(tmp_path: Path) -> None:
     from milky_frog.domain import RunState, ToolResult
-    from milky_frog.handlers.events import RunAfterTool
+    from milky_frog.events.events import RunAfterTool
 
     registry = EventHub()
     dispatcher = registry
@@ -368,7 +368,7 @@ async def test_after_tool_notifies_handlers(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_finish_completed_returns_result_and_notifies(tmp_path: Path) -> None:
     from milky_frog.domain import RunStatus
-    from milky_frog.handlers.events import RunCompleted
+    from milky_frog.events.events import RunCompleted
 
     registry = EventHub()
     dispatcher = registry
@@ -391,7 +391,7 @@ async def test_finish_completed_returns_result_and_notifies(tmp_path: Path) -> N
 @pytest.mark.asyncio
 async def test_finish_paused_returns_result_and_notifies(tmp_path: Path) -> None:
     from milky_frog.domain import RunStatus
-    from milky_frog.handlers.events import RunPaused
+    from milky_frog.events.events import RunPaused
 
     registry = EventHub()
     dispatcher = registry
@@ -414,7 +414,7 @@ async def test_finish_paused_returns_result_and_notifies(tmp_path: Path) -> None
 @pytest.mark.asyncio
 async def test_finish_cancelled_returns_result_and_notifies(tmp_path: Path) -> None:
     from milky_frog.domain import RunStatus
-    from milky_frog.handlers.events import RunCancelled
+    from milky_frog.events.events import RunCancelled
 
     registry = EventHub()
     dispatcher = registry
@@ -437,7 +437,7 @@ async def test_finish_cancelled_returns_result_and_notifies(tmp_path: Path) -> N
 @pytest.mark.asyncio
 async def test_finish_approval_needed_returns_result_and_notifies(tmp_path: Path) -> None:
     from milky_frog.domain import RunStatus
-    from milky_frog.handlers.events import RunPaused
+    from milky_frog.events.events import RunPaused
 
     registry = EventHub()
     dispatcher = registry

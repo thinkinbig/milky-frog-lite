@@ -21,7 +21,7 @@ from milky_frog.domain import (
     StreamDone,
     ToolCall,
 )
-from milky_frog.handlers import (
+from milky_frog.events import (
     EventHub,
     RunBeforeTool,
     RunCancelled,

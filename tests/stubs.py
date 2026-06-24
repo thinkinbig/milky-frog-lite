@@ -17,7 +17,7 @@ from milky_frog.domain import (
     TokenUsage,
     ToolCall,
 )
-from milky_frog.handlers import EventHub
+from milky_frog.events import EventHub
 from milky_frog.handlers.checkpoint import CheckpointHandler
 from milky_frog.harness.agent_harness import AgentHarness
 from milky_frog.harness.sandbox import LocalSandbox, Sandbox

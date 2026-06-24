@@ -17,9 +17,10 @@ from milky_frog.domain import (
     ToolCall,
     ToolResult,
 )
-from milky_frog.handlers import ApprovalResult, BlockResult, EventHub
-from milky_frog.harness.agent_loop import AgentLoop
-from milky_frog.harness.agent_loop import execute_tool as _execute_tool
+from milky_frog.events import EventHub
+from milky_frog.events.loop import AgentLoop
+from milky_frog.events.loop import execute_tool as _execute_tool
+from milky_frog.handlers.context import ApprovalResult, BlockResult
 from milky_frog.harness.sandbox import LocalSandbox, Sandbox, SandboxFactory
 from milky_frog.harness.state import (
     append_tool_result,

@@ -16,7 +16,7 @@ from pathlib import Path
 from evals._settings import without_observability
 from evals.read_collector import ReadCollector
 from milky_frog.agent_session import AgentSession
-from milky_frog.handlers import EventHub
+from milky_frog.events import EventHub
 from milky_frog.project import PROJECT_DIRNAME
 from milky_frog.settings import Settings
 

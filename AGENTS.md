@@ -48,7 +48,7 @@ and is safe to commit. Credentials must never be committed.
 
 ## Architecture
 
-The agent loop lives in `harness/agent_loop.py` (`AgentLoop.advance`): a linear
+The agent loop lives in `events/loop.py` (`AgentLoop.advance`): a linear
 model → Tool → model loop bounded by `max_model_calls`, persisting a Checkpoint
 snapshot after meaningful steps and notifying lifecycle Handlers around each model and
 Tool call. `harness/agent_harness.py` (`AgentHarness`) wraps the loop with run
@@ -67,12 +67,12 @@ qualifier, and never merge them into one base type:
 | Lane | Where | Lifetime | Purpose |
 |------|-------|----------|---------|
 | **Checkpoint snapshot** | `checkpoint/snapshot.py`, `runs.state_json` | Durable (SQLite) | Resume source of truth |
-| **Lifecycle signal** | `handlers/events.py`, hub in `handlers/hub.py` | Ephemeral (in-process) | UI streaming, Langfuse (`broadcast`) |
+| **Lifecycle signal** | `events/events.py`, hub in `events/hub.py` | Ephemeral (in-process) | UI streaming, Langfuse (`broadcast`) |
 | **Harness policy** | Explicit `Protocol` deps on `Harness` (future) | Per-call | Authorization, context build, etc. |
 
 RunState snapshots are serialized via Pydantic models in `checkpoint/snapshot.py` (ADR-0014).
-Lifecycle signals are frozen dataclass subclasses in `handlers/events.py`.
-Only the Harness publishes lifecycle signals via ``EventHub``. Handlers subscribe via
+Lifecycle signals are frozen dataclass subclasses in `events/events.py`.
+Only the Harness publishes lifecycle signals via ``EventHub`` (`events/hub.py`). Handlers subscribe via
 `observe` / `on` / `subscribe`; most return `None`. `RunBeforeTool` and
 `RunBeforeStart` may return `HandlerResult` values that influence the next
 Harness step. Handlers do not publish signals themselves.
@@ -87,7 +87,8 @@ named class — so alternatives can be swapped without touching the Harness:
   (`read_file`, `write_file`, `edit_file`, `list_dir`, `grep`, `bash`).
 - `checkpoint/` — `CheckpointStore` protocol, `SqliteCheckpointStore`, `RunSnapshot` serialization (ADR-0014).
 - `harness/state.py` — transcript mutators and `repair_transcript` (interrupted-tool repair).
-- `handlers/` — lifecycle signals + `EventHub` (ADR-0012); the Harness publishes.
+- `events/` — lifecycle signals, `EventHub`, `AgentLoop` (ADR-0012); the Harness publishes.
+- `handlers/` — lifecycle Handler bundles (checkpoint, policy, budget, Langfuse, skills).
 - `harness/skills/` — `SkillCatalog`, declarative `SKILL.md` bundles (never executable).
 - `harness/sandbox/` — `Sandbox` protocol + `LocalSandbox`
   (path deny patterns, subprocess env, `sandbox_factory` injection). Implements the

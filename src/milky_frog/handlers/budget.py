@@ -7,11 +7,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from milky_frog.domain import Message, MessageRole, ModelRequest
+from milky_frog.events.hub import BaseHandler, EventHub
 from milky_frog.handlers.context import BudgetedRequest, HandlerContext
-from milky_frog.handlers.hub import BaseHandler, EventHub
 
 if TYPE_CHECKING:
-    from milky_frog.handlers.events import (
+    from milky_frog.events.events import (
         RunAfterModel,
         RunBeforeModel,
         RunBeforeResume,
@@ -176,7 +176,7 @@ class BudgetHandler(BaseHandler):
         )
 
     def register(self, hub: EventHub) -> None:
-        from milky_frog.handlers.events import (
+        from milky_frog.events.events import (
             RunAfterModel,
             RunBeforeModel,
             RunBeforeResume,
