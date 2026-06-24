@@ -8,3 +8,8 @@ safety_margin = 1000         # Safety margin below the actual limit
 
 # Shell command timeout (seconds); increase for slow test suites or builds
 bash_timeout_seconds = 60
+
+# Checkpoint retention (TTL)
+[checkpoint]
+retention_days = 30          # Runs older than this are pruned; 0 = disable auto-prune
+prune_on_start = true        # Automatically prune stale checkpoints on startup

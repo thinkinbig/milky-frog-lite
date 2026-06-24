@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from milky_frog.domain import ToolResult
 from milky_frog.harness.sandbox import SandboxViolation
 from milky_frog.harness.tools.base import ToolContext
+from milky_frog.harness.tools.truncate import truncate_tool_output
 
 
 class _DirectoryEntryOrder:
@@ -46,4 +47,8 @@ class ListDirTool:
         if not entries:
             return ToolResult("(empty directory)")
         lines = [f"{entry.name}/" if entry.is_dir() else entry.name for entry in entries]
-        return ToolResult("\n".join(lines))
+        text = "\n".join(lines)
+
+        text = truncate_tool_output(text, max_chars=32000, tool_name="list_dir")
+
+        return ToolResult(text)

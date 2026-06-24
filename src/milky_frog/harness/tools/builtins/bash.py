@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from milky_frog.domain import ToolResult
 from milky_frog.harness.tools.base import ToolContext
+from milky_frog.harness.tools.truncate import truncate_tool_output
 from milky_frog.project import DEFAULT_BASH_TIMEOUT_SECONDS, load_project_config
 
 _MAX_OUTPUT_BYTES = 128 * 1024
@@ -37,16 +38,17 @@ def local_command_environment() -> dict[str, str]:
 class BashInput(BaseModel):
     command: str = Field(
         description="Shell command to run in the workspace directory. "
-        "Use for file operations (grep, find, ls, cat, head, tail, sort, wc, etc.), "
-        "build commands, testing, and general shell operations.",
+        "Prefer narrow, scoped commands: git diff --stat or git diff <file> | tail N "
+        "instead of bare git diff; grep -c or grep <path> instead of repo-wide grep; "
+        "find with -name instead of listing huge directories. "
+        "Output is truncated at 128 KB with head/tail and a spill path when larger.",
     )
 
 
-async def _read_pty(loop: asyncio.AbstractEventLoop, master_fd: int, max_bytes: int) -> bytes:
+async def _read_pty(loop: asyncio.AbstractEventLoop, master_fd: int) -> bytes:
     """Read from a PTY master fd until EIO (slave closed).
 
-    Accumulates up to ``max_bytes`` bytes, then drains (reads and discards)
-    so the child never blocks on a full PTY buffer.  Returns when the slave
+    Accumulates output and returns when the slave
     is fully closed (child exited).
 
     Driven by loop.add_reader so we never block the event loop.  CancelledError
@@ -54,7 +56,6 @@ async def _read_pty(loop: asyncio.AbstractEventLoop, master_fd: int, max_bytes: 
     """
     future: asyncio.Future[bytes] = loop.create_future()
     chunks: list[bytes] = []
-    total = 0
 
     def _done() -> None:
         loop.remove_reader(master_fd)
@@ -62,7 +63,6 @@ async def _read_pty(loop: asyncio.AbstractEventLoop, master_fd: int, max_bytes: 
             future.set_result(b"".join(chunks))
 
     def _on_readable() -> None:
-        nonlocal total
         try:
             data = os.read(master_fd, 4096)
         except OSError:
@@ -72,10 +72,9 @@ async def _read_pty(loop: asyncio.AbstractEventLoop, master_fd: int, max_bytes: 
         if not data:
             _done()
             return
-        if total < max_bytes:
+        # Cap memory at 10MB to avoid OOM
+        if sum(len(c) for c in chunks) < 10 * 1024 * 1024:
             chunks.append(data)
-            total += len(data)
-        # Beyond max_bytes: keep reading so the child doesn't block on a full PTY buffer.
 
     loop.add_reader(master_fd, _on_readable)
     try:
@@ -98,9 +97,11 @@ class BashTool:
     requires_approval = True
     description = (
         "Run a shell command in the workspace and capture its stdout and stderr. "
-        "The command is executed with a clean environment (only HOME, PATH, SHELL, "
-        "TERM, LANG, LC_ALL, TMPDIR are passed through). "
-        "Output is truncated at 128 KB. "
+        "Prefer scoped commands over repo-wide dumps — e.g. git diff --stat, "
+        "git diff <file> | tail, grep -rl <pattern> <dir>, find -name. "
+        "Large output is truncated at 128 KB (head/tail plus a spill file path). "
+        "The command runs with a clean environment (HOME, PATH, SHELL, TERM, LANG, "
+        "LC_ALL, TMPDIR only). "
         f"Default timeout is {DEFAULT_BASH_TIMEOUT_SECONDS} seconds; "
         "override with bash_timeout_seconds in .milky-frog/config.toml."
     )
@@ -136,7 +137,7 @@ class BashTool:
             os.close(slave_fd)
             slave_fd = -1
 
-            read_task = asyncio.create_task(_read_pty(loop, master_fd, _MAX_OUTPUT_BYTES + 1))
+            read_task = asyncio.create_task(_read_pty(loop, master_fd))
 
             try:
                 await asyncio.wait_for(process.wait(), timeout=timeout_seconds)
@@ -147,9 +148,7 @@ class BashTool:
                 with contextlib.suppress(asyncio.CancelledError):
                     await read_task
                 read_task = None
-                return ToolResult(
-                    f"command timed out after {timeout_seconds:g}s", is_error=True
-                )
+                return ToolResult(f"command timed out after {timeout_seconds:g}s", is_error=True)
 
             # Process exited — drain any output still buffered in the PTY.
             try:
@@ -174,16 +173,10 @@ class BashTool:
         text = raw.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
 
         if process.returncode != 0:
+            text = truncate_tool_output(text, max_chars=128000, tool_name="bash")
             stripped = text.strip() or "(no output)"
             return ToolResult(f"exit code {process.returncode}:\n{stripped}", is_error=True)
 
-        if len(raw) > _MAX_OUTPUT_BYTES:
-            truncated = text[:_MAX_OUTPUT_BYTES]
-            msg = (
-                f"output truncated ({len(raw)} bytes; "
-                f"showing first {_MAX_OUTPUT_BYTES}):\n{truncated}"
-            )
-            return ToolResult(msg)
-
+        text = truncate_tool_output(text, max_chars=128000, tool_name="bash")
         result = text.rstrip("\n")
         return ToolResult(result if result else "(no output)")

@@ -93,7 +93,17 @@ not as the underlying model or API provider. The provider is an implementation d
 You complete one user goal at a time.
 
 Be direct and technically precise. Use only the Tools supplied in the request. Never claim that
-you inspected, changed, or executed something unless the available Tools allowed you to do so."""
+you inspected, changed, or executed something unless the available Tools allowed you to do so.
+
+<rules>
+  <rule>When exploring with Tools, prefer narrow commands over broad ones. Start with the
+  smallest scope that can answer the question — one file or directory, summary flags
+  (--stat, --numstat), or head/tail/wc pipes — before running repo-wide diffs, greps, or
+  listings.</rule>
+  <rule>Tool output may be truncated. If you see a truncation notice, refine the command
+  instead of repeating it at the same scope.</rule>
+  <rule>Simple tasks do not need to be split across many steps.</rule>
+</rules>"""
 
 
 def format_project_context(context_files: tuple[ContextFile, ...]) -> str:

@@ -1,0 +1,177 @@
+[
+  {
+    "task_id": "midlog_error_code",
+    "passed": true,
+    "final_message": "The error code is **ERR-7742**.",
+    "expected": "ERR-7742",
+    "model_calls": 2,
+    "tool_calls": [
+      {
+        "name": "bash",
+        "arguments": {
+          "command": "grep 'CHECKPOINT_FAILED' build.log"
+        },
+        "is_error": false,
+        "summary": "bash: grep 'CHECKPOINT_FAILED' build.log"
+      }
+    ]
+  },
+  {
+    "task_id": "jsonl_failed_count",
+    "passed": true,
+    "final_message": "37",
+    "expected": "37",
+    "model_calls": 2,
+    "tool_calls": [
+      {
+        "name": "bash",
+        "arguments": {
+          "command": "grep -c '\"status\": \"failed\"' events.jsonl"
+        },
+        "is_error": false,
+        "summary": "bash: grep -c '\"status\": \"failed\"' events.jsonl"
+      }
+    ]
+  },
+  {
+    "task_id": "nested_sig_find",
+    "passed": true,
+    "final_message": "Yes, there is one file ending in `.sig`:\n\n**`trace_05000.sig`**",
+    "expected": "trace_05000.sig",
+    "model_calls": 3,
+    "tool_calls": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "node_modules/@acme/widget/lib/internal"
+        },
+        "is_error": false,
+        "summary": "list_dir: node_modules/@acme/widget/lib/internal"
+      },
+      {
+        "name": "bash",
+        "arguments": {
+          "command": "find node_modules/@acme/widget/lib/internal -maxdepth 1 -name '*.sig' 2>/dev/null"
+        },
+        "is_error": false,
+        "summary": "bash: find node_modules/@acme/widget/lib/internal -maxdepth 1 -name '*.sig' 2>/dev/null"
+      }
+    ]
+  },
+  {
+    "task_id": "bundle_mid_secret",
+    "passed": true,
+    "final_message": "The secret value is **`MID-8844`**.\n\nIt appears as `SECRET=MID-8844` in the file.",
+    "expected": "MID-8844",
+    "model_calls": 3,
+    "tool_calls": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "dist/app.bundle.js"
+        },
+        "is_error": false,
+        "summary": "read_file: dist/app.bundle.js"
+      },
+      {
+        "name": "bash",
+        "arguments": {
+          "command": "grep -o 'SECRET=[^A]*' dist/app.bundle.js"
+        },
+        "is_error": false,
+        "summary": "bash: grep -o 'SECRET=[^A]*' dist/app.bundle.js"
+      }
+    ]
+  },
+  {
+    "task_id": "exact_import_count",
+    "passed": true,
+    "final_message": "The file is **`file_target.js`** — it has exactly 8001 lines that contain the word `import`.",
+    "expected": "file_target.js",
+    "model_calls": 2,
+    "tool_calls": [
+      {
+        "name": "bash",
+        "arguments": {
+          "command": "find . -name '*.js' -type f | while read f; do count=$(grep -c 'import' \"$f\"); echo \"$count $f\"; done"
+        },
+        "is_error": false,
+        "summary": "bash: find . -name '*.js' -type f | while read f; do count=$(grep -c 'import' \"$f\"); echo \"$count $f\"; ..."
+      }
+    ]
+  },
+  {
+    "task_id": "git_diff_nested_field",
+    "passed": true,
+    "final_message": "The value of `legacy-peer-deps` in the diff is **`\"override-9\"`**.",
+    "expected": "override-9",
+    "model_calls": 3,
+    "tool_calls": [
+      {
+        "name": "bash",
+        "arguments": {
+          "command": "git diff package-lock.json"
+        },
+        "is_error": true,
+        "summary": "bash: git diff package-lock.json"
+      },
+      {
+        "name": "bash",
+        "arguments": {
+          "command": "git diff -U0 package-lock.json | grep -A2 -B2 \"legacy-peer-deps\" | head -20"
+        },
+        "is_error": false,
+        "summary": "bash: git diff -U0 package-lock.json | grep -A2 -B2 \"legacy-peer-deps\" | head -20"
+      }
+    ]
+  },
+  {
+    "task_id": "dual_log_secrets",
+    "passed": true,
+    "final_message": "Here are the values:\n\n- **`CODE_A` = `ALPHA-91`** — found at the end of `logs/a.log` on the last line: `END CODE_A=ALPHA-91`\n- **`CODE_B` = `BRAVO-42`** — found at line 40,001 in `logs/b.log`: `MIDDLE CODE_B=BRAVO-42 marker`",
+    "expected": "ALPHA-91 | BRAVO-42",
+    "model_calls": 5,
+    "tool_calls": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "logs/a.log"
+        },
+        "is_error": false,
+        "summary": "read_file: logs/a.log"
+      },
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "logs/b.log"
+        },
+        "is_error": false,
+        "summary": "read_file: logs/b.log"
+      },
+      {
+        "name": "bash",
+        "arguments": {
+          "command": "tail -1 logs/b.log"
+        },
+        "is_error": false,
+        "summary": "bash: tail -1 logs/b.log"
+      },
+      {
+        "name": "bash",
+        "arguments": {
+          "command": "wc -l logs/b.log"
+        },
+        "is_error": false,
+        "summary": "bash: wc -l logs/b.log"
+      },
+      {
+        "name": "bash",
+        "arguments": {
+          "command": "grep -n \"CODE_B\\|CODE_B=\" logs/b.log"
+        },
+        "is_error": false,
+        "summary": "bash: grep -n \"CODE_B\\|CODE_B=\" logs/b.log"
+      }
+    ]
+  }
+]

@@ -10,13 +10,18 @@ PROJECT_DIRNAME = ".milky-frog"
 CONFIG_FILENAME = "config.toml"
 
 CONFIG_TEMPLATE = (
-    f"# Project-level Milky Frog configuration.\nmax_model_calls = {DEFAULT_MAX_MODEL_CALLS}\n"
+    f"# Project-level Milky Frog configuration.\n"
+    f"max_model_calls = {DEFAULT_MAX_MODEL_CALLS}\n\n"
+    f"[checkpoint]\n"
+    f"retention_days = 30\n"
+    f"prune_on_start = true\n"
 )
 
 DEFAULT_CONTEXT_WINDOW = 128000
 DEFAULT_OUTPUT_RESERVE = 8000
 DEFAULT_SAFETY_MARGIN = 1000
 DEFAULT_BASH_TIMEOUT_SECONDS = 60
+DEFAULT_RETENTION_DAYS = 30
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,6 +33,8 @@ class ProjectConfig:
     output_reserve: int = DEFAULT_OUTPUT_RESERVE
     safety_margin: int = DEFAULT_SAFETY_MARGIN
     bash_timeout_seconds: int = DEFAULT_BASH_TIMEOUT_SECONDS
+    checkpoint_retention_days: int = DEFAULT_RETENTION_DAYS
+    prune_on_start: bool = True
 
 
 def project_root(workspace: Path) -> Path:
@@ -83,10 +90,29 @@ def load_project_config(workspace: Path) -> ProjectConfig:
     ):
         bash_timeout_seconds = DEFAULT_BASH_TIMEOUT_SECONDS
 
+    # ── [checkpoint] section ─────────────────────────────────────────
+    cp = data.get("checkpoint", {})
+    if not isinstance(cp, dict):
+        cp = {}
+
+    checkpoint_retention_days = cp.get("retention_days", DEFAULT_RETENTION_DAYS)
+    if (
+        isinstance(checkpoint_retention_days, bool)
+        or not isinstance(checkpoint_retention_days, int)
+        or checkpoint_retention_days < 0
+    ):
+        checkpoint_retention_days = DEFAULT_RETENTION_DAYS
+
+    prune_on_start = cp.get("prune_on_start", True)
+    if not isinstance(prune_on_start, bool):
+        prune_on_start = True
+
     return ProjectConfig(
         max_model_calls=max_model_calls,
         context_window=context_window,
         output_reserve=output_reserve,
         safety_margin=safety_margin,
         bash_timeout_seconds=bash_timeout_seconds,
+        checkpoint_retention_days=checkpoint_retention_days,
+        prune_on_start=prune_on_start,
     )

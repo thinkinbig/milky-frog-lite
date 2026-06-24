@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
@@ -8,14 +9,20 @@ import typer
 
 from milky_frog import __version__
 from milky_frog.agent_session import AgentSession, MissingModelConfiguration
-from milky_frog.checkpoint import SqliteCheckpointStore
+from milky_frog.checkpoint import CleanupScope, SqliteCheckpointStore
 from milky_frog.checkpoint.snapshot import dump_run_state
 from milky_frog.diagnostics import CheckStatus, Diagnostic
 from milky_frog.domain import ResumeError
-from milky_frog.project import CONFIG_FILENAME, CONFIG_TEMPLATE, PROJECT_DIRNAME
+from milky_frog.project import (
+    CONFIG_FILENAME,
+    CONFIG_TEMPLATE,
+    PROJECT_DIRNAME,
+    load_project_config,
+)
 from milky_frog.settings import Settings
 from milky_frog.ui import MilkyFrogApp
 from milky_frog.ui.cli import (
+    console,
     render_diagnostics,
     render_error,
     render_initialized,
@@ -221,3 +228,36 @@ def resume(
             advance_pending=task is None,
         )
     )
+
+
+@app.command()
+def prune(
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Show what would be pruned without deleting"),
+    ] = False,
+    days: Annotated[
+        int | None,
+        typer.Option("--days", help="Override retention period (default: from config)"),
+    ] = None,
+) -> None:
+    """Remove stale checkpoint snapshots older than the retention period.
+
+    Scoped to the current Workspace. Never prunes RUNNING or
+    WAITING_FOR_INPUT Runs.
+    """
+    settings = Settings.from_environment()
+    store = SqliteCheckpointStore(settings.database_path)
+    workspace = Path.cwd()
+    project_cfg = load_project_config(workspace)
+    retention = days if days is not None else project_cfg.checkpoint_retention_days
+    if retention < 1:
+        render_error("retention period must be at least 1 day")
+        raise typer.Exit(code=1)
+    cutoff = datetime.now(UTC) - timedelta(days=retention)
+    count = store.prune(cutoff, CleanupScope.for_workspace(workspace), dry_run=dry_run)
+    console.print()
+    if dry_run:
+        console.print(f"  [yellow]{count}[/] run(s) would be pruned (retention: {retention} days)")
+    else:
+        console.print(f"  Pruned [green]{count}[/] run(s) (retention: {retention} days)")
