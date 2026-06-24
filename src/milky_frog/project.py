@@ -9,6 +9,12 @@ from milky_frog.domain import DEFAULT_MAX_MODEL_CALLS
 PROJECT_DIRNAME = ".milky-frog"
 CONFIG_FILENAME = "config.toml"
 
+DEFAULT_CONTEXT_WINDOW = 128000
+DEFAULT_OUTPUT_RESERVE = 8000
+DEFAULT_SAFETY_MARGIN = 32000
+DEFAULT_BASH_TIMEOUT_SECONDS = 60
+DEFAULT_RETENTION_DAYS = 30
+
 CONFIG_TEMPLATE = (
     f"# Project-level Milky Frog configuration.\n"
     f"max_model_calls = {DEFAULT_MAX_MODEL_CALLS}\n\n"
@@ -24,12 +30,6 @@ CONFIG_TEMPLATE = (
     f"# Additional host env var names forwarded to subprocesses (uppercase identifiers).\n"
     f'# env_allowlist_extra = ["MY_BUILD_VAR", "DEPLOY_TOKEN"]\n'
 )
-
-DEFAULT_CONTEXT_WINDOW = 128000
-DEFAULT_OUTPUT_RESERVE = 8000
-DEFAULT_SAFETY_MARGIN = 32000
-DEFAULT_BASH_TIMEOUT_SECONDS = 60
-DEFAULT_RETENTION_DAYS = 30
 
 
 @dataclass(frozen=True, slots=True)
