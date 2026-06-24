@@ -12,7 +12,7 @@ We split the concern into a registrant bundle plus two lifetime scopes:
 
 Composition lives at the **composition root**, a `HandlerFactory` (`cli/factory.py`) that owns both the presentation dependency (a live `StreamingPrinter`) and `Settings`. Its `build()` composes the full bundle list — `StreamingHandlers` plus the settings-driven infrastructure — registers each onto one registry, and returns `(registry, bundles)`. The runtime is handed both; it no longer composes anything, it only owns the bundles' lifetime.
 
-The infrastructure half stays in `handlers/assembly.py`: `InfrastructureHandlerAssembly._ROSTER` lists settings-driven Handler types (each implements `SettingsDrivenHandler.from_settings`); `build()` returns active bundles **unregistered** (the factory registers the whole roster uniformly). Adding an infrastructure Handler is a new file plus **one line** in the roster.
+The infrastructure half stays in `handlers/bundles.py`: `InfrastructureHandlerAssembly._ROSTER` lists settings-driven Handler types (each implements `SettingsDrivenHandler.from_settings`); `build()` returns active bundles **unregistered** (the factory registers the whole roster uniformly). Adding an infrastructure Handler is a new file plus **one line** in the roster.
 
 The factory must sit at the composition root rather than in `handlers/`: the UI bundle depends on `ui/`, which already imports `handlers/`, so centralizing UI and infrastructure composition any lower would invert the layering and create an import cycle.
 
@@ -44,7 +44,7 @@ The CLI's streaming Handlers also became a `BaseHandler` (`StreamingHandlers`) f
 
 组装发生在**组装根**——一个 `HandlerFactory`（`cli/factory.py`），它同时持有表现层依赖（实时的 `StreamingPrinter`）与 `Settings`。其 `build()` 组合出完整的 bundle 列表（`StreamingHandlers` 加上配置驱动的基础设施），将每个注册到同一 registry，并返回 `(registry, bundles)`。runtime 同时收到二者；它不再组装任何东西，只负责 bundle 的生命周期。
 
-基础设施那一半仍住在 `handlers/assembly.py`：`InfrastructureHandlerAssembly._ROSTER` 列出由配置驱动的 Handler 类型（各实现 `SettingsDrivenHandler.from_settings`）；`build()` 返回活跃 bundle 的**未注册**列表（由 factory 统一注册整份名册）。新增一个基础设施 Handler = 一个新文件加名册里**一行**。
+基础设施那一半仍住在 `handlers/bundles.py`：`InfrastructureHandlerAssembly._ROSTER` 列出由配置驱动的 Handler 类型（各实现 `SettingsDrivenHandler.from_settings`）；`build()` 返回活跃 bundle 的**未注册**列表（由 factory 统一注册整份名册）。新增一个基础设施 Handler = 一个新文件加名册里**一行**。
 
 factory 必须位于组装根而非 `handlers/`：UI bundle 依赖 `ui/`，而 `ui/` 已经 import `handlers/`，因此若把 UI 与基础设施的组装下沉到更低层会倒置分层并造成循环 import。
 

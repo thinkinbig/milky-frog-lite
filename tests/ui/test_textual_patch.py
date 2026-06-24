@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from milky_frog.ui.tui.textual_patch import (
+from milky_frog.ui.textual_patch import (
     _patched_getincrementaldecoder,
     patch_textual_utf8_decode,
 )

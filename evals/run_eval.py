@@ -21,7 +21,7 @@ from typing import Any
 from evals._settings import without_observability
 from evals.tool_collector import ToolCallCollector, ToolCallRecord, summarize_tool_call
 from milky_frog.agent_session import AgentSession
-from milky_frog.handlers import EventDispatcher
+from milky_frog.events import EventHub
 from milky_frog.settings import Settings
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -94,11 +94,9 @@ async def _run_task_async(
         cfg.mkdir(exist_ok=True)
         (cfg / "config.toml").write_text(f"max_model_calls = {max_model_calls}\n")
 
-        bus = EventDispatcher()
+        bus = EventHub()
         collector = ToolCallCollector()
-        async with AgentSession.from_settings(
-            settings, handlers=bus, bundles=[collector]
-        ) as session:
+        async with AgentSession.from_settings(settings, hub=bus, bundles=[collector]) as session:
             session.policy.auto_approve()
             result = await session.start_new(task["prompt"], workspace)
 

@@ -16,7 +16,7 @@ from pathlib import Path
 from evals._settings import without_observability
 from evals.read_collector import ReadCollector
 from milky_frog.agent_session import AgentSession
-from milky_frog.handlers import EventDispatcher
+from milky_frog.events import EventHub
 from milky_frog.project import PROJECT_DIRNAME
 from milky_frog.settings import Settings
 
@@ -49,11 +49,9 @@ async def _run_task_async(settings: Settings, task: dict[str, object]) -> dict[s
         skill_path = _install_skill(workspace)
         expected_read = str(task["expect_skill_read"])
 
-        bus = EventDispatcher()
+        bus = EventHub()
         collector = ReadCollector()
-        async with AgentSession.from_settings(
-            settings, handlers=bus, bundles=[collector]
-        ) as session:
+        async with AgentSession.from_settings(settings, hub=bus, bundles=[collector]) as session:
             session.policy.auto_approve()
             result = await session.start_new(str(task["prompt"]), workspace)
 

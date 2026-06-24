@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from milky_frog.ui.tui.rendering import (
+from milky_frog.ui.rendering import (
     build_diff_lines,
     complete_command,
     file_change_diff,

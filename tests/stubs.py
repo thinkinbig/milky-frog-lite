@@ -17,7 +17,7 @@ from milky_frog.domain import (
     TokenUsage,
     ToolCall,
 )
-from milky_frog.handlers import EventDispatcher
+from milky_frog.events import EventHub
 from milky_frog.handlers.checkpoint import CheckpointHandler
 from milky_frog.harness.agent_harness import AgentHarness
 from milky_frog.harness.sandbox import LocalSandbox, Sandbox
@@ -46,16 +46,16 @@ def make_harness(
     model: Model,
     tools: ToolRegistry,
     checkpoints: CheckpointStore,
-    handlers: EventDispatcher | None = None,
+    hub: EventHub | None = None,
     sandbox_factory: RecordingSandboxFactory | None = None,
 ) -> AgentHarness:
     """Build a Harness with checkpointing wired, mirroring production assembly.
 
-    Production wires ``CheckpointHandler`` via ``handlers.default_handlers``; the
+    Production wires ``CheckpointHandler`` via ``handlers.session_handler_bundles``; the
     Harness no longer self-registers it. Tests that need a resumable Run use this
-    helper so the snapshot handler lands on the same bus they inspect.
+    helper so the snapshot handler lands on the same hub they inspect.
     """
-    bus = handlers if handlers is not None else EventDispatcher()
+    bus = hub if hub is not None else EventHub()
     CheckpointHandler(checkpoints).register(bus)
     if sandbox_factory is not None:
         return AgentHarness(model, tools, checkpoints, bus, sandbox_factory=sandbox_factory)

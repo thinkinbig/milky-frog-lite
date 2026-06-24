@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from milky_frog.events.events import RunBeforeStart
+from milky_frog.events.hub import BaseHandler, EventHub
 from milky_frog.handlers.context import HandlerContext, SystemPromptSection
-from milky_frog.handlers.dispatcher import BaseHandler, EventDispatcher
-from milky_frog.handlers.events import RunBeforeStart
 from milky_frog.harness.prompt import agent_context_section
 
 
@@ -15,15 +15,15 @@ class AgentContextHandler(BaseHandler):
     metadata from ``home`` (``Settings.home`` at assembly time). The model is
     pointed at skill locations rather than receiving full skill bodies inline.
 
-    Wiring (in ``default_handlers``):
-        AgentContextHandler(settings.home).register(bus)
+    Wiring (in ``session_handler_bundles``):
+        AgentContextHandler(settings.home).register(hub)
     """
 
     def __init__(self, home: Path) -> None:
         self._home = home
 
-    def register(self, registry: EventDispatcher) -> None:
-        registry.on(RunBeforeStart)(self._on_before_start)
+    def register(self, hub: EventHub) -> None:
+        hub.on(RunBeforeStart)(self._on_before_start)
 
     async def _on_before_start(
         self, event: RunBeforeStart, ctx: HandlerContext | None = None

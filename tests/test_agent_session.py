@@ -20,7 +20,7 @@ from milky_frog.domain import (
     TextDelta,
     ToolCall,
 )
-from milky_frog.handlers import BaseHandler, EventDispatcher, RunCancelled
+from milky_frog.events import BaseHandler, EventHub, RunCancelled
 from milky_frog.harness.agent_harness import AgentHarness
 from milky_frog.models import OpenAIModel
 from milky_frog.settings import LangfuseSettings, Settings
@@ -67,14 +67,14 @@ async def test_session_cancel_stops_foreground_run(
 
     monkeypatch.setattr(OpenAIModel, "stream", slow_stream)
     settings = Settings(tmp_path, "test-key", "https://example.test", "test-model", _NO_LANGFUSE)
-    registry = EventDispatcher()
+    hub = EventHub()
     cancelled: list[RunCancelled] = []
 
-    @registry.on(RunCancelled)
+    @hub.on(RunCancelled)
     async def record(event: RunCancelled, _ctx=None) -> None:
         cancelled.append(event)
 
-    async with AgentSession.from_settings(settings, handlers=registry) as session:
+    async with AgentSession.from_settings(settings, hub=hub) as session:
         result = await asyncio.gather(
             session.start_new("slow task", tmp_path),
             _async_cancel(session, delay=0.01),
@@ -98,8 +98,8 @@ async def test_session_context_manager_closes_its_bundles(tmp_path: Path) -> Non
         def __init__(self) -> None:
             self.closed = 0
 
-        def register(self, registry: EventDispatcher) -> None:
-            del registry
+        def register(self, hub: EventHub) -> None:
+            del hub
 
         async def aclose(self) -> None:
             self.closed += 1
@@ -116,8 +116,8 @@ async def test_session_context_manager_closes_its_bundles(tmp_path: Path) -> Non
 @pytest.mark.asyncio
 async def test_session_close_isolates_failing_bundle(tmp_path: Path) -> None:
     class FailingHandler(BaseHandler):
-        def register(self, registry: EventDispatcher) -> None:
-            del registry
+        def register(self, hub: EventHub) -> None:
+            del hub
 
         async def aclose(self) -> None:
             raise RuntimeError("boom")
@@ -126,8 +126,8 @@ async def test_session_close_isolates_failing_bundle(tmp_path: Path) -> None:
         def __init__(self) -> None:
             self.closed = 0
 
-        def register(self, registry: EventDispatcher) -> None:
-            del registry
+        def register(self, hub: EventHub) -> None:
+            del hub
 
         async def aclose(self) -> None:
             self.closed += 1

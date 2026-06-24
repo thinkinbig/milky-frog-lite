@@ -5,10 +5,10 @@ from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from pathlib import Path
 
+from milky_frog.checkpoint._locking import RunLock
 from milky_frog.checkpoint.base import CleanupScope, RunClaimError, StoredRun
 from milky_frog.checkpoint.snapshot import dump_run_state, load_run_state
 from milky_frog.domain import RunState, RunStatus
-from milky_frog.infra.checkpoint._locking import RunLock
 
 
 class SqliteCheckpointStore:

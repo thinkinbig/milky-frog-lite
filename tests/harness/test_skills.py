@@ -5,7 +5,8 @@ import pytest
 
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import ModelChunk, ModelRequest, ModelResponse, RunRequest, StreamDone
-from milky_frog.handlers import EventDispatcher, RunBeforeStart, SystemPromptSection
+from milky_frog.events import EventHub, RunBeforeStart
+from milky_frog.handlers.context import SystemPromptSection
 from milky_frog.handlers.skills import AgentContextHandler
 from milky_frog.harness.skills import SkillCatalog
 from milky_frog.harness.tools import ToolRegistry
@@ -51,10 +52,10 @@ async def test_handler_injects_skill_catalog_metadata(tmp_path: Path) -> None:
     home = tmp_path / "home"
     _write_skill(home / "skills", "review", "Code review skill", "Always check for typos.")
 
-    bus = EventDispatcher()
+    bus = EventHub()
     AgentContextHandler(home).register(bus)
 
-    results = await bus.notify(_make_event(workspace))
+    results = await bus.broadcast(_make_event(workspace))
     injected = [r for r in results if isinstance(r, SystemPromptSection)]
 
     assert len(injected) == 1
@@ -70,10 +71,10 @@ async def test_handler_returns_none_when_no_context(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
 
-    bus = EventDispatcher()
+    bus = EventHub()
     AgentContextHandler(home).register(bus)
 
-    results = await bus.notify(_make_event(workspace))
+    results = await bus.broadcast(_make_event(workspace))
     injected = [r for r in results if isinstance(r, SystemPromptSection)]
 
     assert injected == []
@@ -88,10 +89,10 @@ async def test_project_skills_override_user_skills_in_handler(tmp_path: Path) ->
     _write_skill(home / "skills", "review", "user", "user instructions")
     _write_skill(project_skills, "review", "project", "project instructions")
 
-    bus = EventDispatcher()
+    bus = EventHub()
     AgentContextHandler(home).register(bus)
 
-    results = await bus.notify(_make_event(workspace))
+    results = await bus.broadcast(_make_event(workspace))
     injected = [r for r in results if isinstance(r, SystemPromptSection)]
 
     assert len(injected) == 1
@@ -109,10 +110,10 @@ async def test_handler_skips_malformed_skill(tmp_path: Path) -> None:
     bad.mkdir()
     (bad / "SKILL.md").write_text("no frontmatter here", encoding="utf-8")
 
-    bus = EventDispatcher()
+    bus = EventHub()
     AgentContextHandler(home).register(bus)
 
-    results = await bus.notify(_make_event(workspace))
+    results = await bus.broadcast(_make_event(workspace))
     injected = [r for r in results if isinstance(r, SystemPromptSection)]
 
     assert len(injected) == 1
@@ -138,14 +139,14 @@ async def test_skill_catalog_appears_in_system_message(tmp_path: Path) -> None:
             yield StreamDone(ModelResponse(content="done"))
 
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    bus = EventDispatcher()
+    bus = EventHub()
     AgentContextHandler(home).register(bus)
 
     harness = make_harness(
         model=ImmediateModel(),
         tools=ToolRegistry(),
         checkpoints=store,
-        handlers=bus,
+        hub=bus,
     )
     result = await harness.run(RunRequest("hello", workspace))
 

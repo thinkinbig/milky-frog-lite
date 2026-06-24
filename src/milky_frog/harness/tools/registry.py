@@ -30,6 +30,9 @@ class ToolRegistry:
         except KeyError as error:
             raise UnknownToolError(name) from error
 
+    def tools(self) -> tuple[Tool, ...]:
+        return tuple(self._tools.values())
+
     def schemas(self) -> tuple[dict[str, JsonValue], ...]:
         return tuple(
             {

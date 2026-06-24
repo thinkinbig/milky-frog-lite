@@ -6,7 +6,7 @@ import pytest
 
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import RunRequest, RunStatus
-from milky_frog.handlers import EventDispatcher, RunFailed, RunNotice
+from milky_frog.events import EventHub, RunFailed, RunNotice
 from milky_frog.harness.model_retry import is_retriable_model_error
 from milky_frog.harness.tools import ToolRegistry
 from tests.stubs import FlakyConnectionModel, ImmediateErrorModel, make_harness
@@ -20,7 +20,7 @@ def instant_retry_sleep(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     async def instant_sleep(delay: float) -> None:
         delays.append(delay)
 
-    monkeypatch.setattr("milky_frog.harness.agent_loop.retry_sleep", instant_sleep)
+    monkeypatch.setattr("milky_frog.events.loop.retry_sleep", instant_sleep)
     return delays
 
 
@@ -35,7 +35,7 @@ async def test_retries_retriable_model_errors_and_emits_run_notice(
     tmp_path: Path, instant_retry_sleep: list[float]
 ) -> None:
     notices: list[RunNotice] = []
-    bus = EventDispatcher()
+    bus = EventHub()
 
     @bus.on(RunNotice)
     async def record_notice(event: RunNotice, _ctx=None) -> None:
@@ -46,7 +46,7 @@ async def test_retries_retriable_model_errors_and_emits_run_notice(
         model=model,
         tools=ToolRegistry(),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
-        handlers=bus,
+        hub=bus,
     )
 
     result = await harness.run(RunRequest("hi", tmp_path))
@@ -64,7 +64,7 @@ async def test_retries_retriable_model_errors_and_emits_run_notice(
 @pytest.mark.asyncio
 async def test_exhausted_retries_emit_run_failed(tmp_path: Path) -> None:
     failed: list[RunFailed] = []
-    bus = EventDispatcher()
+    bus = EventHub()
 
     @bus.on(RunFailed)
     async def record_failed(event: RunFailed, _ctx=None) -> None:
@@ -75,7 +75,7 @@ async def test_exhausted_retries_emit_run_failed(tmp_path: Path) -> None:
         model=model,
         tools=ToolRegistry(),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
-        handlers=bus,
+        hub=bus,
     )
 
     result = await harness.run(RunRequest("hi", tmp_path))
@@ -89,7 +89,7 @@ async def test_exhausted_retries_emit_run_failed(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_non_retriable_model_errors_do_not_retry(tmp_path: Path) -> None:
     notices: list[RunNotice] = []
-    bus = EventDispatcher()
+    bus = EventHub()
 
     @bus.on(RunNotice)
     async def record_notice(event: RunNotice, _ctx=None) -> None:
@@ -100,7 +100,7 @@ async def test_non_retriable_model_errors_do_not_retry(tmp_path: Path) -> None:
         model=model,
         tools=ToolRegistry(),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
-        handlers=bus,
+        hub=bus,
     )
 
     result = await harness.run(RunRequest("hi", tmp_path))

@@ -8,9 +8,7 @@ from typing import Any, Literal, Self
 from langfuse import Langfuse
 from langfuse.types import TraceContext
 
-from milky_frog.handlers.context import HandlerContext
-from milky_frog.handlers.dispatcher import BaseHandler, EventDispatcher
-from milky_frog.handlers.events import (
+from milky_frog.events.events import (
     BaseEvent,
     NoticeLevel,
     RunAfterModel,
@@ -30,6 +28,8 @@ from milky_frog.handlers.events import (
     RunTurnEnd,
     RunTurnStart,
 )
+from milky_frog.events.hub import BaseHandler, EventHub
+from milky_frog.handlers.context import HandlerContext
 from milky_frog.settings import LangfuseSettings, Settings
 
 logger = logging.getLogger(__name__)
@@ -65,23 +65,23 @@ class LangfuseHandler(BaseHandler):
         self._stream_reasoning: dict[str, str] = {}
         self._flush_task: asyncio.Task[None] | None = None
 
-    def register(self, registry: EventDispatcher) -> None:
-        registry.on(RunBeforeStart)(self._before_start)
-        registry.on(RunBeforeResume)(self._before_resume)
-        registry.on(RunStarted)(self._run_started)
-        registry.on(RunCompleted)(self._on_terminal)
-        registry.on(RunCancelled)(self._on_terminal)
-        registry.on(RunPaused)(self._on_terminal)
-        registry.on(RunFailed)(self._on_terminal)
-        registry.on(RunBeforeModel)(self._before_model)
-        registry.on(RunModelChunk)(self._model_chunk)
-        registry.on(RunModelReasoning)(self._model_reasoning)
-        registry.on(RunAfterModel)(self._after_model)
-        registry.on(RunBeforeTool)(self._before_tool)
-        registry.on(RunAfterTool)(self._after_tool)
-        registry.on(RunTurnStart)(self._turn_start)
-        registry.on(RunTurnEnd)(self._turn_end)
-        registry.on(RunNotice)(self._run_notice)
+    def register(self, hub: EventHub) -> None:
+        hub.on(RunBeforeStart)(self._before_start)
+        hub.on(RunBeforeResume)(self._before_resume)
+        hub.on(RunStarted)(self._run_started)
+        hub.on(RunCompleted)(self._on_terminal)
+        hub.on(RunCancelled)(self._on_terminal)
+        hub.on(RunPaused)(self._on_terminal)
+        hub.on(RunFailed)(self._on_terminal)
+        hub.on(RunBeforeModel)(self._before_model)
+        hub.on(RunModelChunk)(self._model_chunk)
+        hub.on(RunModelReasoning)(self._model_reasoning)
+        hub.on(RunAfterModel)(self._after_model)
+        hub.on(RunBeforeTool)(self._before_tool)
+        hub.on(RunAfterTool)(self._after_tool)
+        hub.on(RunTurnStart)(self._turn_start)
+        hub.on(RunTurnEnd)(self._turn_end)
+        hub.on(RunNotice)(self._run_notice)
 
     async def __aenter__(self) -> Self:
         if self._client is None:
