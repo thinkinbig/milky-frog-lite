@@ -13,6 +13,3 @@ bash_timeout_seconds = 60
 [checkpoint]
 retention_days = 30          # Runs older than this are pruned; 0 = disable auto-prune
 prune_on_start = true        # Automatically prune stale checkpoints on startup
-
-# Additional host env var names forwarded to subprocesses (uppercase identifiers).
-# env_allowlist_extra = ["MY_BUILD_VAR", "DEPLOY_TOKEN"]

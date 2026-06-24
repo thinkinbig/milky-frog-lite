@@ -5,7 +5,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from milky_frog.domain import ToolResult
-from milky_frog.harness.execution_backend import SandboxViolation
+from milky_frog.harness.sandbox import SandboxViolation
 from milky_frog.harness.tools.base import ToolContext
 from milky_frog.harness.tools.truncate import truncate_tool_output
 
@@ -33,9 +33,9 @@ class ListDirTool:
 
     async def execute(self, context: ToolContext, input: BaseModel) -> ToolResult:
         params = ListDirInput.model_validate(input)
-        backend = context.require_backend()
+        sandbox = context.require_sandbox()
         try:
-            resolved = backend.resolve(params.path)
+            resolved = sandbox.resolve(params.path)
         except SandboxViolation as error:
             return ToolResult(str(error), is_error=True)
         if not resolved.is_dir():
