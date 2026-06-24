@@ -3,6 +3,7 @@ from milky_frog.handlers.checkpoint import CheckpointHandler
 from milky_frog.handlers.context import (
     ApprovalResult,
     BlockResult,
+    BudgetedRequest,
     HandlerContext,
     HandlerResult,
     SystemPromptSection,
@@ -37,6 +38,7 @@ __all__ = [
     "BaseEvent",
     "BaseHandler",
     "BlockResult",
+    "BudgetedRequest",
     "CheckpointHandler",
     "EventDispatcher",
     "HandlerContext",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from milky_frog.domain import ModelRequest
 from milky_frog.harness.tools.tool_policy import SessionToolPolicy
 
 
@@ -29,11 +30,22 @@ class SystemPromptSection:
     content: str
 
 
-type HandlerResult = BlockResult | ApprovalResult | SystemPromptSection
+@dataclass(frozen=True, slots=True)
+class BudgetedRequest:
+    """Return from a ``RunBeforeModel`` handler to trim the request to a token budget.
+
+    The Harness applies this rewrite after collecting handler results, replacing
+    the original request with the budgeted one before sending to the model.
+    """
+
+    request: ModelRequest
+
+
+type HandlerResult = BlockResult | ApprovalResult | SystemPromptSection | BudgetedRequest
 """Union of all result types a handler may return to control Harness execution.
 
 A handler that returns ``None`` is pure observation; returning a
-``HandlerResult`` signals intent to block, pause, or extend the current step.
+``HandlerResult`` signals intent to block, pause, extend, or rewrite the current step.
 """
 
 

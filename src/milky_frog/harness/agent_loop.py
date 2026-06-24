@@ -74,7 +74,15 @@ class AgentLoop:
 
                 request = ModelRequest(state.messages, self._tools.schemas())
                 await self._emitter.turn_started(run_id, model_call=state.completed_model_calls + 1)
-                await self._emitter.before_model(run_id, request)
+                before_model_results = await self._emitter.before_model(run_id, request)
+
+                from milky_frog.handlers import BudgetedRequest
+
+                budgeted_requests = [
+                    r for r in before_model_results if isinstance(r, BudgetedRequest)
+                ]
+                if budgeted_requests:
+                    request = budgeted_requests[0].request
 
                 try:
                     response = await self._model_turn_with_retry(run_id, request, cancellation)
