@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import (
     ApprovalDecision,
     ApprovalVerdict,
@@ -25,6 +24,7 @@ from milky_frog.harness.state import (
     INTERRUPTED_TOOL_RESULT,
 )
 from milky_frog.harness.tools import ToolRegistry
+from milky_frog.infra.checkpoint.sqlite import SqliteCheckpointStore
 from tests.checkpoint_helpers import (
     run_status,
     seed_assistant_turn,

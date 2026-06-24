@@ -7,7 +7,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import TracebackType
 
-from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.checkpoint.base import CleanupScope, StoredRun
 from milky_frog.domain import (
     DEFAULT_MAX_MODEL_CALLS,
@@ -25,6 +24,7 @@ from milky_frog.harness.sandbox import LocalSandbox, SandboxFactory
 from milky_frog.harness.state import seal
 from milky_frog.harness.tools import ToolRegistry, default_tools
 from milky_frog.harness.tools.tool_policy import SessionToolPolicy
+from milky_frog.infra.checkpoint.sqlite import SqliteCheckpointStore
 from milky_frog.models import OpenAIModel
 from milky_frog.project import load_project_config
 from milky_frog.settings import Settings

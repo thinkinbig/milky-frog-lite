@@ -3,12 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import ModelChunk, ModelRequest, ModelResponse, RunRequest, StreamDone
 from milky_frog.handlers import EventDispatcher, RunBeforeStart, SystemPromptSection
 from milky_frog.handlers.skills import AgentContextHandler
 from milky_frog.harness.skills import SkillCatalog
 from milky_frog.harness.tools import ToolRegistry
+from milky_frog.infra.checkpoint.sqlite import SqliteCheckpointStore
 from tests.stubs import make_harness
 
 

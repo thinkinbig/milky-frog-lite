@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import (
     ModelChunk,
     ModelRequest,
@@ -32,6 +31,7 @@ from milky_frog.handlers import (
     RunTurnStart,
 )
 from milky_frog.harness.tools import ToolContext, ToolRegistry, ToolResult
+from milky_frog.infra.checkpoint.sqlite import SqliteCheckpointStore
 from tests.checkpoint_helpers import run_status, tool_messages
 from tests.stubs import EchoTool, FakeModel, SlowStreamModel, make_harness
 

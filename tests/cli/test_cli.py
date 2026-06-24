@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.cli import app
 from milky_frog.domain import RunStatus
+from milky_frog.infra.checkpoint.sqlite import SqliteCheckpointStore
 from milky_frog.ui.tui.app import TuiLaunch
 from tests.checkpoint_helpers import seed_run
 
@@ -83,7 +83,7 @@ def test_version_shows_version(tmp_path: Path) -> None:
 def test_resume_without_task_opens_tui_with_pending_advance(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    cli_module = import_module("milky_frog.cli.app")
+    launch_module = import_module("milky_frog.cli.launch")
     launches: list[TuiLaunch] = []
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -99,7 +99,7 @@ def test_resume_without_task_opens_tui_with_pending_advance(
         def run(self) -> None:
             return None
 
-    monkeypatch.setattr(cli_module, "MilkyFrogApp", FakeApp)  # type: ignore[attr-defined]
+    monkeypatch.setattr(launch_module, "MilkyFrogApp", FakeApp)  # type: ignore[attr-defined]
     result = runner.invoke(
         app,
         ["resume", "run-abc"],
@@ -120,7 +120,7 @@ def test_resume_without_task_opens_tui_with_pending_advance(
 def test_resume_with_task_opens_tui_with_prompt(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    cli_module = import_module("milky_frog.cli.app")
+    launch_module = import_module("milky_frog.cli.launch")
     launches: list[TuiLaunch] = []
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -136,7 +136,7 @@ def test_resume_with_task_opens_tui_with_prompt(
         def run(self) -> None:
             return None
 
-    monkeypatch.setattr(cli_module, "MilkyFrogApp", FakeApp)  # type: ignore[attr-defined]
+    monkeypatch.setattr(launch_module, "MilkyFrogApp", FakeApp)  # type: ignore[attr-defined]
     result = runner.invoke(
         app,
         ["resume", "run-abc", "follow up"],
@@ -155,7 +155,7 @@ def test_resume_with_task_opens_tui_with_prompt(
 
 
 def test_run_opens_tui_with_initial_task(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    cli_module = import_module("milky_frog.cli.app")
+    launch_module = import_module("milky_frog.cli.launch")
     launches: list[TuiLaunch] = []
 
     class FakeApp:
@@ -167,7 +167,7 @@ def test_run_opens_tui_with_initial_task(monkeypatch: pytest.MonkeyPatch, tmp_pa
         def run(self) -> None:
             return None
 
-    monkeypatch.setattr(cli_module, "MilkyFrogApp", FakeApp)  # type: ignore[attr-defined]
+    monkeypatch.setattr(launch_module, "MilkyFrogApp", FakeApp)  # type: ignore[attr-defined]
     result = runner.invoke(
         app,
         ["run", "build feature x"],

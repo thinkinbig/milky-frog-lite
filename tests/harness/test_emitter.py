@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import RunResult, RunState, RunStatus, ToolCall
 from milky_frog.handlers import (
     CheckpointHandler,
@@ -16,6 +15,7 @@ from milky_frog.handlers import (
     RunTurnStart,
 )
 from milky_frog.harness.emitter import RunEmitter
+from milky_frog.infra.checkpoint.sqlite import SqliteCheckpointStore
 
 
 def _make_emitter(store: SqliteCheckpointStore, registry: EventDispatcher) -> RunEmitter:

@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import RunRequest, RunStatus
 from milky_frog.handlers import EventDispatcher, RunFailed, RunNotice
 from milky_frog.harness.model_retry import is_retriable_model_error
 from milky_frog.harness.tools import ToolRegistry
+from milky_frog.infra.checkpoint.sqlite import SqliteCheckpointStore
 from tests.stubs import FlakyConnectionModel, ImmediateErrorModel, make_harness
 
 

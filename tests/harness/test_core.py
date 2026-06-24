@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import MessageRole, RunRequest, RunStatus, TokenUsage
 from milky_frog.handlers import EventDispatcher
 from milky_frog.harness.tools import ToolRegistry
+from milky_frog.infra.checkpoint.sqlite import SqliteCheckpointStore
 from tests.checkpoint_helpers import run_status, tool_messages
 from tests.stubs import (
     EarlyStreamDoneModel,

@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 from milky_frog.agent_session import AgentSession, InactiveAgentSession, MissingModelConfiguration
-from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import (
     ApprovalDecision,
     ApprovalVerdict,
@@ -22,6 +21,7 @@ from milky_frog.domain import (
 )
 from milky_frog.handlers import BaseHandler, EventDispatcher, RunCancelled
 from milky_frog.harness.agent_harness import AgentHarness
+from milky_frog.infra.checkpoint.sqlite import SqliteCheckpointStore
 from milky_frog.models import OpenAIModel
 from milky_frog.settings import LangfuseSettings, Settings
 from tests.checkpoint_helpers import run_status, seed_interrupted_tool_run, seed_run
