@@ -22,13 +22,13 @@ from milky_frog.domain import (
     is_cancelled,
 )
 from milky_frog.harness.emitter import RunEmitter
-from milky_frog.harness.execution_backend import ExecutionBackend
 from milky_frog.harness.model_retry import (
     MODEL_RETRY_BASE_DELAY_S,
     MODEL_RETRY_MAX_ATTEMPTS,
     is_retriable_model_error,
     retry_sleep,
 )
+from milky_frog.harness.sandbox import Sandbox
 from milky_frog.harness.state import append_model_response, append_tool_result
 from milky_frog.harness.tools import ToolContext, ToolRegistry
 from milky_frog.models import Model
@@ -55,7 +55,7 @@ class AgentLoop:
     async def advance(
         self,
         state: RunState,
-        backend: ExecutionBackend,
+        sandbox: Sandbox,
         *,
         max_calls: int = 30,
         cancellation: RunCancellation | None = None,
@@ -118,7 +118,7 @@ class AgentLoop:
                             result = await self._execute_tool(
                                 run_id,
                                 state.workspace,
-                                backend,
+                                sandbox,
                                 call,
                                 cancellation,
                             )
@@ -210,12 +210,12 @@ class AgentLoop:
         self,
         run_id: str,
         workspace: Path,
-        backend: ExecutionBackend,
+        sandbox: Sandbox,
         call: ToolCall,
         cancellation: RunCancellation | None,
     ) -> ToolResult:
         tool = self._tools.get(call.name)
-        context = ToolContext(run_id, workspace, cancellation, backend=backend)
+        context = ToolContext(run_id, workspace, cancellation, sandbox=sandbox)
         try:
             input_model = tool.input_model.model_validate(call.arguments)
             result: ToolResult = await self._run_cancellable(
@@ -269,7 +269,7 @@ async def execute_tool(
     tools: ToolRegistry,
     run_id: str,
     workspace: Path,
-    backend: ExecutionBackend,
+    sandbox: Sandbox,
     call: ToolCall,
     cancellation: RunCancellation | None,
 ) -> ToolResult:
@@ -279,7 +279,7 @@ async def execute_tool(
     resolution tool execution before the loop starts).
     """
     tool = tools.get(call.name)
-    context = ToolContext(run_id, workspace, cancellation, backend=backend)
+    context = ToolContext(run_id, workspace, cancellation, sandbox=sandbox)
     try:
         input_model = tool.input_model.model_validate(call.arguments)
         result: ToolResult = await AgentLoop._run_cancellable(

@@ -77,7 +77,7 @@ src/milky_frog/
 ├── checkpoint/   # CheckpointStore seam, RunSnapshot JSON, SQLite adapter
 ├── cli/          # Typer command surface
 ├── handlers/     # lifecycle signals, EventDispatcher (RunEmitter publishes)
-├── harness/      # Harness loop, Tool registry, ExecutionBackend, state, Skill catalog
+├── harness/      # Harness loop, Tool registry, Sandbox, state, Skill catalog
 ├── infra/        # SQLite, OpenAI, observability adapters
 ├── models/       # model-provider seam
 └── ui/           # Rich one-shot rendering and Textual interactive UI
@@ -94,7 +94,7 @@ uv run mypy
 
 ## Security
 
-The **Local Sandbox** policy (implemented by `LocalExecutionBackend`, ADR-0016) constrains
+The **Local Sandbox** policy (implemented by `LocalSandbox`, ADR-0016) constrains
 structured file operations and requires approval for shell commands; it is not a security
 boundary for untrusted code. Sensitive files such as `.env`, private keys, and `.git/` are
 denied by default. Additional project paths can be excluded in `.milkyfrogignore`.
@@ -160,6 +160,6 @@ uv run milky-frog init
 
 ## 安全边界
 
-**Local Sandbox** 策略（由 `LocalExecutionBackend` 实现，ADR-0016）会限制结构化文件操作，
+**Local Sandbox** 策略（由 `LocalSandbox` 实现，ADR-0016）会限制结构化文件操作，
 并要求用户批准 shell 命令，但它不能安全隔离不可信代码。
 `.env`、私钥和 `.git/` 等敏感路径默认禁止读取；项目可通过 `.milkyfrogignore` 增加排除规则。

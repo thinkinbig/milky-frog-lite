@@ -8,7 +8,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from milky_frog.domain import ToolResult
-from milky_frog.harness.execution_backend import ExecutionBackend, SandboxViolation
+from milky_frog.harness.sandbox import Sandbox, SandboxViolation
 from milky_frog.harness.tools.base import ToolContext
 from milky_frog.harness.tools.truncate import truncate_tool_output
 
@@ -30,7 +30,7 @@ class GrepTool:
     """Search workspace file contents for a regex, returning ``path:line:text``.
 
     Pure-Python search (no external ``rg`` dependency).  Every file searched is
-    run through ``ExecutionBackend.resolve`` first, so denied/escaping paths
+    run through ``Sandbox.resolve`` first, so denied/escaping paths
     (``.env``, ``.git/**``, …) are skipped — exactly the paths ``read_file``
     would also refuse.  That shared policy is why this tool is approval-free and
     why its output always composes with ``read_file``.
@@ -59,9 +59,9 @@ class GrepTool:
         except re.error as error:
             return ToolResult(f"invalid regex: {error}", is_error=True)
 
-        backend = context.require_backend()
+        sandbox = context.require_sandbox()
         try:
-            root = backend.resolve(params.path)
+            root = sandbox.resolve(params.path)
         except SandboxViolation as error:
             return ToolResult(str(error), is_error=True)
         if not root.exists():
@@ -69,8 +69,8 @@ class GrepTool:
 
         lines: list[str] = []
         total = 0
-        for file in _iter_allowed_files(backend, root):
-            rel = file.relative_to(backend.workspace).as_posix()
+        for file in _iter_allowed_files(sandbox, root):
+            rel = file.relative_to(sandbox.workspace).as_posix()
             try:
                 text = file.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
@@ -94,30 +94,30 @@ class GrepTool:
         return ToolResult(output)
 
 
-def _iter_allowed_files(backend: ExecutionBackend, root: Path) -> Iterator[Path]:
+def _iter_allowed_files(sandbox: Sandbox, root: Path) -> Iterator[Path]:
     """Yield text-file candidates under *root* that pass the sandbox policy.
 
-    Reuses ``backend.resolve`` as the single allow/deny predicate, pruning denied
+    Reuses ``sandbox.resolve`` as the single allow/deny predicate, pruning denied
     directories (``.git`` …) during the walk so we never descend into them.
     """
     if root.is_file():
         yield root
         return
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(d for d in dirnames if _is_allowed(backend, Path(dirpath, d)))
+        dirnames[:] = sorted(d for d in dirnames if _is_allowed(sandbox, Path(dirpath, d)))
         for name in sorted(filenames):
             candidate = Path(dirpath, name)
-            if _is_allowed(backend, candidate):
+            if _is_allowed(sandbox, candidate):
                 yield candidate
 
 
-def _is_allowed(backend: ExecutionBackend, path: Path) -> bool:
+def _is_allowed(sandbox: Sandbox, path: Path) -> bool:
     try:
-        rel = path.relative_to(backend.workspace).as_posix()
+        rel = path.relative_to(sandbox.workspace).as_posix()
     except ValueError:
         return False
     try:
-        backend.resolve(rel)
+        sandbox.resolve(rel)
     except SandboxViolation:
         return False
     return True

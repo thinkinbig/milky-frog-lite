@@ -2,7 +2,7 @@ import asyncio
 import subprocess
 from pathlib import Path
 
-from milky_frog.harness.execution_backend import LocalExecutionBackend
+from milky_frog.harness.sandbox import LocalSandbox
 from milky_frog.harness.tools import ToolContext
 from milky_frog.harness.tools.builtins import (
     BashTool,
@@ -16,7 +16,7 @@ from milky_frog.harness.tools.builtins import (
 
 
 def _context(workspace: Path) -> ToolContext:
-    return ToolContext("run-1", workspace, backend=LocalExecutionBackend(workspace))
+    return ToolContext("run-1", workspace, sandbox=LocalSandbox(workspace))
 
 
 def test_default_tools_exposes_all_builtin_tools() -> None:
@@ -186,10 +186,10 @@ async def test_grep_searches_a_single_file(tmp_path: Path) -> None:
     assert result.content == "only.py:1:hit here\nonly.py:3:hit again"
 
 
-async def test_tool_context_builds_default_backend(tmp_path: Path) -> None:
+async def test_tool_context_builds_default_sandbox(tmp_path: Path) -> None:
     context = ToolContext("run-1", tmp_path)
 
-    assert context.require_backend().workspace == tmp_path.resolve()
+    assert context.require_sandbox().workspace == tmp_path.resolve()
 
 
 async def test_bash_empty_command_is_error(tmp_path: Path) -> None:

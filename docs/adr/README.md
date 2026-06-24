@@ -7,7 +7,7 @@ Checkpoint persistence unless a newer ADR says otherwise.
 | ADR | Topic | Status |
 |-----|-------|--------|
 | [0001](0001-own-a-linear-agent-harness.md) | Linear Harness | Current |
-| [0003](0003-start-with-a-policy-based-local-sandbox.md) | Local Sandbox policy (implemented by `LocalExecutionBackend`) | Current |
+| [0003](0003-start-with-a-policy-based-local-sandbox.md) | Local Sandbox policy (`LocalSandbox`) | Current |
 | [0004](0004-use-typed-event-handlers.md) | Typed lifecycle Handlers | Current (intercept removed in 0012) |
 | [0005](0005-keep-skills-declarative-and-non-executable.md) | Declarative Skills | Current |
 | [0006](0006-separate-human-output-by-stream.md) | Stream output lanes | Current |
@@ -18,7 +18,7 @@ Checkpoint persistence unless a newer ADR says otherwise.
 | [0012](0012-shrink-handler-registry-to-a-read-only-lifecycle-bus.md) | Handler bus: notify + bounded control returns | Current (living doc; rewritten from "read-only") |
 | [0014](0014-persist-checkpoints-as-runstate-snapshots.md) | **`RunState` snapshot Checkpoint** | **Current source of truth for persistence** |
 | [0015](0015-centralize-handler-assembly-in-default-handlers.md) | Centralized `default_handlers` assembly | Current |
-| [0016](0016-unify-sandbox-and-command-env-into-execution-backend.md) | **`ExecutionBackend` seam** (replaces `Sandbox` + `CommandEnvironment`) | Current |
+| [0016](0016-unify-command-env-into-sandbox.md) | **`Sandbox` seam** (`CommandEnvironment` merged in) | Current |
 
 ## Three lanes (post-0014)
 

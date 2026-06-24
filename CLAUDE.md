@@ -95,10 +95,10 @@ named class — so alternatives can be swapped without touching the Harness:
 - `handlers/` — lifecycle signals + `EventDispatcher` (ADR-0012); only `RunEmitter` publishes.
 - `ui/protocols.py` — `RunAdvancer`, `RunCanceller` for the interactive loop.
 - `harness/skills/` — `SkillCatalog`, declarative `SKILL.md` bundles (never executable).
-- `harness/execution_backend.py` — `ExecutionBackend` protocol + `LocalExecutionBackend`
-  (path deny patterns, subprocess env, `backend_factory` injection). Implements the
+- `harness/sandbox/` — `Sandbox` protocol + `LocalSandbox`
+  (path deny patterns, subprocess env, `sandbox_factory` injection). Implements the
   **Local Sandbox** policy from ADR-0003; a policy boundary, **not** host isolation.
-  Future `DockerExecutionBackend` swaps this single seam (ADR-0016).
+  Future `DockerSandbox` swaps this single seam (ADR-0016).
 
 `domain.py` holds the shared frozen dataclasses / enums (`RunStatus`, `Message`,
 `ToolCall`, `RunRequest`, `RunResult`, …) — the vocabulary every layer uses.
@@ -141,4 +141,4 @@ both):
 
 - [ADR-0012](docs/adr/0012-shrink-handler-registry-to-a-read-only-lifecycle-bus.md) — Handler bus is notify-only.
 - [ADR-0014](docs/adr/0014-persist-checkpoints-as-runstate-snapshots.md) — RunState snapshot persistence.
-- [ADR-0016](docs/adr/0016-unify-sandbox-and-command-env-into-execution-backend.md) — `ExecutionBackend` seam (replaces `Sandbox` + `CommandEnvironment`).
+- [ADR-0016](docs/adr/0016-unify-command-env-into-sandbox.md) — `CommandEnvironment` merged into `Sandbox` seam.

@@ -54,12 +54,8 @@ _Avoid_: Plugin, Tool
 
 **Local Sandbox**:
 A policy boundary that constrains structured file operations and requires approval for shell commands, but does not isolate untrusted code from the host.
-Implemented in code by `LocalExecutionBackend` (`harness/execution_backend.py`); see ADR-0016.
+Implemented by the `Sandbox` protocol; default adapter is `LocalSandbox` (`harness/sandbox/`). See ADR-0003 and ADR-0016.
 _Avoid_: Container, secure sandbox
-
-**Execution Backend**:
-The injectable seam (`ExecutionBackend` protocol) that groups path policy, subprocess environment, and (future) command execution for a Workspace. `LocalExecutionBackend` is the default; a future `DockerExecutionBackend` replaces this single unit.
-_Avoid_: Sandbox (as a code module name), CommandEnvironment
 
 **Terminal UI**:
 The consistent command-line presentation of Run state, results, errors, and empty states using styled terminal output. It is not a full-screen interactive application.
@@ -123,12 +119,8 @@ _避免使用_：插件、Tool
 
 **Local Sandbox（本地沙箱）**：
 一种策略边界，用于限制结构化文件操作并要求用户批准 shell 命令，但不将不可信代码与宿主机隔离。
-代码实现为 `LocalExecutionBackend`（`harness/execution_backend.py`）；见 ADR-0016。
+由 `Sandbox` 协议实现；默认适配器为 `LocalSandbox`（`harness/sandbox/`）。见 ADR-0003 与 ADR-0016。
 _避免使用_：容器、安全沙箱
-
-**Execution Backend（执行后端）**：
-可注入的 seam（`ExecutionBackend` 协议），将路径策略、子进程环境与（未来的）命令执行绑定在一个 Workspace 执行单元上。默认实现为 `LocalExecutionBackend`；未来的 `DockerExecutionBackend` 只替换这一处。
-_避免使用_：Sandbox（作为代码模块名）、CommandEnvironment
 
 **Terminal UI（终端界面）**：
 使用带样式的终端输出，一致地呈现 Run 状态、结果、错误和空状态；它不是全屏交互式应用。

@@ -1,4 +1,4 @@
-"""Execution Backend seam — injectable local-or-Docker execution context.
+"""Sandbox seam — injectable local-or-Docker execution context.
 
 Unifies three concerns that all break when moving from local to Docker:
 
@@ -6,8 +6,8 @@ Unifies three concerns that all break when moving from local to Docker:
 - **Environment building** — subprocess env dict (allowlist + non-interactive defaults)
 - **(future) Command execution** — ``create_subprocess_shell`` → ``docker exec``
 
-`ToolContext` carries one ``backend`` field instead of separate ``sandbox`` +
-``command_env``.
+``ToolContext`` carries one ``sandbox`` field instead of a separate
+``command_env`` builder.
 
 See ADR-0016 for the full rationale.
 """
@@ -41,14 +41,10 @@ _NONINTERACTIVE_ENV: dict[str, str] = {
 
 
 class SandboxViolation(PermissionError):
-    """Raised when a path resolution violates the Execution Backend policy.
-
-    Renamed from the old ``infra.sandbox.local.SandboxViolation`` — the
-    exception semantics are unchanged.
-    """
+    """Raised when a path resolution violates the Sandbox policy."""
 
 
-class ExecutionBackend(Protocol):
+class Sandbox(Protocol):
     """Policy boundary for Workspace execution.
 
     Wraps path resolution, environment building, and (in future) command
@@ -75,14 +71,14 @@ class ExecutionBackend(Protocol):
         ...
 
 
-class ExecutionBackendFactory(Protocol):
-    """Create an ExecutionBackend for a given Workspace."""
+class SandboxFactory(Protocol):
+    """Create a Sandbox for a given Workspace."""
 
-    def __call__(self, workspace: Path) -> ExecutionBackend: ...
+    def __call__(self, workspace: Path) -> Sandbox: ...
 
 
-class LocalExecutionBackend:
-    """Default ExecutionBackend: local filesystem + host env + PTY subprocess.
+class LocalSandbox:
+    """Default Sandbox: local filesystem + host env + PTY subprocess.
 
     Path policy
     -----------
@@ -105,8 +101,8 @@ class LocalExecutionBackend:
     subprocesses without code changes.
 
     When ``config`` is not supplied it is loaded from the workspace, so the
-    default ``ExecutionBackendFactory`` (this class) stays a ``(workspace) ->
-    ExecutionBackend`` callable while still picking up ``env_allowlist_extra``.
+    default ``SandboxFactory`` (this class) stays a ``(workspace) -> Sandbox``
+    callable while still picking up ``env_allowlist_extra``.
     """
 
     __slots__ = ("_allowlist", "_deny_patterns", "config", "workspace")

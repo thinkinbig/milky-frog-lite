@@ -21,11 +21,7 @@ from milky_frog.handlers import ApprovalResult, BlockResult, EventDispatcher
 from milky_frog.harness.agent_loop import AgentLoop
 from milky_frog.harness.agent_loop import execute_tool as _execute_tool
 from milky_frog.harness.emitter import RunEmitter
-from milky_frog.harness.execution_backend import (
-    ExecutionBackend,
-    ExecutionBackendFactory,
-    LocalExecutionBackend,
-)
+from milky_frog.harness.sandbox import LocalSandbox, Sandbox, SandboxFactory
 from milky_frog.harness.state import (
     append_tool_result,
     append_user_message,
@@ -39,10 +35,10 @@ from milky_frog.models import Model
 
 @dataclass(frozen=True, slots=True)
 class PreparedRun:
-    """State and backend prepared for ``AgentLoop.advance`` after a resume."""
+    """State and sandbox prepared for ``AgentLoop.advance`` after a resume."""
 
     state: RunState
-    backend: ExecutionBackend
+    sandbox: Sandbox
 
 
 class AgentHarness:
@@ -61,12 +57,12 @@ class AgentHarness:
         tools: ToolRegistry,
         checkpoints: CheckpointStore,
         handlers: EventDispatcher,
-        backend_factory: ExecutionBackendFactory = LocalExecutionBackend,
+        sandbox_factory: SandboxFactory = LocalSandbox,
     ) -> None:
         self._model = model
         self._tools = tools
         self._checkpoints = checkpoints
-        self._backend_factory = backend_factory
+        self._sandbox_factory = sandbox_factory
         self._handlers = handlers
         self._emitter = RunEmitter(handlers)
         self._agent_loop = AgentLoop(model, tools, self._emitter)
@@ -84,10 +80,10 @@ class AgentHarness:
                 extra_sections,
             )
             await self._emitter.run_started(run_id, run_request, state)
-            backend = self._make_backend(workspace)
+            sandbox = self._make_sandbox(workspace)
             return await self._agent_loop.advance(
                 state,
-                backend,
+                sandbox,
                 cancellation=run_request.cancellation,
                 max_calls=run_request.max_model_calls,
             )
@@ -113,7 +109,7 @@ class AgentHarness:
                         "approve or deny the pending tool first"
                     )
 
-                backend = self._make_backend(stored.workspace)
+                sandbox = self._make_sandbox(stored.workspace)
 
                 await self._emitter.before_resume(run_id, prompt, stored.status, stored.workspace)
 
@@ -124,7 +120,7 @@ class AgentHarness:
                         state = append_user_message(state, prompt)
                 self._checkpoints.prepare_resume(run_id, stored.updated_at, state)
 
-                plan = PreparedRun(state=state, backend=backend)
+                plan = PreparedRun(state=state, sandbox=sandbox)
                 resolved = await self._apply_approvals(
                     plan,
                     run_id,
@@ -136,7 +132,7 @@ class AgentHarness:
                     return resolved
                 return await self._agent_loop.advance(
                     resolved.state,
-                    resolved.backend,
+                    resolved.sandbox,
                     cancellation=cancellation,
                     max_calls=max_model_calls,
                 )
@@ -160,14 +156,14 @@ class AgentHarness:
                 if stored.status is not RunStatus.WAITING_FOR_APPROVAL:
                     raise ResumeError(f"Run {run_id} is not waiting for tool approval")
 
-                backend = self._make_backend(stored.workspace)
+                sandbox = self._make_sandbox(stored.workspace)
 
                 await self._emitter.before_resume(run_id, None, stored.status, stored.workspace)
 
                 state = self._checkpoints.load_state(run_id)
                 self._checkpoints.prepare_resume(run_id, stored.updated_at, state)
 
-                plan = PreparedRun(state=state, backend=backend)
+                plan = PreparedRun(state=state, sandbox=sandbox)
                 resolved = await self._apply_approvals(
                     plan, run_id, cancellation, approval=approval
                 )
@@ -175,7 +171,7 @@ class AgentHarness:
                     return resolved
                 return await self._agent_loop.advance(
                     resolved.state,
-                    resolved.backend,
+                    resolved.sandbox,
                     cancellation=cancellation,
                     max_calls=max_model_calls,
                 )
@@ -184,15 +180,15 @@ class AgentHarness:
 
     # ── Pre-loop approval resolution ─────────────────────────────────
 
-    def _make_backend(self, workspace: Path) -> ExecutionBackend:
-        """Build an ``ExecutionBackend`` via the injected factory.
+    def _make_sandbox(self, workspace: Path) -> Sandbox:
+        """Build a ``Sandbox`` via the injected factory.
 
         The single construction point for run / resume / respond_approval, so a
-        custom ``backend_factory`` (e.g. a future ``DockerExecutionBackend``) is
-        honoured everywhere.  ``LocalExecutionBackend`` loads project config from
-        the workspace itself, so the factory stays ``(workspace) -> backend``.
+        custom ``sandbox_factory`` (e.g. a future ``DockerSandbox``) is
+        honoured everywhere.  ``LocalSandbox`` loads project config from
+        the workspace itself, so the factory stays ``(workspace) -> sandbox``.
         """
-        return self._backend_factory(workspace)
+        return self._sandbox_factory(workspace)
 
     async def _apply_approvals(
         self,
@@ -223,7 +219,7 @@ class AgentHarness:
                 return resolved
             plan = PreparedRun(
                 state=append_tool_result(plan.state, call, resolved),
-                backend=plan.backend,
+                sandbox=plan.sandbox,
             )
             await self._emitter.after_tool(run_id, call, resolved, plan.state)
         return plan
@@ -249,7 +245,7 @@ class AgentHarness:
                 self._tools,
                 run_id,
                 plan.state.workspace,
-                plan.backend,
+                plan.sandbox,
                 call,
                 cancellation,
             )
@@ -270,7 +266,7 @@ class AgentHarness:
             self._tools,
             run_id,
             plan.state.workspace,
-            plan.backend,
+            plan.sandbox,
             call,
             cancellation,
         )

@@ -89,9 +89,9 @@ class BashTool:
         if not command:
             return ToolResult("empty command", is_error=True)
 
-        backend = context.require_backend()
-        env = backend.build_env()
-        timeout_seconds = float(backend.config.bash_timeout_seconds)
+        sandbox = context.require_sandbox()
+        env = sandbox.build_env()
+        timeout_seconds = float(sandbox.config.bash_timeout_seconds)
 
         loop = asyncio.get_running_loop()
         master_fd, slave_fd = pty.openpty()
@@ -103,7 +103,7 @@ class BashTool:
                     stdin=asyncio.subprocess.DEVNULL,
                     stdout=slave_fd,
                     stderr=slave_fd,
-                    cwd=str(backend.workspace),
+                    cwd=str(sandbox.workspace),
                     env=env,
                 )
             except OSError as error:

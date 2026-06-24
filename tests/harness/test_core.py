@@ -18,7 +18,7 @@ from tests.stubs import (
     IdentityCapturingModel,
     InvalidToolArgsThenRecoverModel,
     ReasoningModel,
-    RecordingBackendFactory,
+    RecordingSandboxFactory,
     UsageReportingModel,
     make_harness,
 )
@@ -51,15 +51,15 @@ async def test_runs_tool_loop_and_persists_events(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_injected_backend_factory_is_used(tmp_path: Path) -> None:
+async def test_injected_sandbox_factory_is_used(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    factory = RecordingBackendFactory()
+    factory = RecordingSandboxFactory()
     harness = make_harness(
         model=FakeModel(),
         tools=ToolRegistry((EchoTool(),)),
         checkpoints=store,
         handlers=EventDispatcher(),
-        backend_factory=factory,
+        sandbox_factory=factory,
     )
 
     result = await harness.run(RunRequest("echo hello", tmp_path))
