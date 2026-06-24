@@ -4,10 +4,8 @@ from collections.abc import Sequence
 
 from milky_frog.checkpoint import CheckpointStore
 from milky_frog.events.hub import BaseHandler
-from milky_frog.handlers.budget import BudgetHandler
 from milky_frog.handlers.checkpoint import CheckpointHandler
 from milky_frog.handlers.langfuse import LangfuseHandler
-from milky_frog.handlers.policy import PolicyHandler
 from milky_frog.handlers.skills import AgentContextHandler
 from milky_frog.settings import Settings
 
@@ -28,9 +26,7 @@ def session_handler_bundles(
     """
     bundles: list[BaseHandler] = [
         CheckpointHandler(checkpoints),
-        PolicyHandler(),
         AgentContextHandler(settings.home),
-        BudgetHandler(),
     ]
     bundles.extend(extra)
     langfuse = LangfuseHandler.from_settings(settings)

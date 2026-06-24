@@ -2,8 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from milky_frog.harness.prompt import BuildSystemPromptOptions, build_system_prompt, system_prompt
-from milky_frog.harness.prompt_context import ContextFile, load_context_files
+from milky_frog.harness.prompt import (
+    BuildSystemPromptOptions,
+    agent_context_section,
+    build_system_prompt,
+    format_agent_context,
+    system_prompt,
+)
+from milky_frog.harness.prompt_context import AgentContext, ContextFile, load_agent_context
 from milky_frog.harness.skills import SkillCatalog
 from milky_frog.project import PROJECT_DIRNAME
 
@@ -39,8 +45,7 @@ def test_system_prompt_injects_workspace_agents_md(tmp_path: Path) -> None:
     prompt = build_system_prompt(
         BuildSystemPromptOptions(
             workspace=workspace,
-            home=home,
-            context_files=load_context_files(workspace, home),
+            agent_context=load_agent_context(workspace, home),
         )
     )
 
@@ -62,7 +67,7 @@ def test_load_context_files_orders_global_then_ancestors(tmp_path: Path) -> None
     (company / "AGENTS.md").write_text("company rules\n", encoding="utf-8")
     (project / "CLAUDE.md").write_text("project rules\n", encoding="utf-8")
 
-    files = load_context_files(project, home)
+    files = load_agent_context(project, home).context_files
 
     assert [file.content.strip() for file in files] == [
         "global rules",
@@ -82,13 +87,10 @@ def test_system_prompt_injects_skills_and_append_rules(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
 
-    catalog = SkillCatalog(home / "skills", project_skills)
     prompt = build_system_prompt(
         BuildSystemPromptOptions(
             workspace=workspace,
-            home=home,
-            append_system="Prefer small diffs.",
-            skill_locations=catalog.prompt_locations(),
+            agent_context=load_agent_context(workspace, home),
         )
     )
 
@@ -107,16 +109,48 @@ def test_build_system_prompt_is_pure_assembly(tmp_path: Path) -> None:
     prompt = build_system_prompt(
         BuildSystemPromptOptions(
             workspace=workspace,
-            home=tmp_path / "home",
-            context_files=(context,),
-            append_system="extra rule",
-            skill_locations=(("demo", "Demo skill", workspace / "skill" / "SKILL.md"),),
+            agent_context=AgentContext(
+                append_system="extra rule",
+                context_files=(context,),
+                skill_locations=(("demo", "Demo skill", workspace / "skill" / "SKILL.md"),),
+            ),
         )
     )
 
     assert "extra rule" in prompt
     assert "project-only" in prompt
     assert "<name>demo</name>" in prompt
+
+
+def test_handler_injection_matches_direct_build(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "AGENTS.md").write_text("Run pytest first.\n", encoding="utf-8")
+    (home / "APPEND_SYSTEM.md").write_text("Keep diffs small.\n", encoding="utf-8")
+
+    context = load_agent_context(workspace, home)
+    injected = format_agent_context(context)
+    assert injected is not None
+
+    via_handler = system_prompt(workspace, extra_sections=(injected,))
+    via_build = build_system_prompt(
+        BuildSystemPromptOptions(workspace=workspace, agent_context=context)
+    )
+
+    assert via_handler == via_build
+
+
+def test_agent_context_section_matches_format_agent_context(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "AGENTS.md").write_text("Project rules.\n", encoding="utf-8")
+
+    context = load_agent_context(workspace, home)
+    assert agent_context_section(workspace, home) == format_agent_context(context)
 
 
 def test_skill_catalog_prompt_locations(tmp_path: Path) -> None:

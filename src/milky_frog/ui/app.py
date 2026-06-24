@@ -20,9 +20,9 @@ from textual.widgets import Footer, Header, Input, OptionList, Static
 from textual.widgets.option_list import Option
 from textual.worker import Worker
 
-from milky_frog.agent_session import AgentSession
+from milky_frog.app.session import AgentSession
+from milky_frog.core.controller import RunController
 from milky_frog.domain import ApprovalDecision, ApprovalVerdict, ResumeError, RunStatus, RunUsage
-from milky_frog.harness.state import unmatched_tool_calls
 from milky_frog.project import load_project_config
 from milky_frog.settings import Settings
 from milky_frog.ui.bundles import tui_presentation_bundle
@@ -460,11 +460,18 @@ class MilkyFrogApp(App[None]):
 
         self._thinking_spinner_timer: Timer | None = None
         self._thinking_frame_idx: int = 0
+        self._run_controller: RunController | None = None
 
     @property
     def session(self) -> AgentSession:
         """The active ``AgentSession``; always valid while the app is running."""
         return self._session
+
+    @property
+    def run_controller(self) -> RunController:
+        if self._run_controller is None:
+            raise RuntimeError("RunController is not ready; session has not started")
+        return self._run_controller
 
     def run(self, *args: Any, **kwargs: Any) -> Any:
         """Run the TUI with a managed ``AgentSession`` lifecycle.
@@ -477,6 +484,7 @@ class MilkyFrogApp(App[None]):
 
         async def _run_with_session() -> Any:
             async with self._session:
+                self._run_controller = RunController(self._session.checkpoints)
                 return await self.run_async(*args, **kwargs)
 
         return asyncio.run(_run_with_session())
@@ -990,37 +998,19 @@ class MilkyFrogApp(App[None]):
         self._start_run(task, run_id=self.session.run_id)
 
     def _handle_resume(self, task: str) -> None:
-        """Parse ``/resume`` and either attach to a Run or continue it.
-
-        Without a run_id, defaults to the most recently updated run:
-
-          ``/resume``               — attach to the latest run
-          ``/resume RUN_ID``         — attach to a specific run
-          ``/resume prompt``         — continue the latest run with a prompt
-          ``/resume RUN_ID prompt``  — continue a specific run with a prompt
-        """
-        rest = task[len("/resume") :].strip()
-        head, _, tail = rest.partition(" ")
-        head = head.strip()
-        tail = tail.strip()
-
-        if head:
-            try:
-                run_id = self.session.checkpoints.resolve_run_id(head)
-            except (LookupError, ValueError) as error:
-                self._render_error(f"unknown Run: {error}")
-                return
-        else:
-            runs = self.session.checkpoints.list_runs(limit=1)
-            if not runs:
-                self._render_error(
-                    "No runs found to resume.",
-                    hint="Start a new task to create a run first.",
-                )
-                return
-            run_id = runs[0].run_id
-
-        self._attach_or_continue_run(run_id, prompt=tail or None)
+        """Parse ``/resume`` and either attach to a Run or continue it."""
+        parsed = self.run_controller.parse_resume_command(task)
+        if isinstance(parsed, str):
+            hint = None
+            if parsed == "No runs found to resume.":
+                hint = "Start a new task to create a run first."
+            self._render_error(parsed, hint=hint)
+            return
+        self._attach_or_continue_run(
+            parsed.run_id,
+            prompt=parsed.prompt,
+            advance_pending=False,
+        )
 
     def _attach_or_continue_run(
         self,
@@ -1030,37 +1020,41 @@ class MilkyFrogApp(App[None]):
         advance_pending: bool = False,
     ) -> None:
         """Attach to a Run, continue with a prompt, or advance pending work."""
-        if prompt is not None:
-            self.session.run_id = run_id
-            self.query_one(RunStatusBar).set_run_id(run_id)
-            self._start_run(prompt, run_id=run_id)
+        outcome = self.run_controller.attach(
+            run_id,
+            prompt=prompt,
+            advance_pending=advance_pending,
+        )
+
+        if outcome.kind == "prompt_continue":
+            self.session.run_id = outcome.run_id
+            self.query_one(RunStatusBar).set_run_id(outcome.run_id)
+            self._start_run(prompt or "", run_id=outcome.run_id)
             return
 
-        self.session.run_id = run_id
-        self.query_one(RunStatusBar).set_run_id(run_id)
-        stored = self.session.checkpoints.get_run(run_id)
-        if stored is not None and stored.status is RunStatus.WAITING_FOR_APPROVAL:
-            state = self.session.checkpoints.load_state(run_id)
-            pending = unmatched_tool_calls(state.messages)
-            tool_name = pending[0].name if pending else ""
-            reason = stored.final_message or "Tool approval required"
-            self.post_message(ApprovalRequired(run_id, reason, tool_name))
+        self.session.run_id = outcome.run_id
+        self.query_one(RunStatusBar).set_run_id(outcome.run_id)
+
+        if outcome.kind == "approval_pending":
+            self.post_message(
+                ApprovalRequired(outcome.run_id, outcome.approval_reason, outcome.tool_name)
+            )
             self._append(
                 Text(
-                    f"Attached to run {run_id[:8]} · pending tool approval",
+                    f"Attached to run {outcome.run_id[:8]} · pending tool approval",
                     style="dim",
                 )
             )
             return
 
-        if advance_pending:
-            self._append(Text(f"Resuming run {run_id[:8]}…", style="dim"))
-            self._start_continue_pending(run_id)
+        if outcome.kind == "advance":
+            self._append(Text(f"Resuming run {outcome.run_id[:8]}…", style="dim"))
+            self._start_continue_pending(outcome.run_id)
             return
 
         self._append(
             Text(
-                f"Attached to run {run_id[:8]} · next prompt continues it",
+                f"Attached to run {outcome.run_id[:8]} · next prompt continues it",
                 style="dim",
             )
         )

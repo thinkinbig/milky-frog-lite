@@ -2,7 +2,7 @@ import asyncio
 import subprocess
 from pathlib import Path
 
-from milky_frog.harness.sandbox import LocalSandbox
+from milky_frog.adapters.local import LocalSandbox
 from milky_frog.harness.tools import ToolContext
 from milky_frog.harness.tools.builtins import (
     BashTool,

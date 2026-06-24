@@ -7,8 +7,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from milky_frog.core.sandbox import Sandbox, SandboxViolation
 from milky_frog.domain import ToolResult
-from milky_frog.harness.sandbox import Sandbox, SandboxViolation
 from milky_frog.harness.tools.base import ToolContext
 from milky_frog.harness.tools.truncate import truncate_tool_output
 

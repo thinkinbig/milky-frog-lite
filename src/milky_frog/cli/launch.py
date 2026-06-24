@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import typer
 
-from milky_frog.agent_session import AgentSession, MissingModelConfiguration
+from milky_frog.app.session import AgentSession, MissingModelConfiguration
 from milky_frog.settings import Settings
 from milky_frog.ui import MilkyFrogApp
 from milky_frog.ui.app import TuiLaunch

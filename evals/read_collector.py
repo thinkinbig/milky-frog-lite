@@ -16,8 +16,8 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 
+from milky_frog.core.handlers import HandlerContext
 from milky_frog.events import BaseHandler, EventHub, RunAfterTool
-from milky_frog.handlers.context import HandlerContext
 
 
 @dataclass(frozen=True, slots=True)

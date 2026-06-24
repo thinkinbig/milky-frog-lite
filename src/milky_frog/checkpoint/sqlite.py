@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from milky_frog.checkpoint._locking import RunLock
-from milky_frog.checkpoint.base import CleanupScope, RunClaimError, StoredRun
+from milky_frog.checkpoint.base import StoredRun
 from milky_frog.checkpoint.snapshot import dump_run_state, load_run_state
 from milky_frog.domain import RunState, RunStatus
 
@@ -108,41 +108,10 @@ class SqliteCheckpointStore:
             ).fetchall()
         return tuple(self._row_to_stored_run(row) for row in rows)
 
-    def reap_orphans(self, scope: CleanupScope) -> int:
-        """Detect and seal Runs whose process died while marked RUNNING.
-
-        Tries to ``claim()`` every in-*scope* RUNNING Run. If the claim succeeds
-        the owning process is gone — seal the state and mark the Run CANCELLED.
-        Returns the count of orphans recovered.
-        """
-        from milky_frog.harness.state import seal
-
-        count = 0
-        for run in self.list_runs(limit=1000):
-            if run.status is not RunStatus.RUNNING:
-                continue
-            if scope.workspace is not None and run.workspace != scope.workspace:
-                continue
-            try:
-                # Hold the claim across seal+save: acquiring it proves no live
-                # process owns the Run, and keeping it shut out any process that
-                # tries to resume between detection and sealing.
-                with self.claim(run.run_id):
-                    state = self.load_state(run.run_id)
-                    sealed_state, _ = seal(state)
-                    self.save_state(
-                        run.run_id,
-                        sealed_state,
-                        status=RunStatus.CANCELLED,
-                        final_message="orphaned",
-                    )
-                    count += 1
-            except RunClaimError:
-                continue  # Still alive, skip
-        return count
-
-    def prune(self, before: datetime, scope: CleanupScope, *, dry_run: bool = False) -> int:
-        """Delete stale non-active Runs older than *before* within *scope*."""
+    def prune(
+        self, before: datetime, workspace: Path | None = None, *, dry_run: bool = False
+    ) -> int:
+        """Delete stale non-active Runs older than *before*."""
         where = "updated_at < ? AND status NOT IN (?, ?, ?)"
         params: list[object] = [
             before.isoformat(),
@@ -150,9 +119,9 @@ class SqliteCheckpointStore:
             RunStatus.WAITING_FOR_INPUT,
             RunStatus.WAITING_FOR_APPROVAL,
         ]
-        if scope.workspace is not None:
+        if workspace is not None:
             where += " AND workspace = ?"
-            params.append(str(scope.workspace))
+            params.append(str(workspace.resolve()))
         with self._db as conn:
             cursor = conn.execute(f"SELECT COUNT(*) FROM runs WHERE {where}", params)
             count: int = cursor.fetchone()[0]

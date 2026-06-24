@@ -1,6 +1,5 @@
 from milky_frog.checkpoint.base import (
     CheckpointStore,
-    CleanupScope,
     RunClaimError,
     StoredRun,
 )
@@ -9,7 +8,6 @@ from milky_frog.checkpoint.sqlite import SqliteCheckpointStore
 
 __all__ = [
     "CheckpointStore",
-    "CleanupScope",
     "RunClaimError",
     "SqliteCheckpointStore",
     "StoredRun",

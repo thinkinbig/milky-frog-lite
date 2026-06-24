@@ -13,6 +13,7 @@ from milky_frog.domain.usage import TokenUsage
 class ModelRequest:
     messages: tuple[Message, ...]
     tools: tuple[dict[str, JsonValue], ...]
+    run_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from milky_frog.checkpoint import CheckpointStore
+from milky_frog.core.handlers import HandlerContext
 from milky_frog.domain import RunStatus
 from milky_frog.events.events import (
     RunAfterModel,
@@ -13,7 +14,6 @@ from milky_frog.events.events import (
     TerminalRunEvent,
 )
 from milky_frog.events.hub import BaseHandler, EventHub
-from milky_frog.handlers.context import HandlerContext
 
 _PRIORITY = 100
 

@@ -12,6 +12,11 @@ CONFIG_FILENAME = "config.toml"
 CONFIG_TEMPLATE = (
     f"# Project-level Milky Frog configuration.\n"
     f"max_model_calls = {DEFAULT_MAX_MODEL_CALLS}\n\n"
+    f"# Context window budgeting (trim before each model call).\n"
+    f"# context_window = {DEFAULT_CONTEXT_WINDOW}\n"
+    f"# output_reserve = {DEFAULT_OUTPUT_RESERVE}\n"
+    f"# safety_margin = {DEFAULT_SAFETY_MARGIN}\n"
+    f"\n"
     f"[checkpoint]\n"
     f"retention_days = 30\n"
     f"prune_on_start = true\n"
@@ -22,7 +27,7 @@ CONFIG_TEMPLATE = (
 
 DEFAULT_CONTEXT_WINDOW = 128000
 DEFAULT_OUTPUT_RESERVE = 8000
-DEFAULT_SAFETY_MARGIN = 1000
+DEFAULT_SAFETY_MARGIN = 32000
 DEFAULT_BASH_TIMEOUT_SECONDS = 60
 DEFAULT_RETENTION_DAYS = 30
 

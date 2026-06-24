@@ -150,9 +150,9 @@ async def test_run_notice_notifies_handler() -> None:
 async def test_run_before_start_collects_system_prompt_sections(
     tmp_path: Path,
 ) -> None:
+    from milky_frog.core.handlers import SystemPromptSection
     from milky_frog.domain import RunRequest
     from milky_frog.events.events import RunBeforeStart
-    from milky_frog.handlers.context import SystemPromptSection
 
     registry = EventHub()
     dispatcher = registry

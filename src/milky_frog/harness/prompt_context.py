@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from milky_frog.project import PROJECT_DIRNAME
+from milky_frog.harness.skills import SkillCatalog
+from milky_frog.project import PROJECT_DIRNAME, project_root
 
 _CONTEXT_FILENAMES = ("AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD")
 _APPEND_FILENAME = "APPEND_SYSTEM.md"
@@ -13,6 +14,28 @@ _APPEND_FILENAME = "APPEND_SYSTEM.md"
 class ContextFile:
     path: Path
     content: str
+
+
+@dataclass(frozen=True, slots=True)
+class AgentContext:
+    """Structured agent-home context loaded from disk before prompt assembly."""
+
+    append_system: str | None = None
+    context_files: tuple[ContextFile, ...] = ()
+    skill_locations: tuple[tuple[str, str, Path], ...] = ()
+
+
+def load_agent_context(workspace: Path, home: Path) -> AgentContext:
+    """Load append rules, project instructions, and skill catalog metadata."""
+    resolved_home = home.expanduser()
+    append = load_append_system_prompt(workspace, resolved_home)
+    context_files = load_context_files(workspace, resolved_home)
+    catalog = SkillCatalog(resolved_home / "skills", project_root(workspace) / "skills")
+    return AgentContext(
+        append_system=append,
+        context_files=context_files,
+        skill_locations=catalog.prompt_locations(),
+    )
 
 
 def load_context_files(workspace: Path, home: Path) -> tuple[ContextFile, ...]:

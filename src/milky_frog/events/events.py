@@ -91,13 +91,10 @@ class RunAfterModel(BaseEvent):
 
 @dataclass(frozen=True)
 class RunBeforeTool(BaseEvent):
-    """Dispatched before a tool call — handlers may observe OR control.
+    """Dispatched before a tool call — pure observation.
 
-    **Observation**: return ``None`` (the default).  The call proceeds.
-    **Control**: return ``BlockResult(reason=…)`` or ``ApprovalResult()``.
-
-    Control is purely through return values — the event itself stays
-    frozen and immutable.
+    Return ``None`` (the default).  Authorization is enforced inline by
+    ``ToolStepExecutor`` via ``ToolPolicy`` before execution begins.
     """
 
     call: ToolCall

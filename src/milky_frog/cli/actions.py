@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from milky_frog.checkpoint import CleanupScope, SqliteCheckpointStore, StoredRun
+from milky_frog.checkpoint import SqliteCheckpointStore, StoredRun
 from milky_frog.checkpoint.snapshot import dump_run_state
 from milky_frog.diagnostics import CheckStatus, Diagnostic
 from milky_frog.domain import RunState
@@ -102,5 +102,5 @@ def prune_runs(
     if retention < 1:
         raise ValueError("retention period must be at least 1 day")
     cutoff = datetime.now(UTC) - timedelta(days=retention)
-    count = store.prune(cutoff, CleanupScope.for_workspace(workspace), dry_run=dry_run)
+    count = store.prune(cutoff, workspace, dry_run=dry_run)
     return PruneResult(count=count, retention_days=retention, dry_run=dry_run)

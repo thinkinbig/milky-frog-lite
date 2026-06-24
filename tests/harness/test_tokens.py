@@ -4,10 +4,9 @@ import json
 from pathlib import Path
 
 from milky_frog.domain import Message, MessageRole, ModelRequest
-from milky_frog.handlers.budget import BudgetHandler
 from milky_frog.harness.prompt import BuildSystemPromptOptions, build_system_prompt, system_prompt
-from milky_frog.harness.prompt_context import ContextFile
-from milky_frog.harness.tokens import ApproxCharCounter
+from milky_frog.harness.prompt_context import AgentContext, ContextFile
+from milky_frog.harness.tokens import ApproxCharCounter, TokenBudget
 from milky_frog.harness.tools import ToolRegistry, default_tools
 
 
@@ -57,15 +56,18 @@ def test_built_system_prompt_grows_with_injected_context(tmp_path: Path) -> None
     counter = ApproxCharCounter()
 
     minimal = build_system_prompt(
-        BuildSystemPromptOptions(workspace=workspace, home=tmp_path / "home")
+        BuildSystemPromptOptions(workspace=workspace, agent_context=AgentContext())
     )
     expanded = build_system_prompt(
         BuildSystemPromptOptions(
             workspace=workspace,
-            home=tmp_path / "home",
-            append_system="Always run pytest before committing.",
-            context_files=(ContextFile(workspace / "AGENTS.md", "Never skip the formatter."),),
-            skill_locations=(("review", "Review code carefully", workspace / "skills" / "review"),),
+            agent_context=AgentContext(
+                append_system="Always run pytest before committing.",
+                context_files=(ContextFile(workspace / "AGENTS.md", "Never skip the formatter."),),
+                skill_locations=(
+                    ("review", "Review code carefully", workspace / "skills" / "review"),
+                ),
+            ),
         )
     )
 
@@ -75,12 +77,12 @@ def test_built_system_prompt_grows_with_injected_context(tmp_path: Path) -> None
     assert expanded_tokens > minimal_tokens
 
 
-def test_budget_handler_raw_count_for_typical_run_request(tmp_path: Path) -> None:
+def test_token_budget_count_for_typical_run_request(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     counter = ApproxCharCounter()
-    handler = BudgetHandler()
-    handler._counter = counter
+    budget = TokenBudget()
+    budget._counter = counter
 
     system = system_prompt(workspace)
     user = "Fix the failing test in tests/test_example.py"
@@ -99,5 +101,5 @@ def test_budget_handler_raw_count_for_typical_run_request(tmp_path: Path) -> Non
     ]
     expected = counter.count_messages(message_dicts) + counter.count_tool_schemas(tools)
 
-    assert handler._raw_count(request) == expected
+    assert budget._count_request_tokens(request) == expected
     assert expected > counter.count_messages(message_dicts)

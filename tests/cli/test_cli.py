@@ -59,7 +59,7 @@ def test_init_reports_filesystem_error_without_traceback(tmp_path: Path) -> None
 
 def test_require_model_config_validates_before_construction(tmp_path: Path) -> None:
     """Missing model config raises before any resource-holding object is built."""
-    from milky_frog.agent_session import AgentSession, MissingModelConfiguration
+    from milky_frog.app.session import AgentSession, MissingModelConfiguration
     from milky_frog.settings import Settings
 
     settings = Settings(tmp_path, api_key=None, model=None, base_url=None, langfuse=None)

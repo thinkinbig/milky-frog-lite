@@ -2,8 +2,7 @@
 
 ``SessionToolPolicy`` reads each tool's approval attributes from the same
 registry the Harness executes against, so policy and execution never diverge.
-``PolicyHandler`` reads it from ``HandlerContext.policy`` on every
-``RunBeforeTool`` event.
+``ToolStepExecutor`` calls ``decide()`` inline before each tool execution.
 """
 
 from __future__ import annotations
@@ -16,9 +15,9 @@ from milky_frog.harness.tools.registry import ToolRegistry, UnknownToolError
 class SessionToolPolicy:
     """Mutable session-level tool policy for one ``ToolRegistry``.
 
-    Owned by ``AgentSession``; exposed as ``session.policy``.  ``PolicyHandler``
-    reads its current state from ``HandlerContext.policy`` on every
-    ``RunBeforeTool`` event, so changes take effect immediately.
+    Wired at assembly time by ``assemble_agent_harness``; exposed as
+    ``session.policy``.  ``ToolStepExecutor`` calls ``decide()`` inline before
+    each tool execution, so changes take effect immediately.
 
     Default behaviour reads each tool's ``requires_approval`` attribute.
     Per-tool overrides (``allow`` / ``deny`` / ``require_approval``) and
@@ -63,9 +62,6 @@ class SessionToolPolicy:
         if call_needs_approval(tool, call):
             return ToolDecision.NEEDS_APPROVAL
         return ToolDecision.ALLOW
-
-
-# ── decision helpers ──────────────────────────────────────────────────────
 
 
 def approval_free_tool_names(registry: ToolRegistry) -> frozenset[str]:

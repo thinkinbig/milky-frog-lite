@@ -2,7 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from milky_frog.harness.sandbox import LocalSandbox, SandboxViolation
+from milky_frog.adapters.local import LocalSandbox
+from milky_frog.core.sandbox import SandboxViolation
 from milky_frog.project import ProjectConfig
 
 

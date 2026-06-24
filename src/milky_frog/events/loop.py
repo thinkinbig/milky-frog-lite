@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import Coroutine
 from copy import deepcopy
-from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, cast
 
+from milky_frog.core.runtime.execute_tool import run_cancellable
+from milky_frog.core.sandbox import Sandbox
 from milky_frog.domain import (
     ModelRequest,
     ModelResponse,
@@ -16,23 +16,17 @@ from milky_frog.domain import (
     RunState,
     StreamDone,
     TextDelta,
-    ToolCall,
-    ToolResult,
     ToolRunCancelled,
     is_cancelled,
 )
 from milky_frog.events.hub import EventHub
-from milky_frog.handlers.context import ApprovalResult, BlockResult, BudgetedRequest
-from milky_frog.harness.model_retry import (
-    MODEL_RETRY_BASE_DELAY_S,
-    MODEL_RETRY_MAX_ATTEMPTS,
-    is_retriable_model_error,
-    retry_sleep,
-)
-from milky_frog.harness.sandbox import Sandbox
+from milky_frog.events.tool_step import ToolStepExecutor
 from milky_frog.harness.state import append_model_response, append_tool_result
-from milky_frog.harness.tools import ToolContext, ToolRegistry
+from milky_frog.harness.tools import ToolRegistry
 from milky_frog.models import Model
+
+if TYPE_CHECKING:
+    from milky_frog.harness.tokens import TokenBudget
 
 
 class AgentLoop:
@@ -40,17 +34,20 @@ class AgentLoop:
 
     Drives the loop and publishes lifecycle+streaming events on the shared
     ``EventHub``.  Knows nothing about checkpoints or project config —
-    those are handled by bus subscribers (``CheckpointHandler``, ``PolicyHandler``).
+    those are handled by bus subscribers (``CheckpointHandler``).
 
     ``advance()`` takes a ``RunState`` and returns a ``RunResult`` — the
     caller (``Harness``) is responsible for seeding / repairing state and
     handling pre-loop approval resolution.
     """
 
-    def __init__(self, model: Model, tools: ToolRegistry, hub: EventHub) -> None:
+    def __init__(
+        self, model: Model, tools: ToolRegistry, hub: EventHub, tool_step: ToolStepExecutor
+    ) -> None:
         self._model = model
         self._tools = tools
         self._hub = hub
+        self._tool_step = tool_step
 
     async def advance(
         self,
@@ -59,6 +56,7 @@ class AgentLoop:
         *,
         max_calls: int = 30,
         cancellation: RunCancellation | None = None,
+        budget: TokenBudget | None = None,
     ) -> RunResult:
         """Drive at most ``max_calls`` model-tool turns.
 
@@ -72,19 +70,21 @@ class AgentLoop:
                 if is_cancelled(cancellation):
                     return await self._hub.finish_cancelled(state)
 
-                request = ModelRequest(state.messages, self._tools.schemas())
+                request = ModelRequest(state.messages, self._tools.schemas(), run_id=run_id)
                 model_call = state.completed_model_calls + 1
                 await self._hub.turn_started(run_id, model_call=model_call)
-                before_model_results = await self._hub.before_model(run_id, request)
-
-                budgeted_requests = [
-                    r for r in before_model_results if isinstance(r, BudgetedRequest)
-                ]
-                if budgeted_requests:
-                    request = budgeted_requests[0].request
+                await self._hub.before_model(run_id, request)
+                if budget is not None:
+                    request = budget.trim(request)
 
                 try:
-                    response = await self._model_turn_with_retry(run_id, request, cancellation)
+                    response = cast(
+                        ModelResponse,
+                        await run_cancellable(
+                            self._model_turn(run_id, request),
+                            cancellation,
+                        ),
+                    )
                 except ToolRunCancelled:
                     return await self._hub.finish_cancelled(state)
 
@@ -102,29 +102,22 @@ class AgentLoop:
                     if is_cancelled(cancellation):
                         return await self._hub.finish_cancelled(state)
 
-                    check_results = await self._hub.before_tool(run_id, call)
+                    try:
+                        outcome = await self._tool_step.run_with_policy(
+                            run_id,
+                            state,
+                            sandbox,
+                            call,
+                            cancellation,
+                        )
+                    except ToolRunCancelled:
+                        return await self._hub.finish_cancelled(state)
 
-                    blocked = [r for r in check_results if isinstance(r, BlockResult)]
-                    approvals = [r for r in check_results if isinstance(r, ApprovalResult)]
+                    if isinstance(outcome, RunResult):
+                        return outcome
 
-                    if blocked:
-                        result = ToolResult(blocked[0].reason, is_error=True)
-                    elif approvals:
-                        return await self._hub.finish_approval_needed(state, call)
-                    else:
-                        try:
-                            result = await self._execute_tool(
-                                run_id,
-                                state.workspace,
-                                sandbox,
-                                call,
-                                cancellation,
-                            )
-                        except ToolRunCancelled:
-                            return await self._hub.finish_cancelled(state)
-
-                    state = append_tool_result(state, call, result)
-                    await self._hub.after_tool(run_id, call, result, state)
+                    state = append_tool_result(state, call, outcome)
+                    await self._hub.after_tool(run_id, call, outcome, state)
 
                 model_call = state.completed_model_calls
                 await self._hub.turn_ended(run_id, model_call=model_call)
@@ -139,57 +132,11 @@ class AgentLoop:
         except Exception as error:
             return await self._hub.finish_failed(state, error)
 
-    # ── Model + Tool execution helpers ──────────────────────────────
-
-    async def _model_turn_with_retry(
-        self,
-        run_id: str,
-        request: ModelRequest,
-        cancellation: RunCancellation | None,
-    ) -> ModelResponse:
-        for attempt in range(1, MODEL_RETRY_MAX_ATTEMPTS + 1):
-            try:
-                return cast(
-                    ModelResponse,
-                    await self._run_cancellable(
-                        self._model_turn(run_id, request),
-                        cancellation,
-                    ),
-                )
-            except ToolRunCancelled:
-                raise
-            except Exception as error:
-                if not is_retriable_model_error(error) or attempt >= MODEL_RETRY_MAX_ATTEMPTS:
-                    raise
-                await self._hub.run_notice(
-                    run_id,
-                    (
-                        f"Cannot reach model ({type(error).__name__}) — "
-                        f"retrying ({attempt + 1}/{MODEL_RETRY_MAX_ATTEMPTS})"
-                    ),
-                    level="warning",
-                )
-                await self._wait_before_retry(
-                    MODEL_RETRY_BASE_DELAY_S * attempt,
-                    cancellation,
-                )
-        raise RuntimeError("model retry loop exited without a response")
-
-    async def _wait_before_retry(
-        self, delay_s: float, cancellation: RunCancellation | None
-    ) -> None:
-        if is_cancelled(cancellation):
-            raise ToolRunCancelled
-        await retry_sleep(delay_s)
-        if is_cancelled(cancellation):
-            raise ToolRunCancelled
-
     async def _model_turn(
         self,
         run_id: str,
         request: ModelRequest,
     ) -> ModelResponse:
-        """Stream one model response, emitting chunk events to the bus."""
         response: ModelResponse | None = None
         observer_request = deepcopy(request)
         async with contextlib.aclosing(self._model.stream(request)) as model_stream:
@@ -204,88 +151,3 @@ class AgentLoop:
         if response is None:
             raise RuntimeError("model stream ended without a StreamDone chunk")
         return response
-
-    async def _execute_tool(
-        self,
-        run_id: str,
-        workspace: Path,
-        sandbox: Sandbox,
-        call: ToolCall,
-        cancellation: RunCancellation | None,
-    ) -> ToolResult:
-        tool = self._tools.get(call.name)
-        context = ToolContext(run_id, workspace, cancellation, sandbox=sandbox)
-        try:
-            input_model = tool.input_model.model_validate(call.arguments)
-            result: ToolResult = await self._run_cancellable(
-                tool.execute(context, input_model), cancellation
-            )
-        except ToolRunCancelled:
-            raise
-        except Exception as error:
-            result = ToolResult(f"{type(error).__name__}: {error}", is_error=True)
-        return result
-
-    @staticmethod
-    async def _wait_for_cancellation(cancellation: RunCancellation) -> None:
-        while not cancellation.is_cancelled:
-            await asyncio.sleep(0.05)
-
-    @staticmethod
-    async def _run_cancellable(
-        coro: Coroutine[Any, Any, Any],
-        cancellation: RunCancellation | None,
-    ) -> Any:
-        task: asyncio.Task[Any] = asyncio.create_task(coro)
-        poll: asyncio.Task[None] | None = None
-        if cancellation is not None:
-            poll = asyncio.create_task(AgentLoop._wait_for_cancellation(cancellation))
-        try:
-            if poll is None:
-                return await task
-            done, _pending = await asyncio.wait(
-                {task, poll},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            if poll in done:
-                raise ToolRunCancelled
-            return task.result()
-        finally:
-            if poll is not None and not poll.done():
-                poll.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await poll
-            if not task.done():
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
-
-
-# ── Standalone tool executor (shared by Harness approval resolution) ──
-
-
-async def execute_tool(
-    tools: ToolRegistry,
-    run_id: str,
-    workspace: Path,
-    sandbox: Sandbox,
-    call: ToolCall,
-    cancellation: RunCancellation | None,
-) -> ToolResult:
-    """Execute one tool call with cancellation polling.
-
-    Shared between ``AgentLoop`` (inline) and ``Harness`` (approval-
-    resolution tool execution before the loop starts).
-    """
-    tool = tools.get(call.name)
-    context = ToolContext(run_id, workspace, cancellation, sandbox=sandbox)
-    try:
-        input_model = tool.input_model.model_validate(call.arguments)
-        result: ToolResult = await AgentLoop._run_cancellable(
-            tool.execute(context, input_model), cancellation
-        )
-    except ToolRunCancelled:
-        raise
-    except Exception as error:
-        result = ToolResult(f"{type(error).__name__}: {error}", is_error=True)
-    return result

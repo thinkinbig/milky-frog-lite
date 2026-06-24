@@ -6,8 +6,9 @@ from typing import Protocol
 
 from pydantic import BaseModel
 
+from milky_frog.adapters.local.sandbox import LocalSandbox
+from milky_frog.core.sandbox import Sandbox
 from milky_frog.domain import RunCancellation, ToolResult
-from milky_frog.harness.sandbox import LocalSandbox, Sandbox
 
 
 @dataclass(frozen=True, slots=True)

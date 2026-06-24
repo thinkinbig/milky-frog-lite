@@ -6,7 +6,10 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from milky_frog.adapters.local import LocalSandbox
 from milky_frog.checkpoint import CheckpointStore
+from milky_frog.core.runtime.assemble import assemble_agent_harness
+from milky_frog.core.sandbox import Sandbox
 from milky_frog.domain import (
     ModelChunk,
     ModelRequest,
@@ -19,8 +22,7 @@ from milky_frog.domain import (
 )
 from milky_frog.events import EventHub
 from milky_frog.handlers.checkpoint import CheckpointHandler
-from milky_frog.harness.agent_harness import AgentHarness
-from milky_frog.harness.sandbox import LocalSandbox, Sandbox
+from milky_frog.harness.harness import AgentHarness
 from milky_frog.harness.tools import ToolContext, ToolRegistry, ToolResult
 from milky_frog.models import Model
 
@@ -57,9 +59,15 @@ def make_harness(
     """
     bus = hub if hub is not None else EventHub()
     CheckpointHandler(checkpoints).register(bus)
-    if sandbox_factory is not None:
-        return AgentHarness(model, tools, checkpoints, bus, sandbox_factory=sandbox_factory)
-    return AgentHarness(model, tools, checkpoints, bus)
+    harness = assemble_agent_harness(
+        model,
+        checkpoints,
+        bus,
+        tools=tools,
+        sandbox_factory=sandbox_factory or LocalSandbox,
+    )
+    harness.policy.auto_approve()
+    return harness
 
 
 # ── Tool stubs ────────────────────────────────────────────────────────

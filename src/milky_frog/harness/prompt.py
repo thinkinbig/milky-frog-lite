@@ -5,84 +5,80 @@ from datetime import date
 from pathlib import Path
 from xml.sax.saxutils import escape
 
-from milky_frog.harness.prompt_context import (
-    ContextFile,
-    load_append_system_prompt,
-    load_context_files,
-)
-from milky_frog.harness.skills import SkillCatalog
-from milky_frog.project import project_root
+from milky_frog.harness.prompt_context import AgentContext, ContextFile, load_agent_context
+
+__all__ = [
+    "BuildSystemPromptOptions",
+    "agent_context_section",
+    "build_system_prompt",
+    "format_agent_context",
+    "format_project_context",
+    "format_skills_for_prompt",
+    "load_agent_context",
+    "system_prompt",
+]
 
 
 @dataclass(frozen=True, slots=True)
 class BuildSystemPromptOptions:
     workspace: Path
-    home: Path
-    context_files: tuple[ContextFile, ...] = ()
-    append_system: str | None = None
-    skill_locations: tuple[tuple[str, str, Path], ...] = ()
+    agent_context: AgentContext | None = None
     extra_sections: tuple[str, ...] = ()
 
 
 def build_system_prompt(options: BuildSystemPromptOptions) -> str:
-    """Assemble the system prompt from the base identity and injected context."""
+    """Assemble the full system prompt from base identity, loaded context, and extras."""
     workspace = options.workspace.expanduser().resolve()
-    prompt_cwd = workspace.as_posix()
-
     prompt = _BASE_PROMPT
-    if options.append_system:
-        prompt += f"\n\n{options.append_system.strip()}"
-
-    if options.context_files:
-        prompt += format_project_context(options.context_files)
-
-    if options.skill_locations:
-        prompt += format_skills_for_prompt(options.skill_locations)
-
+    if options.agent_context is not None:
+        prompt = _append_agent_context(prompt, options.agent_context)
     if options.extra_sections:
         prompt += "\n\n" + "\n\n".join(section.strip() for section in options.extra_sections)
-
-    prompt += f"\nCurrent date: {date.today().isoformat()}"
-    prompt += f"\nCurrent working directory: {prompt_cwd}"
-    return prompt
-
-
-def system_prompt(workspace: Path, extra_sections: tuple[str, ...] = ()) -> str:
-    """Build the stable system prompt for a Run.
-
-    Agent-home context (instructions, append rules, skill catalog) is injected
-    by ``AgentContextHandler`` via ``RunBeforeStart`` → ``extra_sections``.
-    """
-    workspace = workspace.expanduser().resolve()
-    prompt = _BASE_PROMPT
-    if extra_sections:
-        prompt += "\n\n" + "\n\n".join(section.strip() for section in extra_sections)
     prompt += f"\nCurrent date: {date.today().isoformat()}"
     prompt += f"\nCurrent working directory: {workspace.as_posix()}"
     return prompt
 
 
+def system_prompt(workspace: Path, extra_sections: tuple[str, ...] = ()) -> str:
+    """Build the system prompt for a Run.
+
+    Handler-injected context arrives via ``RunBeforeStart`` → ``extra_sections``.
+    Use ``build_system_prompt`` with ``load_agent_context`` when assembling the
+    full prompt in one step (tests, tooling).
+    """
+    return build_system_prompt(
+        BuildSystemPromptOptions(workspace=workspace, extra_sections=extra_sections)
+    )
+
+
 def agent_context_section(workspace: Path, home: Path) -> str | None:
-    """Build injectable context from agent home and workspace (for handlers)."""
-    resolved_home = home.expanduser()
-    parts: list[str] = []
+    """Format loaded agent-home context for ``RunBeforeStart`` injection."""
+    return format_agent_context(load_agent_context(workspace, home))
 
-    append = load_append_system_prompt(workspace, resolved_home)
-    if append:
-        parts.append(append.strip())
 
-    context_files = load_context_files(workspace, resolved_home)
-    if context_files:
-        parts.append(format_project_context(context_files).strip())
-
-    catalog = SkillCatalog(resolved_home / "skills", project_root(workspace) / "skills")
-    skill_locations = catalog.prompt_locations()
-    if skill_locations:
-        parts.append(format_skills_for_prompt(skill_locations).strip())
-
+def format_agent_context(context: AgentContext) -> str | None:
+    """Format structured agent context as one injectable section."""
+    parts = _agent_context_parts(context)
     if not parts:
         return None
     return "\n\n".join(parts)
+
+
+def _append_agent_context(prompt: str, context: AgentContext) -> str:
+    for part in _agent_context_parts(context):
+        prompt += f"\n\n{part}"
+    return prompt
+
+
+def _agent_context_parts(context: AgentContext) -> tuple[str, ...]:
+    parts: list[str] = []
+    if context.append_system:
+        parts.append(context.append_system.strip())
+    if context.context_files:
+        parts.append(format_project_context(context.context_files).strip())
+    if context.skill_locations:
+        parts.append(format_skills_for_prompt(context.skill_locations).strip())
+    return tuple(parts)
 
 
 _BASE_PROMPT = """You are Milky Frog (奶蛙), a lightweight local coding agent.

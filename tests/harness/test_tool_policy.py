@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from milky_frog.domain import ToolCall, ToolDecision
-from milky_frog.harness.tools import default_tools
-from milky_frog.harness.tools.registry import ToolRegistry
-from milky_frog.harness.tools.tool_policy import (
+from milky_frog.core.session_tool_policy import (
     SessionToolPolicy,
     approval_free_tool_names,
     call_needs_approval,
 )
+from milky_frog.domain import ToolCall, ToolDecision
+from milky_frog.harness.tools import default_tools
+from milky_frog.harness.tools.registry import ToolRegistry
 
 
 class AlwaysNeedsApprovalTool:

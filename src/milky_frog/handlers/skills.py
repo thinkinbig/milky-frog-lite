@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from milky_frog.core.handlers import HandlerContext, SystemPromptSection
 from milky_frog.events.events import RunBeforeStart
 from milky_frog.events.hub import BaseHandler, EventHub
-from milky_frog.handlers.context import HandlerContext, SystemPromptSection
 from milky_frog.harness.prompt import agent_context_section
 
 

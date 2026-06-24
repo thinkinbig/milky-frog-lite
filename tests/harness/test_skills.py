@@ -4,9 +4,9 @@ from pathlib import Path
 import pytest
 
 from milky_frog.checkpoint import SqliteCheckpointStore
+from milky_frog.core.handlers import SystemPromptSection
 from milky_frog.domain import ModelChunk, ModelRequest, ModelResponse, RunRequest, StreamDone
 from milky_frog.events import EventHub, RunBeforeStart
-from milky_frog.handlers.context import SystemPromptSection
 from milky_frog.handlers.skills import AgentContextHandler
 from milky_frog.harness.skills import SkillCatalog
 from milky_frog.harness.tools import ToolRegistry
