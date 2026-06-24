@@ -3,11 +3,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import TracebackType
 
 from milky_frog.checkpoint import SqliteCheckpointStore
-from milky_frog.checkpoint.base import StoredRun
+from milky_frog.checkpoint.base import CleanupScope, StoredRun
 from milky_frog.domain import (
     DEFAULT_MAX_MODEL_CALLS,
     ApprovalVerdict,
@@ -167,6 +168,30 @@ class AgentSession:
             return self
 
         self._checkpoints = SqliteCheckpointStore(self._settings.database_path)
+
+        # Cleanup is scoped to the current Workspace: this startup reads policy
+        # from the current Workspace's config, so it must never touch another
+        # Workspace's Runs in the shared store.
+        workspace = Path.cwd()
+        scope = CleanupScope.for_workspace(workspace)
+
+        # ── Recover orphaned Runs before anything else ───────────────
+        orphans = self._checkpoints.reap_orphans(scope)
+        if orphans:
+            logger.info("Recovered %d orphaned Run(s)", orphans)
+
+        # ── Prune stale checkpoints on start ─────────────────────────
+        project_cfg = load_project_config(workspace)
+        if project_cfg.prune_on_start and project_cfg.checkpoint_retention_days > 0:
+            cutoff = datetime.now(UTC) - timedelta(days=project_cfg.checkpoint_retention_days)
+            pruned = self._checkpoints.prune(cutoff, scope)
+            if pruned:
+                logger.info(
+                    "Pruned %d stale checkpoint(s) (retention: %d days)",
+                    pruned,
+                    project_cfg.checkpoint_retention_days,
+                )
+
         self._dispatcher = self._dispatcher_override or EventDispatcher()
         self._handlers = default_handlers(
             self._settings,

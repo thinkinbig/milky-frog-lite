@@ -154,9 +154,7 @@ def test_resume_with_task_opens_tui_with_prompt(
     ]
 
 
-def test_run_opens_tui_with_initial_task(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_run_opens_tui_with_initial_task(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     cli_module = import_module("milky_frog.cli.app")
     launches: list[TuiLaunch] = []
 

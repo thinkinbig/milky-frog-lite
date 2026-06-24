@@ -60,3 +60,39 @@ def test_invalid_bash_timeout_falls_back_to_default(tmp_path: Path) -> None:
     _write_config(tmp_path, "bash_timeout_seconds = 0\n")
 
     assert load_project_config(tmp_path).bash_timeout_seconds == DEFAULT_BASH_TIMEOUT_SECONDS
+
+
+def test_checkpoint_retention_days_from_config(tmp_path: Path) -> None:
+    _write_config(
+        tmp_path,
+        "[checkpoint]\nretention_days = 7\nprune_on_start = false\n",
+    )
+
+    cfg = load_project_config(tmp_path)
+    assert cfg.checkpoint_retention_days == 7
+    assert cfg.prune_on_start is False
+
+
+def test_checkpoint_missing_section_uses_defaults(tmp_path: Path) -> None:
+    _write_config(tmp_path, "max_model_calls = 10\n")
+
+    cfg = load_project_config(tmp_path)
+    assert cfg.checkpoint_retention_days == 30
+    assert cfg.prune_on_start is True
+
+
+def test_checkpoint_invalid_retention_falls_back(tmp_path: Path) -> None:
+    _write_config(
+        tmp_path,
+        "[checkpoint]\nretention_days = -1\n",
+    )
+
+    assert load_project_config(tmp_path).checkpoint_retention_days == 30
+
+
+def test_checkpoint_generated_template_round_trips(tmp_path: Path) -> None:
+    _write_config(tmp_path, CONFIG_TEMPLATE)
+
+    cfg = load_project_config(tmp_path)
+    assert cfg.checkpoint_retention_days == 30
+    assert cfg.prune_on_start is True
