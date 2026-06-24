@@ -115,7 +115,7 @@ def load_project_config(workspace: Path) -> ProjectConfig:
     if not isinstance(env_allowlist_extra_raw, list):
         env_allowlist_extra_raw = ()
     env_allowlist_extra: tuple[str, ...] = tuple(
-        str(v)
+        v
         for v in env_allowlist_extra_raw
         if isinstance(v, str) and v.isidentifier() and v.isupper()
     )

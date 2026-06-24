@@ -4,39 +4,21 @@ import asyncio
 import contextlib
 import os
 import pty
-from pathlib import Path
 
 from pydantic import BaseModel, Field
 
 from milky_frog.domain import ToolResult
-from milky_frog.harness.execution_backend import default_execution_backend
 from milky_frog.harness.tools.base import ToolContext
 from milky_frog.harness.tools.truncate import truncate_tool_output
-from milky_frog.project import DEFAULT_BASH_TIMEOUT_SECONDS, load_project_config
+from milky_frog.project import DEFAULT_BASH_TIMEOUT_SECONDS
 
 _MAX_OUTPUT_BYTES = 128 * 1024
 # Grace period to drain PTY output after the process exits.
 _PTY_DRAIN_SECONDS = 2.0
 
 
-def local_command_environment() -> dict[str, str]:
-    """Build the final environment for a spawned local command.
-
-    Convenience wrapper around ``default_execution_backend(Path.cwd()).build_env()``
-    — kept for callers that need a quick env dict without threading a seam
-    through ``ToolContext``.
-    """
-    return default_execution_backend(Path.cwd()).build_env()
-
-
 class BashInput(BaseModel):
-    command: str = Field(
-        description="Shell command to run in the workspace directory. "
-        "Prefer narrow, scoped commands: git diff --stat or git diff <file> | tail N "
-        "instead of bare git diff; grep -c or grep <path> instead of repo-wide grep; "
-        "find with -name instead of listing huge directories. "
-        "Output is truncated at 128 KB with head/tail and a spill path when larger.",
-    )
+    command: str = Field(description="Shell command to run in the workspace directory.")
 
 
 async def _read_pty(loop: asyncio.AbstractEventLoop, master_fd: int) -> bytes:
@@ -93,8 +75,6 @@ class BashTool:
     requires_approval = True
     description = (
         "Run a shell command in the workspace and capture its stdout and stderr. "
-        "Prefer scoped commands over repo-wide dumps — e.g. git diff --stat, "
-        "git diff <file> | tail, grep -rl <pattern> <dir>, find -name. "
         "Large output is truncated at 128 KB (head/tail plus a spill file path). "
         "Commands run non-interactively (no pagers or terminal prompts; stdin closed). "
         "Host env is limited to HOME, PATH, SHELL, TERM, LANG, LC_ALL, TMPDIR. "
@@ -111,7 +91,7 @@ class BashTool:
 
         backend = context.require_backend()
         env = backend.build_env()
-        timeout_seconds = float(load_project_config(backend.workspace).bash_timeout_seconds)
+        timeout_seconds = float(backend.config.bash_timeout_seconds)
 
         loop = asyncio.get_running_loop()
         master_fd, slave_fd = pty.openpty()

@@ -19,7 +19,7 @@ import os
 from pathlib import Path
 from typing import Protocol
 
-from milky_frog.project import ProjectConfig
+from milky_frog.project import ProjectConfig, load_project_config
 
 # Host env vars passed through to a spawned local command (never secrets).
 _COMMAND_ENV_ALLOWLIST = ("HOME", "LANG", "LC_ALL", "PATH", "SHELL", "TERM", "TMPDIR")
@@ -56,6 +56,7 @@ class ExecutionBackend(Protocol):
     """
 
     workspace: Path
+    config: ProjectConfig
 
     def resolve(self, relative_path: str, *, allow_sensitive: bool = False) -> Path:
         """Resolve a workspace-relative path, enforcing deny-pattern policy.
@@ -92,18 +93,23 @@ class LocalExecutionBackend:
     Environment
     -----------
     Build order:
-      1. Start with ``_NONINTERACTIVE_ENV`` (disables pagers / prompts).
-      2. Overlay host environ entries matching the allowlist (built-in
+      1. Overlay host environ entries matching the allowlist (built-in
          ``_COMMAND_ENV_ALLOWLIST`` + optional extras from
          ``ProjectConfig.env_allowlist_extra``).
+      2. Apply ``_NONINTERACTIVE_ENV`` last so the pager/prompt defaults
+         always win, even if a forwarded var (e.g. ``GIT_PAGER``) collides.
       3. Ensure ``/usr/local/bin`` is on ``PATH``.
 
     ``env_allowlist_extra`` is the config-driven hook that lets workspace
     owners forward additional env vars (e.g. ``MY_BUILD_VAR``) to
     subprocesses without code changes.
+
+    When ``config`` is not supplied it is loaded from the workspace, so the
+    default ``ExecutionBackendFactory`` (this class) stays a ``(workspace) ->
+    ExecutionBackend`` callable while still picking up ``env_allowlist_extra``.
     """
 
-    __slots__ = ("_allowlist", "_deny_patterns", "workspace")
+    __slots__ = ("_allowlist", "_deny_patterns", "config", "workspace")
 
     DEFAULT_DENY_PATTERNS = (
         ".git",
@@ -121,12 +127,13 @@ class LocalExecutionBackend:
         if not self.workspace.is_dir():
             raise ValueError(f"workspace is not a directory: {workspace}")
 
+        self.config = config if config is not None else load_project_config(self.workspace)
+
         # Deny patterns
         self._deny_patterns = (*self.DEFAULT_DENY_PATTERNS, *self._load_ignore_file())
 
         # Env allowlist
-        extra: tuple[str, ...] = config.env_allowlist_extra if config is not None else ()
-        self._allowlist = _COMMAND_ENV_ALLOWLIST + extra
+        self._allowlist = _COMMAND_ENV_ALLOWLIST + self.config.env_allowlist_extra
 
     # ── Path resolution ──────────────────────────────────────────────
 
@@ -157,16 +164,11 @@ class LocalExecutionBackend:
     # ── Environment building ─────────────────────────────────────────
 
     def build_env(self) -> dict[str, str]:
-        env = dict(_NONINTERACTIVE_ENV)
-        env.update({name: os.environ[name] for name in self._allowlist if name in os.environ})
+        env = {name: os.environ[name] for name in self._allowlist if name in os.environ}
+        # Non-interactive defaults win over forwarded host vars, so an
+        # allowlisted GIT_PAGER/PAGER can never re-enable pagers or prompts.
+        env.update(_NONINTERACTIVE_ENV)
         path = env.get("PATH", "")
         if "/usr/local/bin" not in path:
             env["PATH"] = f"/usr/local/bin:{path}" if path else "/usr/local/bin"
         return env
-
-
-def default_execution_backend(
-    workspace: Path, config: ProjectConfig | None = None
-) -> ExecutionBackend:
-    """Return a default ``LocalExecutionBackend`` for the given workspace."""
-    return LocalExecutionBackend(workspace, config)

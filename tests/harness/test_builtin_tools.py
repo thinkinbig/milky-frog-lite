@@ -7,12 +7,12 @@ from milky_frog.harness.tools import ToolContext
 from milky_frog.harness.tools.builtins import (
     BashTool,
     EditFileTool,
+    GrepTool,
     ListDirTool,
     ReadFileTool,
     WriteFileTool,
     default_tools,
 )
-from milky_frog.harness.tools.builtins.bash import local_command_environment
 
 
 def _context(workspace: Path) -> ToolContext:
@@ -22,7 +22,7 @@ def _context(workspace: Path) -> ToolContext:
 def test_default_tools_exposes_all_builtin_tools() -> None:
     names = {tool.name for tool in default_tools()}
 
-    assert names == {"read_file", "write_file", "edit_file", "list_dir", "bash"}
+    assert names == {"read_file", "write_file", "edit_file", "list_dir", "grep", "bash"}
 
 
 async def test_read_file_returns_contents(tmp_path: Path) -> None:
@@ -117,6 +117,73 @@ async def test_list_dir_empty(tmp_path: Path) -> None:
     result = await ListDirTool().execute(_context(tmp_path), ListDirTool.input_model())
 
     assert result.content == "(empty directory)"
+
+
+# ── GrepTool ─────────────────────────────────────────────────────────────
+
+
+async def test_grep_matches_with_workspace_relative_paths(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "a.py").write_text("class Tool:\n    pass\n", encoding="utf-8")
+    (tmp_path / "src" / "b.py").write_text("x = 1\n", encoding="utf-8")
+
+    result = await GrepTool().execute(
+        _context(tmp_path), GrepTool.input_model(pattern="class Tool")
+    )
+
+    assert not result.is_error
+    assert result.content == "src/a.py:1:class Tool:"
+
+
+async def test_grep_no_matches(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+
+    result = await GrepTool().execute(_context(tmp_path), GrepTool.input_model(pattern="nope"))
+
+    assert result.content == "(no matches)"
+
+
+async def test_grep_invalid_regex_is_error(tmp_path: Path) -> None:
+    result = await GrepTool().execute(_context(tmp_path), GrepTool.input_model(pattern="("))
+
+    assert result.is_error
+    assert "invalid regex" in result.content
+
+
+async def test_grep_never_surfaces_denied_files(tmp_path: Path) -> None:
+    # The load-bearing guarantee: a recursive grep must never read .env or .git,
+    # so secrets can't leak through an approval-free tool.
+    (tmp_path / ".env").write_text("SECRET_KEY=topsecret\n", encoding="utf-8")
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "config").write_text("SECRET_KEY=alsosecret\n", encoding="utf-8")
+    (tmp_path / "app.py").write_text("SECRET_KEY = load()\n", encoding="utf-8")
+
+    result = await GrepTool().execute(
+        _context(tmp_path), GrepTool.input_model(pattern="SECRET_KEY")
+    )
+
+    assert not result.is_error
+    assert result.content == "app.py:1:SECRET_KEY = load()"
+    assert "topsecret" not in result.content
+    assert "alsosecret" not in result.content
+
+
+async def test_grep_rejects_escaping_path(tmp_path: Path) -> None:
+    result = await GrepTool().execute(
+        _context(tmp_path), GrepTool.input_model(pattern="x", path="../outside")
+    )
+
+    assert result.is_error
+
+
+async def test_grep_searches_a_single_file(tmp_path: Path) -> None:
+    (tmp_path / "only.py").write_text("hit here\nmiss\nhit again\n", encoding="utf-8")
+
+    result = await GrepTool().execute(
+        _context(tmp_path), GrepTool.input_model(pattern="hit", path="only.py")
+    )
+
+    assert result.content == "only.py:1:hit here\nonly.py:3:hit again"
 
 
 async def test_tool_context_builds_default_backend(tmp_path: Path) -> None:
@@ -268,15 +335,6 @@ async def test_bash_truncated_output(tmp_path: Path) -> None:
 
     assert not result.is_error
     assert "Truncated" in result.content
-
-
-def test_local_command_environment_disables_interactive_tools() -> None:
-    env = local_command_environment()
-
-    assert env["PAGER"] == "cat"
-    assert env["GIT_PAGER"] == "cat"
-    assert env["GIT_TERMINAL_PROMPT"] == "0"
-    assert env["GIT_CONFIG_VALUE_0"] == "cat"
 
 
 def _init_git_repo(path: Path) -> None:

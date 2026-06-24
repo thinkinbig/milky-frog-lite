@@ -35,7 +35,6 @@ from milky_frog.harness.state import (
 )
 from milky_frog.harness.tools import ToolRegistry
 from milky_frog.models import Model
-from milky_frog.project import load_project_config
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,7 +75,6 @@ class AgentHarness:
         """Start a fresh Run: seed the transcript, then advance."""
         run_id = uuid4().hex
         workspace = run_request.workspace.resolve(strict=True)
-        project_cfg = load_project_config(workspace)
         with self._checkpoints.claim(run_id):
             self._checkpoints.create_run(run_id, workspace)
             extra_sections = await self._emitter.run_before_start(run_id, run_request, workspace)
@@ -86,7 +84,7 @@ class AgentHarness:
                 extra_sections,
             )
             await self._emitter.run_started(run_id, run_request, state)
-            backend = LocalExecutionBackend(workspace, project_cfg)
+            backend = self._make_backend(workspace)
             return await self._agent_loop.advance(
                 state,
                 backend,
@@ -187,8 +185,14 @@ class AgentHarness:
     # ── Pre-loop approval resolution ─────────────────────────────────
 
     def _make_backend(self, workspace: Path) -> ExecutionBackend:
-        """Build an ``ExecutionBackend`` from workspace path and project config."""
-        return LocalExecutionBackend(workspace, load_project_config(workspace))
+        """Build an ``ExecutionBackend`` via the injected factory.
+
+        The single construction point for run / resume / respond_approval, so a
+        custom ``backend_factory`` (e.g. a future ``DockerExecutionBackend``) is
+        honoured everywhere.  ``LocalExecutionBackend`` loads project config from
+        the workspace itself, so the factory stays ``(workspace) -> backend``.
+        """
+        return self._backend_factory(workspace)
 
     async def _apply_approvals(
         self,

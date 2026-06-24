@@ -18,6 +18,7 @@ from tests.stubs import (
     IdentityCapturingModel,
     InvalidToolArgsThenRecoverModel,
     ReasoningModel,
+    RecordingBackendFactory,
     UsageReportingModel,
     make_harness,
 )
@@ -47,6 +48,24 @@ async def test_runs_tool_loop_and_persists_events(tmp_path: Path) -> None:
         MessageRole.ASSISTANT,
     ]
     assert run_status(store, result.run_id) is RunStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_injected_backend_factory_is_used(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    factory = RecordingBackendFactory()
+    harness = make_harness(
+        model=FakeModel(),
+        tools=ToolRegistry((EchoTool(),)),
+        checkpoints=store,
+        handlers=EventDispatcher(),
+        backend_factory=factory,
+    )
+
+    result = await harness.run(RunRequest("echo hello", tmp_path))
+
+    assert result.status is RunStatus.COMPLETED
+    assert factory.calls == [tmp_path.resolve()]
 
 
 @pytest.mark.asyncio
