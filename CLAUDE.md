@@ -126,11 +126,13 @@ both):
   B, SIM, RUF.
 - Prefer frozen `@dataclass(frozen=True, slots=True)` for domain value types;
   Pydantic `BaseModel` for Checkpoint bodies and lifecycle signals; seams are
-  `typing.Protocol`s or small named classes — **no bare `lambda`** for callbacks
-  or sort keys in production code.
+  `typing.Protocol`s or small named classes. Avoid `lambda` for non-trivial
+  callbacks and ad-hoc seams; simple one-liner sort keys (e.g.
+  `key=lambda p: (not p.is_dir(), p.name)`) are fine.
 - Tool inputs are validated through pydantic `BaseModel`s.
 - Checkpoint events are append-only; never mutate prior events.
-- Tests may use named stub classes in `tests/stubs.py` instead of lambdas.
+- Tests may use named stub classes in `tests/stubs.py` for reusable doubles;
+  simple one-off lambdas are fine elsewhere.
 - Keep ADR decisions in mind before changing a seam; add a new ADR for
   significant architectural shifts.
 
