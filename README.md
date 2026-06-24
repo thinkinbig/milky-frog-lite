@@ -8,7 +8,8 @@ Milky Frog (Chinese: 奶蛙) is a lightweight local coding-agent CLI. It runs on
 coordinates model and Tool calls through a linear Harness, and persists a RunState
 Checkpoint snapshot so interrupted Runs can be resumed safely.
 
-> The repository provides OpenAI-compatible foreground Runs, built-in file Tools, snapshot-based
+> The repository provides OpenAI-compatible foreground Runs, built-in Tools
+> (`read_file`, `write_file`, `edit_file`, `list_dir`, `grep`, `bash`), snapshot-based
 > resume (`milky-frog resume`), a multi-turn interactive loop, and optional Langfuse observability.
 > See [CONTEXT.md](CONTEXT.md) and [docs/adr/](docs/adr/) for architecture details.
 
@@ -76,8 +77,8 @@ src/milky_frog/
 ├── checkpoint/   # CheckpointStore seam, RunSnapshot JSON, SQLite adapter
 ├── cli/          # Typer command surface
 ├── handlers/     # lifecycle signals, EventDispatcher (RunEmitter publishes)
-├── harness/      # Harness loop, Tool registry, state mutators, Skill catalog
-├── infra/        # SQLite, OpenAI, Local Sandbox, observability adapters
+├── harness/      # Harness loop, Tool registry, Sandbox, state, Skill catalog
+├── infra/        # SQLite, OpenAI, observability adapters
 ├── models/       # model-provider seam
 └── ui/           # Rich one-shot rendering and Textual interactive UI
 ```
@@ -93,9 +94,10 @@ uv run mypy
 
 ## Security
 
-The Local Sandbox constrains structured file operations and requires approval for shell commands;
-it is not a security boundary for untrusted code. Sensitive files such as `.env`, private keys, and
-`.git/` are denied by default. Additional project paths can be excluded in `.milkyfrogignore`.
+The **Local Sandbox** policy (implemented by `LocalSandbox`, ADR-0016) constrains
+structured file operations and requires approval for shell commands; it is not a security
+boundary for untrusted code. Sensitive files such as `.env`, private keys, and `.git/` are
+denied by default. Additional project paths can be excluded in `.milkyfrogignore`.
 
 ## License
 
@@ -108,7 +110,8 @@ MIT
 奶蛙是一个轻量级本地代码 Agent CLI。它每次以前台方式执行一个任务，通过线性
 Harness 协调模型与 Tool 调用，并将 Checkpoint 保存为 RunState 快照，使中断的 Run 可以安全恢复。
 
-> 当前仓库已支持兼容 OpenAI 的前台 Run、内置文件 Tool、Checkpoint 恢复（`milky-frog resume`）、
+> 当前仓库已支持兼容 OpenAI 的前台 Run、内置 Tool（`read_file`、`write_file`、
+> `edit_file`、`list_dir`、`grep`、`bash`）、Checkpoint 恢复（`milky-frog resume`）、
 > 多轮交互循环，以及可选的 Langfuse 可观测性。架构细节见
 > [CONTEXT.md](CONTEXT.md) 与 [docs/adr/](docs/adr/)。
 
@@ -157,5 +160,6 @@ uv run milky-frog init
 
 ## 安全边界
 
-Local Sandbox 会限制结构化文件操作，并要求用户批准 shell 命令，但它不能安全隔离不可信代码。
+**Local Sandbox** 策略（由 `LocalSandbox` 实现，ADR-0016）会限制结构化文件操作，
+并要求用户批准 shell 命令，但它不能安全隔离不可信代码。
 `.env`、私钥和 `.git/` 等敏感路径默认禁止读取；项目可通过 `.milkyfrogignore` 增加排除规则。

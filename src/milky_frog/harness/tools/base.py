@@ -21,7 +21,7 @@ class ToolContext:
         return self.cancellation is not None and self.cancellation.is_cancelled
 
     def require_sandbox(self) -> Sandbox:
-        """Return the sandbox, building a default Local Sandbox for the Workspace if absent."""
+        """Return the sandbox, building a default for the Workspace if absent."""
         return self.sandbox or LocalSandbox(self.workspace)
 
 

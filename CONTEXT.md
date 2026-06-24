@@ -54,6 +54,7 @@ _Avoid_: Plugin, Tool
 
 **Local Sandbox**:
 A policy boundary that constrains structured file operations and requires approval for shell commands, but does not isolate untrusted code from the host.
+Implemented by the `Sandbox` protocol; default adapter is `LocalSandbox` (`harness/sandbox/`). See ADR-0003 and ADR-0016.
 _Avoid_: Container, secure sandbox
 
 **Terminal UI**:
@@ -118,6 +119,7 @@ _避免使用_：插件、Tool
 
 **Local Sandbox（本地沙箱）**：
 一种策略边界，用于限制结构化文件操作并要求用户批准 shell 命令，但不将不可信代码与宿主机隔离。
+由 `Sandbox` 协议实现；默认适配器为 `LocalSandbox`（`harness/sandbox/`）。见 ADR-0003 与 ADR-0016。
 _避免使用_：容器、安全沙箱
 
 **Terminal UI（终端界面）**：

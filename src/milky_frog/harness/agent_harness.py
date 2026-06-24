@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from uuid import uuid4
 
 from milky_frog.checkpoint import CheckpointStore, RunClaimError
@@ -79,9 +80,10 @@ class AgentHarness:
                 extra_sections,
             )
             await self._emitter.run_started(run_id, run_request, state)
+            sandbox = self._make_sandbox(workspace)
             return await self._agent_loop.advance(
                 state,
-                self._sandbox_factory(workspace),
+                sandbox,
                 cancellation=run_request.cancellation,
                 max_calls=run_request.max_model_calls,
             )
@@ -107,7 +109,7 @@ class AgentHarness:
                         "approve or deny the pending tool first"
                     )
 
-                sandbox = self._sandbox_factory(stored.workspace)
+                sandbox = self._make_sandbox(stored.workspace)
 
                 await self._emitter.before_resume(run_id, prompt, stored.status, stored.workspace)
 
@@ -122,7 +124,6 @@ class AgentHarness:
                 resolved = await self._apply_approvals(
                     plan,
                     run_id,
-                    sandbox,
                     cancellation,
                     approval=None,
                     require_verdict=waiting_approval,
@@ -155,7 +156,7 @@ class AgentHarness:
                 if stored.status is not RunStatus.WAITING_FOR_APPROVAL:
                     raise ResumeError(f"Run {run_id} is not waiting for tool approval")
 
-                sandbox = self._sandbox_factory(stored.workspace)
+                sandbox = self._make_sandbox(stored.workspace)
 
                 await self._emitter.before_resume(run_id, None, stored.status, stored.workspace)
 
@@ -164,7 +165,7 @@ class AgentHarness:
 
                 plan = PreparedRun(state=state, sandbox=sandbox)
                 resolved = await self._apply_approvals(
-                    plan, run_id, sandbox, cancellation, approval=approval
+                    plan, run_id, cancellation, approval=approval
                 )
                 if isinstance(resolved, RunResult):
                     return resolved
@@ -179,11 +180,20 @@ class AgentHarness:
 
     # ── Pre-loop approval resolution ─────────────────────────────────
 
+    def _make_sandbox(self, workspace: Path) -> Sandbox:
+        """Build a ``Sandbox`` via the injected factory.
+
+        The single construction point for run / resume / respond_approval, so a
+        custom ``sandbox_factory`` (e.g. a future ``DockerSandbox``) is
+        honoured everywhere.  ``LocalSandbox`` loads project config from
+        the workspace itself, so the factory stays ``(workspace) -> sandbox``.
+        """
+        return self._sandbox_factory(workspace)
+
     async def _apply_approvals(
         self,
         plan: PreparedRun,
         run_id: str,
-        sandbox: Sandbox,
         cancellation: RunCancellation | None,
         approval: ApprovalVerdict | None,
         *,
@@ -200,7 +210,6 @@ class AgentHarness:
             resolved = await self._resolve_pending_call(
                 plan,
                 run_id,
-                sandbox,
                 call,
                 cancellation,
                 approval,
@@ -219,7 +228,6 @@ class AgentHarness:
         self,
         plan: PreparedRun,
         run_id: str,
-        sandbox: Sandbox,
         call: ToolCall,
         cancellation: RunCancellation | None,
         approval: ApprovalVerdict | None,
@@ -234,7 +242,12 @@ class AgentHarness:
             return ToolResult(msg, is_error=True)
         if approval is not None and approval.decision is ApprovalDecision.APPROVE:
             result: ToolResult = await _execute_tool(
-                self._tools, run_id, plan.state.workspace, sandbox, call, cancellation
+                self._tools,
+                run_id,
+                plan.state.workspace,
+                plan.sandbox,
+                call,
+                cancellation,
             )
             return result
 
@@ -250,6 +263,11 @@ class AgentHarness:
         if approvals:
             return await self._emitter.finish_approval_needed(plan.state, call)
         r: ToolResult = await _execute_tool(
-            self._tools, run_id, plan.state.workspace, sandbox, call, cancellation
+            self._tools,
+            run_id,
+            plan.state.workspace,
+            plan.sandbox,
+            call,
+            cancellation,
         )
         return r
