@@ -9,7 +9,8 @@ from typer.testing import CliRunner
 
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.cli import app
-from milky_frog.domain import RunResult, RunStatus
+from milky_frog.domain import RunStatus
+from milky_frog.ui.tui.app import TuiLaunch
 from tests.checkpoint_helpers import seed_run
 
 runner = CliRunner()
@@ -79,23 +80,26 @@ def test_version_shows_version(tmp_path: Path) -> None:
     assert __version__ in result.stdout.strip()
 
 
-def test_resume_without_task_advances_pending_work(
+def test_resume_without_task_opens_tui_with_pending_advance(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     cli_module = import_module("milky_frog.cli.app")
-    calls: list[tuple[str, str | None]] = []
+    launches: list[TuiLaunch] = []
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    seed_run(store, "run-abc", workspace, status=RunStatus.PAUSED_LIMIT)
 
-    async def fake_resume(
-        settings: object,
-        run_id: str,
-        *,
-        prompt: str | None = None,
-    ) -> RunResult:
-        del settings
-        calls.append((run_id, prompt))
-        return RunResult(run_id, RunStatus.COMPLETED, "resumed", 1)
+    class FakeApp:
+        def __init__(self, settings: object, *, launch: TuiLaunch | None = None) -> None:
+            del settings
+            if launch is not None:
+                launches.append(launch)
 
-    monkeypatch.setattr(cli_module, "_resume_run", fake_resume)  # type: ignore[attr-defined]
+        def run(self) -> None:
+            return None
+
+    monkeypatch.setattr(cli_module, "MilkyFrogApp", FakeApp)  # type: ignore[attr-defined]
     result = runner.invoke(
         app,
         ["resume", "run-abc"],
@@ -108,25 +112,31 @@ def test_resume_without_task_advances_pending_work(
     )
 
     assert result.exit_code == 0
-    assert calls == [("run-abc", None)]
-    assert "resumed" in result.stdout
+    assert launches == [
+        TuiLaunch(run_id="run-abc", prompt=None, advance_pending=True),
+    ]
 
 
-def test_resume_with_task_continues_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_resume_with_task_opens_tui_with_prompt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     cli_module = import_module("milky_frog.cli.app")
-    calls: list[tuple[str, str | None]] = []
+    launches: list[TuiLaunch] = []
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    seed_run(store, "run-abc", workspace, status=RunStatus.COMPLETED, final_message="done")
 
-    async def fake_resume(
-        settings: object,
-        run_id: str,
-        *,
-        prompt: str | None = None,
-    ) -> RunResult:
-        del settings
-        calls.append((run_id, prompt))
-        return RunResult(run_id, RunStatus.COMPLETED, "continued", 2)
+    class FakeApp:
+        def __init__(self, settings: object, *, launch: TuiLaunch | None = None) -> None:
+            del settings
+            if launch is not None:
+                launches.append(launch)
 
-    monkeypatch.setattr(cli_module, "_resume_run", fake_resume)  # type: ignore[attr-defined]
+        def run(self) -> None:
+            return None
+
+    monkeypatch.setattr(cli_module, "MilkyFrogApp", FakeApp)  # type: ignore[attr-defined]
     result = runner.invoke(
         app,
         ["resume", "run-abc", "follow up"],
@@ -139,8 +149,40 @@ def test_resume_with_task_continues_run(monkeypatch: pytest.MonkeyPatch, tmp_pat
     )
 
     assert result.exit_code == 0
-    assert calls == [("run-abc", "follow up")]
-    assert "continued" in result.stdout
+    assert launches == [
+        TuiLaunch(run_id="run-abc", prompt="follow up", advance_pending=False),
+    ]
+
+
+def test_run_opens_tui_with_initial_task(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cli_module = import_module("milky_frog.cli.app")
+    launches: list[TuiLaunch] = []
+
+    class FakeApp:
+        def __init__(self, settings: object, *, launch: TuiLaunch | None = None) -> None:
+            del settings
+            if launch is not None:
+                launches.append(launch)
+
+        def run(self) -> None:
+            return None
+
+    monkeypatch.setattr(cli_module, "MilkyFrogApp", FakeApp)  # type: ignore[attr-defined]
+    result = runner.invoke(
+        app,
+        ["run", "build feature x"],
+        env={
+            "MILKY_FROG_HOME": str(tmp_path),
+            "MILKY_FROG_API_KEY": "test-key",
+            "MILKY_FROG_MODEL": "test-model",
+            "NO_COLOR": "1",
+        },
+    )
+
+    assert result.exit_code == 0
+    assert launches == [TuiLaunch(prompt="build feature x")]
 
 
 def test_no_arguments_requires_model_configuration(tmp_path: Path) -> None:
@@ -163,7 +205,7 @@ def test_doctor_keeps_results_on_stdout_and_errors_on_stderr(tmp_path: Path) -> 
     assert result.exit_code == 2
     assert "Milky Frog doctor" in result.stdout
     assert "FAIL" in result.stdout
-    assert "Error: Required model configuration is missing." in result.stderr
+    assert "Required model configuration is missing." in result.stderr
     assert "API key" not in result.stderr
 
 
@@ -205,5 +247,5 @@ def test_unknown_run_is_reported_on_stderr(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert result.stdout == ""
-    assert "Error: unknown Run: missing" in result.stderr
-    assert "Hint: List available Runs with: milky-frog runs" in result.stderr
+    assert "unknown Run: missing" in result.stderr
+    assert "List available Runs with: milky-frog runs" in result.stderr

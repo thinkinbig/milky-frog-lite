@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -14,20 +15,23 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Vertical, VerticalScroll
 from textual.reactive import reactive
-from textual.screen import ModalScreen
 from textual.timer import Timer
-from textual.widgets import Footer, Header, Input, ListItem, ListView, Static
+from textual.widgets import Footer, Header, Input, OptionList, Static
+from textual.widgets.option_list import Option
 from textual.worker import Worker
 
 from milky_frog.agent_session import AgentSession
 from milky_frog.domain import ApprovalDecision, ApprovalVerdict, ResumeError, RunStatus, RunUsage
+from milky_frog.harness.state import unmatched_tool_calls
 from milky_frog.project import load_project_config
 from milky_frog.settings import Settings
-from milky_frog.ui.logo import pixel_frog_logo
+from milky_frog.ui.cli import runs_table
+from milky_frog.ui.logo import welcome_banner
 from milky_frog.ui.tui.assembly import tui_presentation_bundle
 from milky_frog.ui.tui.messages import (
     AddText,
     AddThinking,
+    ApprovalOptionSelected,
     ApprovalRequired,
     BashOutputMsg,
     GitOutputMsg,
@@ -52,6 +56,15 @@ from milky_frog.ui.tui.rendering import (
 )
 from milky_frog.ui.tui.textual_patch import patch_textual_utf8_decode
 from milky_frog.ui.usage import context_fraction, format_context_meter, format_run_usage
+
+
+@dataclass(frozen=True, slots=True)
+class TuiLaunch:
+    """Optional startup action when the TUI opens from a Typer command."""
+
+    run_id: str | None = None
+    prompt: str | None = None
+    advance_pending: bool = False
 
 
 def _row(marker: Text, body: RenderableType) -> Table:
@@ -264,157 +277,83 @@ class PromptInput(Input):
         self.cursor_position = len(self.value)
 
 
-# ── Main App ───────────────────────────────────────────────────────────
+# ── Approval prompt (Claude-style selectable options) ────────────────
 
 
-class ApprovalDialog(ModalScreen[ApprovalVerdict | str]):
-    """Modal dialog for tool call approval with session-policy quick actions.
+def _approval_body(reason: str) -> str:
+    """Drop the machine header and keep the user-facing question."""
+    _, sep, tail = reason.partition("\n\n")
+    return tail.strip() if sep else reason.strip()
 
-    Multi-phase interaction:
-      1. SELECT — choose from Yes / No / No, provide reason / Always allow
-      2. INPUT_REASON — when "No, provide reason" is selected, show a text
-         input for the denial reason, then dismiss with the full verdict.
 
-    Returns ``ApprovalVerdict`` for Yes/No, or ``"allow_tool"`` / ``"allow_all"``
-    to apply a session-level policy override before approving.
-    """
+class ApprovalPrompt(Vertical):
+    """Inline approval menu: arrow keys to highlight, Enter to confirm."""
 
-    CSS = """
-    ApprovalDialog {
-        align: center middle;
-    }
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("1", "pick_first", "Allow once", show=False, priority=True),
+        Binding("2", "pick_second", "Always this tool", show=False, priority=True),
+        Binding("3", "pick_third", "Always all", show=False, priority=True),
+        Binding("4", "pick_fourth", "Deny", show=False, priority=True),
+        Binding("5", "pick_fifth", "Deny with reason", show=False, priority=True),
+    ]
 
-    #approval-dialog-box {
-        width: 60;
-        height: auto;
-        padding: 1 2;
-        border: thick $secondary;
-        background: $surface;
-    }
-
-    #approval-message {
-        margin-bottom: 1;
-    }
-
-    ListView {
-        height: auto;
-        margin: 0 1;
-        border: none;
-    }
-
-    ListItem {
-        padding: 0 1;
-    }
-
-    ListItem:focus {
-        background: $accent;
-    }
-
-    #approval-help {
-        margin-top: 1;
-        color: $text-muted;
-    }
-
-    #reason-input {
-        display: none;
-        margin: 0 1;
-    }
-    #reason-input.-visible {
-        display: block;
-    }
-
-    #reason-help {
-        display: none;
-        margin-top: 1;
-        color: $text-muted;
-    }
-    #reason-help.-visible {
-        display: block;
-    }
-    """
-
-    def __init__(self, reason: str, tool_name: str = "") -> None:
-        super().__init__()
-        self.message = reason
-        self.tool_name = tool_name
+    def __init__(self, *, tool_name: str, reason: str) -> None:
+        super().__init__(classes="approval-prompt")
+        self._tool_name = tool_name
+        self._reason = reason
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="approval-dialog"), Vertical(id="approval-dialog-box"):
-            yield Static(self.message, id="approval-message")
-            yield ListView(
-                ListItem(Static("  1. Yes"), name="approve"),
-                ListItem(Static("  2. No"), name="deny"),
-                ListItem(Static("  3. No, provide reason"), name="deny_with_reason"),
-                ListItem(Static("  4. Always allow this tool"), name="allow_tool"),
-                ListItem(Static("  5. Don\u2019t ask again this session"), name="allow_all"),
-                initial_index=0,
-                id="option-list",
-            )
-            yield Static(
-                "Enter to select \u00b7 1-5 to choose \u00b7 Esc to deny",
-                id="approval-help",
-            )
-            yield Input(
-                placeholder="Reason shown back to the agent (optional)...",
-                id="reason-input",
-            )
-            yield Static(
-                "Type reason and press Enter, or Esc to go back",
-                id="reason-help",
-            )
+        header = f"Run {self._tool_name}?" if self._tool_name else "Tool approval required"
+        yield Static(Text.assemble(("  ⚠ ", "bold yellow"), (header, "bold")), id="approval-header")
+        yield Static(Text(f"  {_approval_body(self._reason)}", style="dim"), id="approval-body")
+        options: list[Option] = [
+            Option("  1. Allow once", id="approve"),
+            Option(
+                (
+                    f"  2. Always allow {self._tool_name}"
+                    if self._tool_name
+                    else "  2. Always allow this tool"
+                ),
+                id="allow_tool",
+                disabled=not self._tool_name,
+            ),
+            Option("  3. Always allow all tools", id="allow_all"),
+            Option("  4. Deny", id="deny"),
+            Option("  5. Deny and tell the agent why…", id="deny_reason"),
+        ]
+        yield OptionList(*options, id="approval-options")
 
-    def on_list_view_selected(self, event: ListView.Selected) -> None:
-        name = event.item.name
-        if name == "approve":
-            self.dismiss(ApprovalVerdict(ApprovalDecision.APPROVE))
-        elif name == "deny_with_reason":
-            self._show_reason_input()
-        elif name == "allow_tool":
-            self.dismiss("allow_tool")
-        elif name == "allow_all":
-            self.dismiss("allow_all")
-        else:
-            self.dismiss(ApprovalVerdict(ApprovalDecision.DENY))
+    def on_mount(self) -> None:
+        self.query_one("#approval-options", OptionList).focus()
 
-    def on_key(self, event: events.Key) -> None:
-        if event.key == "1":
-            event.stop()
-            self.dismiss(ApprovalVerdict(ApprovalDecision.APPROVE))
-        elif event.key == "2":
-            event.stop()
-            self.dismiss(ApprovalVerdict(ApprovalDecision.DENY))
-        elif event.key == "3":
-            event.stop()
-            self._show_reason_input()
-        elif event.key == "4":
-            event.stop()
-            self.dismiss("allow_tool")
-        elif event.key == "5":
-            event.stop()
-            self.dismiss("allow_all")
-        elif event.key == "escape":
-            event.stop()
-            self.dismiss(ApprovalVerdict(ApprovalDecision.DENY))
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        option_id = event.option.id
+        if option_id is not None:
+            self.post_message(ApprovalOptionSelected(option_id))
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        reason = event.value.strip()
-        self.dismiss(
-            ApprovalVerdict(
-                ApprovalDecision.DENY,
-                denial_reason=reason or None,
-            )
-        )
+    def _pick(self, index: int) -> None:
+        options = self.query_one("#approval-options", OptionList)
+        if 0 <= index < options.option_count:
+            options.highlighted = index
+            options.action_select()
 
-    def _show_reason_input(self) -> None:
-        """Transition to the reason-input phase."""
-        self.query_one("#option-list", ListView).display = False
-        self.query_one("#approval-help", Static).display = False
-        reason_input = self.query_one("#reason-input", Input)
-        reason_input.display = True
-        reason_input.add_class("-visible")
-        self.query_one("#reason-help", Static).display = True
-        self.query_one("#reason-help", Static).add_class("-visible")
-        reason_input.focus()
+    def action_pick_first(self) -> None:
+        self._pick(0)
+
+    def action_pick_second(self) -> None:
+        self._pick(1)
+
+    def action_pick_third(self) -> None:
+        self._pick(2)
+
+    def action_pick_fourth(self) -> None:
+        self._pick(3)
+
+    def action_pick_fifth(self) -> None:
+        self._pick(4)
+
+
+# ── Main App ───────────────────────────────────────────────────────────
 
 
 class MilkyFrogApp(App[None]):
@@ -458,6 +397,27 @@ class MilkyFrogApp(App[None]):
         background: $boost;
         padding: 0 1;
     }
+
+    .approval-prompt {
+        height: auto;
+        margin-bottom: 1;
+        border: round yellow;
+        padding: 0 1 1 0;
+    }
+
+    .approval-prompt OptionList {
+        height: auto;
+        max-height: 8;
+        margin: 0 1;
+        background: transparent;
+        border: none;
+        padding: 0;
+    }
+
+    .approval-prompt OptionList > .option-list--option-highlighted {
+        background: $accent 20%;
+        color: $text;
+    }
     """
 
     BINDINGS: ClassVar[list[BindingType]] = [
@@ -468,16 +428,20 @@ class MilkyFrogApp(App[None]):
         Binding("escape", "cancel_run", "Interrupt", priority=True),
     ]
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, *, launch: TuiLaunch | None = None) -> None:
         super().__init__()
+        self._launch = launch
         # Create the async AgentSession now (without entering it — entering happens
         # in ``run()`` so Textual's sync outer loop can bracket the lifecycle).
         self._session = AgentSession(
             settings,
             bundles=tui_presentation_bundle(self.post_message),
+            interactive=True,
         )
         self._worker: Worker[None] | None = None
-        self._approval_event: ApprovalRequired | None = None
+        self._pending_approval: ApprovalRequired | None = None
+        self._approval_widget: ApprovalPrompt | None = None
+        self._approval_deny_reason_mode: bool = False
 
         # Streaming render state: buffers plus the live widget updated in place.
         self._thinking_buf: list[str] = []
@@ -537,6 +501,22 @@ class MilkyFrogApp(App[None]):
         """App started: render welcome."""
         self._render_welcome()
         self.query_one("#prompt-input", Input).focus()
+        if self._launch is not None:
+            self.call_after_refresh(self._apply_launch)
+
+    def _apply_launch(self) -> None:
+        launch = self._launch
+        if launch is None:
+            return
+        if launch.run_id is None:
+            if launch.prompt:
+                self._start_run(launch.prompt)
+            return
+        self._attach_or_continue_run(
+            launch.run_id,
+            prompt=launch.prompt,
+            advance_pending=launch.advance_pending,
+        )
 
     # ── Conversation plumbing ─────────────────────────────────────────
 
@@ -558,14 +538,8 @@ class MilkyFrogApp(App[None]):
     # ── Rendering helpers ─────────────────────────────────────────────
 
     def _render_welcome(self) -> None:
-        welcome = Table.grid(padding=(0, 3))
-        welcome.add_column(no_wrap=True)
-        welcome.add_column(overflow="fold")
-        welcome.add_row(
-            pixel_frog_logo(),
-            Text("✻ Welcome to MILKY FROG · 奶蛙", style="bold yellow"),
-        )
-        self._append(Panel(welcome, border_style="yellow"))
+        self._append(welcome_banner())
+        self._append(Text("Welcome to MILKY FROG · 奶蛙", style="bold yellow"))
         self._append(
             Text.assemble(
                 ("Describe what to build, fix, or explain — be specific\n", "dim"),
@@ -649,6 +623,12 @@ class MilkyFrogApp(App[None]):
         commands.add_row("↑ / ↓", "Recall previous prompts")
         commands.add_row("Esc", "Interrupt the running task")
         self._append(Panel(commands, title="Commands", border_style="bright_black"))
+
+    def _render_runs(self) -> None:
+        runs = self.session.checkpoints.list_runs()
+        self._append(
+            Panel(runs_table(runs), title="Recent runs", border_style="bright_black"),
+        )
 
     def _close_phase(self) -> None:
         """Close the current streaming phase, committing any buffered content."""
@@ -774,10 +754,6 @@ class MilkyFrogApp(App[None]):
             self._render_assistant_footer(event.result.run_id, usage=event.result.usage)
         elif event.status is RunStatus.CANCELLED:
             self._render_error(event.message, hint="Type a new prompt, or Ctrl+C to exit.")
-        # elif event.status is RunStatus.WAITING_FOR_APPROVAL:
-        #     # The approval prompt is rendered by on_approval_required (driven by
-        #     # the RunPaused lifecycle signal); nothing more to show here.
-        #     pass
         elif event.status is RunStatus.FAILED or event.status is RunStatus.PAUSED_LIMIT:
             self._render_error(event.message)
 
@@ -798,38 +774,148 @@ class MilkyFrogApp(App[None]):
     def on_run_notice_msg(self, event: RunNoticeMsg) -> None:
         self._render_notification(event.message, event.level)
 
+    def _parse_approval_input(self, text: str) -> ApprovalVerdict | str | None:
+        """Parse user input as an approval decision.
+
+        Returns ``ApprovalVerdict`` for approve/deny, ``"allow_tool"`` or
+        ``"allow_all"`` for session-policy overrides, or ``None`` if the input
+        is unrecognised.
+        """
+        lowered = text.strip().lower()
+
+        if lowered in ("y", "yes", "approve"):
+            return ApprovalVerdict(ApprovalDecision.APPROVE)
+        if lowered in ("n", "no", "deny"):
+            return ApprovalVerdict(ApprovalDecision.DENY)
+
+        for prefix in ("no because ", "n because "):
+            if lowered.startswith(prefix):
+                reason = text.strip()[len(prefix) :].strip()
+                return ApprovalVerdict(ApprovalDecision.DENY, denial_reason=reason)
+
+        if lowered in ("always", "always allow"):
+            return "allow_tool"
+        if lowered in (
+            "always all",
+            "always_all",
+            "alwaysall",
+            "don't ask again",
+            "dont ask again",
+        ):
+            return "allow_all"
+
+        return None
+
     def on_approval_required(self, event: ApprovalRequired) -> None:
-        """A tool call needs the user's verdict: show an approval dialog."""
+        """A tool call needs the user's verdict: show a selectable option menu."""
         self._close_phase()
         self.session.pending_approval = event.run_id
-        self.query_one("#prompt-input", PromptInput).disabled = True
-        self._approval_event = event
-        self.push_screen(
-            ApprovalDialog(event.reason, event.tool_name),
-            self._handle_approval_verdict,
-        )
+        self._pending_approval = event
+        self._approval_deny_reason_mode = False
 
-    def _handle_approval_verdict(
-        self,
-        verdict: ApprovalVerdict | str | None,
-    ) -> None:
-        """Process the approval dialog result and optionally apply session policy."""
-        event = self._approval_event
-        if event is None or verdict is None:
-            self._approval_event = None
+        prompt = ApprovalPrompt(tool_name=event.tool_name, reason=event.reason)
+        self._approval_widget = prompt
+        self._conversation().mount(prompt)
+        self._scroll_end()
+
+        self.session.busy = False
+        prompt_input = self.query_one("#prompt-input", PromptInput)
+        prompt_input.disabled = True
+        prompt_input.placeholder = "Type a task and press Enter..."
+
+    def on_approval_option_selected(self, event: ApprovalOptionSelected) -> None:
+        """Apply the highlighted approval choice."""
+        if self._pending_approval is None:
             return
+        if event.action == "deny_reason":
+            self._begin_deny_reason_input()
+            return
+        self._apply_approval_action(event.action)
+
+    def _begin_deny_reason_input(self) -> None:
+        """Switch from the option menu to a free-text denial reason."""
+        self._approval_deny_reason_mode = True
+        if self._approval_widget is not None:
+            self._approval_widget.remove()
+            self._approval_widget = None
+        self._append(
+            Text("  Type why you're denying, then press Enter.", style="bold yellow"),
+            spaced=False,
+        )
+        prompt_input = self.query_one("#prompt-input", PromptInput)
+        prompt_input.disabled = False
+        prompt_input.placeholder = "Reason for denial…"
+        prompt_input.focus()
+
+    def _clear_approval_ui(self) -> None:
+        self._pending_approval = None
         self.session.pending_approval = None
+        self._approval_deny_reason_mode = False
+        if self._approval_widget is not None:
+            self._approval_widget.remove()
+            self._approval_widget = None
+        prompt_input = self.query_one("#prompt-input", PromptInput)
+        prompt_input.placeholder = "Type a task and press Enter..."
+
+    def _apply_approval_action(self, action: str) -> None:
+        """Resolve a pending approval from a menu action id."""
+        event = self._pending_approval
+        if event is None:
+            return
+        self._clear_approval_ui()
+
+        if action == "approve":
+            self._start_approval(event.run_id, ApprovalVerdict(ApprovalDecision.APPROVE))
+        elif action == "deny":
+            self._start_approval(event.run_id, ApprovalVerdict(ApprovalDecision.DENY))
+        elif action == "allow_tool":
+            if event.tool_name:
+                self._session.policy.allow(event.tool_name)
+            self._start_approval(event.run_id, ApprovalVerdict(ApprovalDecision.APPROVE))
+        elif action == "allow_all":
+            self._session.policy.auto_approve()
+            self._start_approval(event.run_id, ApprovalVerdict(ApprovalDecision.APPROVE))
+
+    def _handle_approval_input(self, text: str) -> None:
+        """Parse typed approval shorthand (y/n/always) as a fallback."""
+        event = self._pending_approval
+        if event is None:
+            return
+
+        if self._approval_deny_reason_mode:
+            reason = text.strip()
+            if not reason:
+                self._append(
+                    Text("  Please enter a reason, or Esc to cancel.", style="bold yellow"),
+                    spaced=False,
+                )
+                return
+            run_id = event.run_id
+            self._clear_approval_ui()
+            self._start_approval(
+                run_id,
+                ApprovalVerdict(ApprovalDecision.DENY, denial_reason=reason),
+            )
+            return
+
+        verdict = self._parse_approval_input(text)
+        if verdict is None:
+            self._append(
+                Text(
+                    "  Use ↑/↓ and Enter on the menu, or type: "
+                    "y / n / n because <reason> / always / always all",
+                    style="bold yellow",
+                ),
+                spaced=False,
+            )
+            return
+
         if isinstance(verdict, str):
-            if verdict == "allow_tool":
-                if event.tool_name:
-                    self._session.policy.allow(event.tool_name)
-                self._start_approval(event.run_id, ApprovalVerdict(ApprovalDecision.APPROVE))
-            elif verdict == "allow_all":
-                self._session.policy.auto_approve()
-                self._start_approval(event.run_id, ApprovalVerdict(ApprovalDecision.APPROVE))
+            self._apply_approval_action(verdict)
         else:
-            self._start_approval(event.run_id, verdict)
-        self._approval_event = None
+            run_id = event.run_id
+            self._clear_approval_ui()
+            self._start_approval(run_id, verdict)
 
     # ── Input handling ────────────────────────────────────────────────
 
@@ -862,8 +948,6 @@ class MilkyFrogApp(App[None]):
 
     def on_input_submitted(self, message: Input.Submitted) -> None:
         """Handle a user prompt submission."""
-        if self.session.busy:
-            return
         task = message.value.strip()
         if not task:
             return
@@ -873,13 +957,26 @@ class MilkyFrogApp(App[None]):
         prompt_input.clear()
         self.query_one("#command-hints", Static).display = False
 
+        # Pending approval?  Menu is focused; typed input is a fallback or denial reason.
+        if self._pending_approval is not None:
+            if self._approval_deny_reason_mode or not self._approval_widget:
+                self._handle_approval_input(task)
+            return
+
+        if self.session.busy:
+            return
+
         command = task.casefold()
         if command in {"exit", "quit", "/exit"}:
+            self._prepare_shutdown()
             self.exit()
             return
 
         if command in {"?", "/help"}:
             self._render_help()
+            return
+        if command == "/runs":
+            self._render_runs()
             return
         if command == "/clear":
             self._conversation().remove_children()
@@ -923,21 +1020,50 @@ class MilkyFrogApp(App[None]):
                 return
             run_id = runs[0].run_id
 
-        prompt = tail or None
+        self._attach_or_continue_run(run_id, prompt=tail or None)
 
-        if prompt is None:
+    def _attach_or_continue_run(
+        self,
+        run_id: str,
+        *,
+        prompt: str | None = None,
+        advance_pending: bool = False,
+    ) -> None:
+        """Attach to a Run, continue with a prompt, or advance pending work."""
+        if prompt is not None:
             self.session.run_id = run_id
             self.query_one(RunStatusBar).set_run_id(run_id)
+            self._start_run(prompt, run_id=run_id)
+            return
+
+        self.session.run_id = run_id
+        self.query_one(RunStatusBar).set_run_id(run_id)
+        stored = self.session.checkpoints.get_run(run_id)
+        if stored is not None and stored.status is RunStatus.WAITING_FOR_APPROVAL:
+            state = self.session.checkpoints.load_state(run_id)
+            pending = unmatched_tool_calls(state.messages)
+            tool_name = pending[0].name if pending else ""
+            reason = stored.final_message or "Tool approval required"
+            self.post_message(ApprovalRequired(run_id, reason, tool_name))
             self._append(
                 Text(
-                    f"Attached to run {run_id[:8]} · next prompt continues it",
+                    f"Attached to run {run_id[:8]} · pending tool approval",
                     style="dim",
                 )
             )
             return
 
-        self.session.run_id = run_id
-        self._start_run(prompt, run_id=run_id)
+        if advance_pending:
+            self._append(Text(f"Resuming run {run_id[:8]}…", style="dim"))
+            self._start_continue_pending(run_id)
+            return
+
+        self._append(
+            Text(
+                f"Attached to run {run_id[:8]} · next prompt continues it",
+                style="dim",
+            )
+        )
 
     def _start_run(self, task: str, *, run_id: str | None = None) -> None:
         """Kick off a Run as a Textual worker."""
@@ -955,6 +1081,40 @@ class MilkyFrogApp(App[None]):
         self.query_one("#prompt-input", PromptInput).disabled = True
 
         self._worker = self._do_run(task, run_id)
+
+    def _start_continue_pending(self, run_id: str) -> None:
+        """Advance a Run with pending work and no new user turn."""
+        self.session.run_id = run_id
+        self.session.busy = True
+        self._phase = None
+        self._thinking_buf.clear()
+        self._answer_buf.clear()
+        self._thinking_widget = None
+        self._answer_widget = None
+
+        self.query_one(RunStatusBar).set_run_id(run_id)
+        self.query_one(RunStatusBar).set_working()
+        self.query_one("#prompt-input", PromptInput).disabled = True
+
+        self._worker = self._do_continue(run_id)
+
+    @work(thread=False, exit_on_error=False)
+    async def _do_continue(self, run_id: str) -> None:
+        """Thin worker: advance pending work without a new user message."""
+        try:
+            await self.session.continue_with(run_id)
+        except ResumeError as error:
+            self.post_message(RunError(str(error)))
+        except asyncio.CancelledError:
+            result = AgentSession.cancelled_result(run_id)
+            self.post_message(
+                RunFinished(
+                    result=result,
+                    status=RunStatus.CANCELLED,
+                    message="Cancelled the current task.",
+                )
+            )
+            raise
 
     @work(thread=False, exit_on_error=False)
     async def _do_run(self, task: str, run_id: str | None) -> None:
@@ -1016,7 +1176,14 @@ class MilkyFrogApp(App[None]):
     # ── Key bindings ──────────────────────────────────────────────────
 
     def action_request_exit(self) -> None:
+        self._prepare_shutdown()
         self.exit()
+
+    def _prepare_shutdown(self) -> None:
+        """Cooperatively stop an in-flight Run before the TUI closes."""
+        self.session.shutdown_foreground_run()
+        if self._worker is not None:
+            self._worker.cancel()
 
     def action_cancel_run(self) -> None:
         """Interrupt the in-flight Run, if any (Esc).

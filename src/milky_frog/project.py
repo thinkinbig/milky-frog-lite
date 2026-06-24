@@ -16,6 +16,7 @@ CONFIG_TEMPLATE = (
 DEFAULT_CONTEXT_WINDOW = 128000
 DEFAULT_OUTPUT_RESERVE = 8000
 DEFAULT_SAFETY_MARGIN = 1000
+DEFAULT_BASH_TIMEOUT_SECONDS = 60
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +27,7 @@ class ProjectConfig:
     context_window: int = DEFAULT_CONTEXT_WINDOW
     output_reserve: int = DEFAULT_OUTPUT_RESERVE
     safety_margin: int = DEFAULT_SAFETY_MARGIN
+    bash_timeout_seconds: int = DEFAULT_BASH_TIMEOUT_SECONDS
 
 
 def project_root(workspace: Path) -> Path:
@@ -72,9 +74,19 @@ def load_project_config(workspace: Path) -> ProjectConfig:
     if isinstance(safety_margin, bool) or not isinstance(safety_margin, int) or safety_margin < 0:
         safety_margin = DEFAULT_SAFETY_MARGIN
 
+    bash_timeout_seconds = data.get("bash_timeout_seconds", DEFAULT_BASH_TIMEOUT_SECONDS)
+    if (
+        isinstance(bash_timeout_seconds, bool)
+        or not isinstance(bash_timeout_seconds, int)
+        or bash_timeout_seconds < 1
+        or bash_timeout_seconds > 600
+    ):
+        bash_timeout_seconds = DEFAULT_BASH_TIMEOUT_SECONDS
+
     return ProjectConfig(
         max_model_calls=max_model_calls,
         context_window=context_window,
         output_reserve=output_reserve,
         safety_margin=safety_margin,
+        bash_timeout_seconds=bash_timeout_seconds,
     )

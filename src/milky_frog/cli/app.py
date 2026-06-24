@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from pathlib import Path
 from typing import Annotated
@@ -12,7 +11,7 @@ from milky_frog.agent_session import AgentSession, MissingModelConfiguration
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.checkpoint.snapshot import dump_run_state
 from milky_frog.diagnostics import CheckStatus, Diagnostic
-from milky_frog.domain import ResumeError, RunResult, RunStatus
+from milky_frog.domain import ResumeError
 from milky_frog.project import CONFIG_FILENAME, CONFIG_TEMPLATE, PROJECT_DIRNAME
 from milky_frog.settings import Settings
 from milky_frog.ui import MilkyFrogApp
@@ -20,10 +19,10 @@ from milky_frog.ui.cli import (
     render_diagnostics,
     render_error,
     render_initialized,
-    render_result,
     render_run,
     render_runs,
 )
+from milky_frog.ui.tui.app import TuiLaunch
 
 
 def _find_last_run(store: SqliteCheckpointStore, workspace: Path) -> str | None:
@@ -33,31 +32,14 @@ def _find_last_run(store: SqliteCheckpointStore, workspace: Path) -> str | None:
     return None
 
 
-def _render_result(result: RunResult) -> None:
-    """Render a one-shot RunResult to the terminal."""
-    render_result(result)
-    if result.status is RunStatus.FAILED:
-        raise typer.Exit(code=1)
-
-
-# ── Async helpers (called via asyncio.run) ────────────────────────────
-
-
-async def _run_cmd(settings: Settings, task: str) -> RunResult:
-    """Async: create a session and start a new Run."""
-    async with AgentSession.from_settings(settings) as session:
-        return await session.start_new(task, Path.cwd())
-
-
-async def _resume_run(
-    settings: Settings,
-    run_id: str,
-    *,
-    prompt: str | None = None,
-) -> RunResult:
-    """Async: advance an existing Run, optionally with a new user turn."""
-    async with AgentSession.from_settings(settings) as session:
-        return await session.continue_with(run_id, prompt=prompt)
+def _resolve_run_id(settings: Settings, run_id: str) -> str:
+    store = SqliteCheckpointStore(settings.database_path)
+    try:
+        return store.resolve_run_id(run_id)
+    except LookupError as error:
+        raise ResumeError(f"unknown Run: {run_id}") from error
+    except ValueError as error:
+        raise ResumeError(f"ambiguous Run prefix: {run_id}") from error
 
 
 # ── Typer app ─────────────────────────────────────────────────────────
@@ -89,7 +71,7 @@ def main(
         interactive()
 
 
-def interactive() -> None:
+def interactive(*, launch: TuiLaunch | None = None) -> None:
     """Run the foreground interactive loop in full-screen TUI mode."""
     settings = Settings.from_environment()
     try:
@@ -97,7 +79,7 @@ def interactive() -> None:
     except MissingModelConfiguration:
         _render_configuration_error()
         raise typer.Exit(code=2) from None
-    MilkyFrogApp(settings).run()
+    MilkyFrogApp(settings, launch=launch).run()
 
 
 def _render_configuration_error(*, run_doctor_again: bool = False) -> None:
@@ -197,15 +179,8 @@ def show(
 
 @app.command()
 def run(task: Annotated[str, typer.Argument()]) -> None:
-    """Start one foreground Run."""
-    settings = Settings.from_environment()
-    try:
-        AgentSession.require_model_configuration(settings)
-    except MissingModelConfiguration:
-        _render_configuration_error()
-        raise typer.Exit(code=2) from None
-    result = asyncio.run(_run_cmd(settings, task))
-    _render_result(result)
+    """Start a foreground Run in the interactive TUI."""
+    interactive(launch=TuiLaunch(prompt=task))
 
 
 @app.command()
@@ -213,7 +188,7 @@ def resume(
     run_id: Annotated[str | None, typer.Argument()] = None,
     task: Annotated[str | None, typer.Argument()] = None,
 ) -> None:
-    """Resume a Run from its Checkpoint.
+    """Resume a Run in the interactive TUI.
 
     Without RUN_ID, resumes the most recent Run in the current workspace.
     Without TASK, advances pending work (paused, cancelled, or orphaned). With
@@ -235,11 +210,14 @@ def resume(
             )
             raise typer.Exit(code=1)
     try:
-        if task is None:
-            result = asyncio.run(_resume_run(settings, run_id))
-        else:
-            result = asyncio.run(_resume_run(settings, run_id, prompt=task))
+        resolved = _resolve_run_id(settings, run_id)
     except ResumeError as error:
         render_error(str(error), hint="List available Runs with: milky-frog runs")
         raise typer.Exit(code=1) from error
-    _render_result(result)
+    interactive(
+        launch=TuiLaunch(
+            run_id=resolved,
+            prompt=task,
+            advance_pending=task is None,
+        )
+    )

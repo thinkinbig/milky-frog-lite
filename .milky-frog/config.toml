@@ -5,3 +5,6 @@ max_model_calls = 30
 context_window = 128000      # Model's context window size
 output_reserve = 8000        # Tokens reserved for model output
 safety_margin = 1000         # Safety margin below the actual limit
+
+# Shell command timeout (seconds); increase for slow test suites or builds
+bash_timeout_seconds = 60

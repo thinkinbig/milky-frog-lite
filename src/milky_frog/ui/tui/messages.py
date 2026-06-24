@@ -76,6 +76,14 @@ class ApprovalRequired(Message):
         self.tool_name = tool_name
 
 
+class ApprovalOptionSelected(Message):
+    """User picked an option from the inline approval menu."""
+
+    def __init__(self, action: str) -> None:
+        super().__init__()
+        self.action = action
+
+
 class RunError(Message):
     """An unexpected error occurred during the Run."""
 

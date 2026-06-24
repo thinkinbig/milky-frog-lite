@@ -100,9 +100,11 @@ class AgentHarness:
                 stored = self._checkpoints.get_run(run_id)
                 if stored is None:
                     raise ResumeError(f"unknown Run: {run_id}")
-                if stored.status is RunStatus.WAITING_FOR_APPROVAL:
+                waiting_approval = stored.status is RunStatus.WAITING_FOR_APPROVAL
+                if waiting_approval and prompt is not None:
                     raise ResumeError(
-                        f"Run {run_id} is waiting for tool approval; use respond_approval instead"
+                        f"Run {run_id} is waiting for tool approval; "
+                        "approve or deny the pending tool first"
                     )
 
                 sandbox = self._sandbox_factory(stored.workspace)
@@ -110,14 +112,20 @@ class AgentHarness:
                 await self._emitter.before_resume(run_id, prompt, stored.status, stored.workspace)
 
                 state = self._checkpoints.load_state(run_id)
-                state, _ = seal(state)
-                if prompt is not None:
-                    state = append_user_message(state, prompt)
+                if not waiting_approval:
+                    state, _ = seal(state)
+                    if prompt is not None:
+                        state = append_user_message(state, prompt)
                 self._checkpoints.prepare_resume(run_id, stored.updated_at, state)
 
                 plan = PreparedRun(state=state, sandbox=sandbox)
                 resolved = await self._apply_approvals(
-                    plan, run_id, sandbox, cancellation, approval=None
+                    plan,
+                    run_id,
+                    sandbox,
+                    cancellation,
+                    approval=None,
+                    require_verdict=waiting_approval,
                 )
                 if isinstance(resolved, RunResult):
                     return resolved
@@ -178,6 +186,8 @@ class AgentHarness:
         sandbox: Sandbox,
         cancellation: RunCancellation | None,
         approval: ApprovalVerdict | None,
+        *,
+        require_verdict: bool = False,
     ) -> PreparedRun | RunResult:
         """Resolve tool calls that were pending approval on resume."""
         pending = unmatched_tool_calls(plan.state.messages)
@@ -188,7 +198,13 @@ class AgentHarness:
                 return await self._emitter.finish_cancelled(plan.state)
 
             resolved = await self._resolve_pending_call(
-                plan, run_id, sandbox, call, cancellation, approval
+                plan,
+                run_id,
+                sandbox,
+                call,
+                cancellation,
+                approval,
+                require_verdict=require_verdict,
             )
             if isinstance(resolved, RunResult):
                 return resolved
@@ -207,6 +223,8 @@ class AgentHarness:
         call: ToolCall,
         cancellation: RunCancellation | None,
         approval: ApprovalVerdict | None,
+        *,
+        require_verdict: bool = False,
     ) -> ToolResult | RunResult:
         """Decide one pending call's fate; ``RunResult`` ends the Run."""
         if approval is not None and approval.decision is ApprovalDecision.DENY:
@@ -219,6 +237,9 @@ class AgentHarness:
                 self._tools, run_id, plan.state.workspace, sandbox, call, cancellation
             )
             return result
+
+        if require_verdict:
+            return await self._emitter.finish_approval_needed(plan.state, call)
 
         # No verdict: fall back to the tool policy, which may pause again.
         check_results = await self._emitter.before_tool(run_id, call)

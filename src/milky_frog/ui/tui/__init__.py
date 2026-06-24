@@ -1,4 +1,4 @@
-from milky_frog.ui.tui.app import MilkyFrogApp
+from milky_frog.ui.tui.app import MilkyFrogApp, TuiLaunch
 from milky_frog.ui.tui.assembly import tui_presentation_bundle
 from milky_frog.ui.tui.messages import (
     AddText,
@@ -16,6 +16,7 @@ __all__ = [
     "AddText",
     "AddThinking",
     "MilkyFrogApp",
+    "TuiLaunch",
     "RunError",
     "RunFinished",
     "RunNoticeMsg",

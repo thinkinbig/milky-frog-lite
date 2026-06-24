@@ -68,7 +68,7 @@ class AgentLoop:
         """
         run_id = state.run_id
         try:
-            while state.completed_model_calls < max_calls:
+            while max_calls <= 0 or state.completed_model_calls < max_calls:
                 if is_cancelled(cancellation):
                     return await self._emitter.finish_cancelled(state)
 
@@ -130,6 +130,7 @@ class AgentLoop:
 
                 await self._emitter.turn_ended(run_id, model_call=state.completed_model_calls)
 
+            # Only reachable when max_calls > 0 (unlimited loops never pause).
             return await self._emitter.finish_paused(state, max_calls)
 
         except asyncio.CancelledError:

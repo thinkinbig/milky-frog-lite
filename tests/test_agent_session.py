@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from milky_frog.agent_session import AgentSession, MissingModelConfiguration
+from milky_frog.agent_session import AgentSession, InactiveAgentSession, MissingModelConfiguration
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import (
     ApprovalDecision,
@@ -21,6 +21,7 @@ from milky_frog.domain import (
     ToolCall,
 )
 from milky_frog.handlers import BaseHandler, EventDispatcher, RunCancelled
+from milky_frog.harness.agent_harness import AgentHarness
 from milky_frog.models import OpenAIModel
 from milky_frog.settings import LangfuseSettings, Settings
 from tests.checkpoint_helpers import run_status, seed_interrupted_tool_run, seed_run
@@ -192,6 +193,27 @@ async def test_session_resume_advances_stored_run(
 
 
 @pytest.mark.asyncio
+async def test_session_resume_resurfaces_waiting_for_approval(tmp_path: Path) -> None:
+    settings = Settings(tmp_path, "test-key", "https://example.test", "test-model", _NO_LANGFUSE)
+    store = SqliteCheckpointStore(settings.database_path)
+    run_id = "approval-run"
+    seed_interrupted_tool_run(
+        store,
+        run_id,
+        tmp_path,
+        status=RunStatus.WAITING_FOR_APPROVAL,
+        final_message="approval needed",
+    )
+
+    async with AgentSession.from_settings(settings) as session:
+        result = await session.continue_with(run_id)
+
+    assert result.run_id == run_id
+    assert result.status is RunStatus.WAITING_FOR_APPROVAL
+    assert "echo" in result.final_message
+
+
+@pytest.mark.asyncio
 async def test_session_resume_rejects_unknown_run(tmp_path: Path) -> None:
     settings = Settings(tmp_path, "test-key", "https://example.test", "test-model", _NO_LANGFUSE)
 
@@ -228,6 +250,75 @@ async def test_session_respond_approval_executes_pending_tool(
     assert result.run_id == run_id
     assert result.status is RunStatus.COMPLETED
     assert result.final_message == "done"
+
+
+@pytest.mark.asyncio
+async def test_session_persists_cancel_on_interrupt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    async def interrupted_resume(*_args: object, **_kwargs: object) -> object:
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(AgentHarness, "resume", interrupted_resume)
+    settings = Settings(tmp_path, "test-key", "https://example.test", "test-model", _NO_LANGFUSE)
+    store = SqliteCheckpointStore(settings.database_path)
+    run_id = "running-run"
+    seed_run(store, run_id, tmp_path, status=RunStatus.RUNNING)
+
+    async with AgentSession.from_settings(settings) as session:
+        with pytest.raises(asyncio.CancelledError):
+            await session.continue_with(run_id)
+
+    assert run_status(store, run_id) is RunStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_session_persists_cancel_on_exit_while_busy(tmp_path: Path) -> None:
+    settings = Settings(tmp_path, "test-key", "https://example.test", "test-model", _NO_LANGFUSE)
+    store = SqliteCheckpointStore(settings.database_path)
+    run_id = "running-run"
+    seed_run(store, run_id, tmp_path, status=RunStatus.RUNNING)
+
+    session = await AgentSession.from_settings(settings).__aenter__()
+    try:
+        session.busy = True
+        session.run_id = run_id
+    finally:
+        await session.__aexit__(None, None, None)
+
+    assert run_status(store, run_id) is RunStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_session_exit_leaves_waiting_for_approval_unchanged(tmp_path: Path) -> None:
+    settings = Settings(tmp_path, "test-key", "https://example.test", "test-model", _NO_LANGFUSE)
+    store = SqliteCheckpointStore(settings.database_path)
+    run_id = "approval-run"
+    seed_interrupted_tool_run(
+        store,
+        run_id,
+        tmp_path,
+        status=RunStatus.WAITING_FOR_APPROVAL,
+        final_message="approval needed",
+    )
+
+    session = await AgentSession.from_settings(settings).__aenter__()
+    try:
+        session.busy = True
+        session.run_id = run_id
+    finally:
+        await session.__aexit__(None, None, None)
+
+    assert run_status(store, run_id) is RunStatus.WAITING_FOR_APPROVAL
+
+
+@pytest.mark.asyncio
+async def test_session_requires_enter_before_checkpoints(tmp_path: Path) -> None:
+    settings = Settings(tmp_path, "test-key", None, "test-model", _NO_LANGFUSE)
+    session = AgentSession.from_settings(settings)
+
+    with pytest.raises(InactiveAgentSession, match="not active"):
+        _ = session.checkpoints
 
 
 @pytest.mark.asyncio

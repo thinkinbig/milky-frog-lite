@@ -53,6 +53,12 @@ def test_matching_commands_filters_by_prefix() -> None:
     assert matching_commands("/zzz") == ()
 
 
+def test_matching_commands_includes_runs() -> None:
+    names = {command.name for command in matching_commands("/r")}
+    assert "/resume" in names
+    assert "/runs" in names
+
+
 def test_complete_command_resolves_unique_prefix() -> None:
     assert complete_command("/cl") == "/clear"
     assert complete_command("/help") == "/help"

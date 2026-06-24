@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,7 @@ from milky_frog.handlers import BaseHandler, EventDispatcher, default_handlers
 from milky_frog.handlers.context import HandlerContext
 from milky_frog.harness.agent_harness import AgentHarness
 from milky_frog.harness.sandbox import LocalSandbox, SandboxFactory
+from milky_frog.harness.state import seal
 from milky_frog.harness.tools import ToolRegistry, default_tools
 from milky_frog.harness.tools.tool_policy import SessionToolPolicy
 from milky_frog.models import OpenAIModel
@@ -28,9 +30,21 @@ from milky_frog.settings import Settings
 
 logger = logging.getLogger(__name__)
 
+_INACTIVE_MSG = "AgentSession is not active; use `async with session`"
+
+
+def _active[T](value: T | None) -> T:
+    if value is None:
+        raise InactiveAgentSession(_INACTIVE_MSG)
+    return value
+
 
 class MissingModelConfiguration(ValueError):
     """Raised when the model API key or model name is not configured."""
+
+
+class InactiveAgentSession(RuntimeError):
+    """Raised when a method needs an entered session."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +71,9 @@ class AgentSession:
         async with AgentSession.from_settings(settings, bundles=[...]) as session:
             result = await session.start_new("build feature X")
 
+    Construction only stores configuration.  ``__aenter__`` wires and
+    acquires every session resource; ``__aexit__`` releases them.
+
     Orchestration methods (``start_new``, ``continue_with``, ``respond_approval``)
     handle the decision about whether to call ``Harness.run``, ``Harness.resume``,
     or ``Harness.respond_approval``, manage the busy flag, and mint cancellation
@@ -70,31 +87,24 @@ class AgentSession:
         config: AgentSessionConfig | None = None,
         handlers: EventDispatcher | None = None,
         bundles: list[BaseHandler] | None = None,
+        interactive: bool = False,
     ) -> None:
         api_key, model = self.require_model_configuration(settings)
+        self._settings = settings
         self._config = config or AgentSessionConfig()
-        self._checkpoints = SqliteCheckpointStore(settings.database_path)
+        self._api_key = api_key
         self._model_name = model
-        self._dispatcher = handlers if handlers is not None else EventDispatcher()
-        self._handlers: list[BaseHandler] = default_handlers(
-            settings,
-            self._checkpoints,
-            extra=bundles or (),
-        )
-        for bundle in self._handlers:
-            bundle.register(self._dispatcher)
-        self._model = OpenAIModel(api_key=api_key, model=model, base_url=settings.base_url)
-        self._harness = AgentHarness(
-            model=self._model,
-            tools=ToolRegistry(default_tools()),
-            checkpoints=self._checkpoints,
-            handlers=self._dispatcher,
-            sandbox_factory=self._config.sandbox_factory,
-        )
+        self._base_url = settings.base_url
+        self._dispatcher_override = handlers
+        self._extra_bundles = list(bundles or ())
+        self._interactive = interactive
 
-        # ── Mutable session-level policy ─────────────────────────────
-        self.policy = SessionToolPolicy()
-        self._dispatcher.set_context(HandlerContext(policy=self.policy))
+        self._checkpoints: SqliteCheckpointStore | None = None
+        self._dispatcher: EventDispatcher | None = None
+        self._handlers: list[BaseHandler] = []
+        self._model: OpenAIModel | None = None
+        self._harness: AgentHarness | None = None
+        self._policy: SessionToolPolicy | None = None
 
         # ── Orchestration state ──────────────────────────────────────
         self.run_id: str | None = None
@@ -115,15 +125,19 @@ class AgentSession:
 
     @property
     def dispatcher(self) -> EventDispatcher:
-        return self._dispatcher
+        return _active(self._dispatcher)
 
     @property
     def checkpoints(self) -> SqliteCheckpointStore:
-        return self._checkpoints
+        return _active(self._checkpoints)
+
+    @property
+    def policy(self) -> SessionToolPolicy:
+        return _active(self._policy)
 
     @property
     def harness(self) -> AgentHarness:
-        return self._harness
+        return _active(self._harness)
 
     # ── Construction helpers ──────────────────────────────────────────
 
@@ -149,9 +163,40 @@ class AgentSession:
     # ── Async resource lifecycle ─────────────────────────────────────
 
     async def __aenter__(self) -> AgentSession:
+        if self._model is not None:
+            return self
+
+        self._checkpoints = SqliteCheckpointStore(self._settings.database_path)
+        self._dispatcher = self._dispatcher_override or EventDispatcher()
+        self._handlers = default_handlers(
+            self._settings,
+            self._checkpoints,
+            extra=self._extra_bundles,
+        )
+        for bundle in self._handlers:
+            bundle.register(self._dispatcher)
+
+        self._policy = SessionToolPolicy()
+        self._dispatcher.set_context(HandlerContext(policy=self._policy))
+
+        self._model = OpenAIModel(
+            api_key=self._api_key,
+            model=self._model_name,
+            base_url=self._base_url,
+        )
         await self._model.__aenter__()
+
+        self._harness = AgentHarness(
+            model=self._model,
+            tools=ToolRegistry(default_tools()),
+            checkpoints=self._checkpoints,
+            handlers=self._dispatcher,
+            sandbox_factory=self._config.sandbox_factory,
+        )
+
         for handler in self._handlers:
             await handler.__aenter__()
+
         return self
 
     async def __aexit__(
@@ -160,15 +205,27 @@ class AgentSession:
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
+        self.shutdown_foreground_run()
+        if self._model is None:
+            return
+
         for handler in reversed(self._handlers):
             try:
                 await handler.__aexit__(exc_type, exc, traceback)
             except Exception:
                 logger.exception("Cleanup failed: %s", type(handler).__qualname__)
+
         try:
             await self._model.__aexit__(exc_type, exc, traceback)
         except Exception:
             logger.exception("Cleanup failed: model")
+
+        self._harness = None
+        self._model = None
+        self._handlers = []
+        self._checkpoints = None
+        self._dispatcher = None
+        self._policy = None
 
     # ── Orchestration (sync) ──────────────────────────────────────────
 
@@ -176,6 +233,25 @@ class AgentSession:
         """Request cooperative cancellation of the foreground Run."""
         if self._cancellation is not None:
             self._cancellation.cancel()
+
+    def shutdown_foreground_run(self) -> None:
+        """Stop and checkpoint an in-flight Run without releasing session resources."""
+        self.cancel()
+        run_id = self.run_id
+        checkpoints = self._checkpoints
+        if run_id is None or checkpoints is None:
+            return
+        stored = checkpoints.get_run(run_id)
+        if stored is None or stored.status is not RunStatus.RUNNING:
+            return
+        state = checkpoints.load_state(run_id)
+        sealed, _ = seal(state)
+        checkpoints.save_state(
+            run_id,
+            sealed,
+            status=RunStatus.CANCELLED,
+            final_message="interrupted",
+        )
 
     # ── Orchestration (async) ─────────────────────────────────────────
 
@@ -186,14 +262,19 @@ class AgentSession:
         self.busy = True
         self._cancellation = RunCancellation()
         try:
-            result = await self._harness.run(
-                RunRequest(
-                    task,
-                    workspace,
-                    max_model_calls=project_cfg.max_model_calls,
-                    cancellation=self._cancellation,
+            max_calls = 0 if self._interactive else project_cfg.max_model_calls
+            try:
+                result = await self.harness.run(
+                    RunRequest(
+                        task,
+                        workspace,
+                        max_model_calls=max_calls,
+                        cancellation=self._cancellation,
+                    )
                 )
-            )
+            except asyncio.CancelledError:
+                self.shutdown_foreground_run()
+                raise
             self.run_id = result.run_id
             return result
         finally:
@@ -222,12 +303,17 @@ class AgentSession:
         self._cancellation = RunCancellation()
         self.run_id = stored.run_id
         try:
-            result = await self._harness.resume(
-                stored.run_id,
-                max_model_calls=project_cfg.max_model_calls,
-                cancellation=self._cancellation,
-                prompt=prompt,
-            )
+            max_calls = 0 if self._interactive else project_cfg.max_model_calls
+            try:
+                result = await self.harness.resume(
+                    stored.run_id,
+                    max_model_calls=max_calls,
+                    cancellation=self._cancellation,
+                    prompt=prompt,
+                )
+            except asyncio.CancelledError:
+                self.shutdown_foreground_run()
+                raise
             self.run_id = result.run_id
             return result
         finally:
@@ -248,12 +334,17 @@ class AgentSession:
         self._cancellation = RunCancellation()
         self.run_id = stored.run_id
         try:
-            result = await self._harness.respond_approval(
-                stored.run_id,
-                max_model_calls=project_cfg.max_model_calls,
-                cancellation=self._cancellation,
-                approval=verdict,
-            )
+            max_calls = 0 if self._interactive else project_cfg.max_model_calls
+            try:
+                result = await self.harness.respond_approval(
+                    stored.run_id,
+                    max_model_calls=max_calls,
+                    cancellation=self._cancellation,
+                    approval=verdict,
+                )
+            except asyncio.CancelledError:
+                self.shutdown_foreground_run()
+                raise
             self.run_id = result.run_id
             return result
         finally:
@@ -262,12 +353,12 @@ class AgentSession:
 
     def _resolve_stored_run(self, run_id: str) -> StoredRun:
         try:
-            resolved = self._checkpoints.resolve_run_id(run_id)
+            resolved = self.checkpoints.resolve_run_id(run_id)
         except LookupError as error:
             raise ResumeError(f"unknown Run: {run_id}") from error
         except ValueError as error:
             raise ResumeError(f"ambiguous Run prefix: {run_id}") from error
-        stored = self._checkpoints.get_run(resolved)
+        stored = self.checkpoints.get_run(resolved)
         if stored is None:
             raise ResumeError(f"unknown Run: {resolved}")
         return stored

@@ -250,7 +250,26 @@ async def test_resume_with_prompt_continues_completed_run(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
-async def test_resume_rejects_waiting_for_approval(tmp_path: Path) -> None:
+async def test_resume_resurfaces_waiting_for_approval(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    run_id = "approval-run"
+    seed_interrupted_tool_run(
+        store,
+        run_id,
+        tmp_path,
+        status=RunStatus.WAITING_FOR_APPROVAL,
+        final_message="approval needed",
+    )
+    harness = make_harness(FakeModel(), ToolRegistry((EchoTool(),)), store, EventDispatcher())
+
+    result = await harness.resume(run_id, max_model_calls=30)
+
+    assert result.status is RunStatus.WAITING_FOR_APPROVAL
+    assert "echo" in result.final_message
+
+
+@pytest.mark.asyncio
+async def test_resume_rejects_prompt_while_waiting_for_approval(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
     run_id = "approval-run"
     seed_interrupted_tool_run(
@@ -263,7 +282,7 @@ async def test_resume_rejects_waiting_for_approval(tmp_path: Path) -> None:
     harness = make_harness(FakeModel(), ToolRegistry((EchoTool(),)), store, EventDispatcher())
 
     with pytest.raises(ResumeError, match="waiting for tool approval"):
-        await harness.resume(run_id, max_model_calls=30)
+        await harness.resume(run_id, max_model_calls=30, prompt="continue anyway")
 
 
 @pytest.mark.asyncio

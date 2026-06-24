@@ -9,8 +9,8 @@ from pydantic import BaseModel, Field
 
 from milky_frog.domain import ToolResult
 from milky_frog.harness.tools.base import ToolContext
+from milky_frog.project import DEFAULT_BASH_TIMEOUT_SECONDS, load_project_config
 
-_BASH_TIMEOUT_SECONDS = 30.0
 _MAX_OUTPUT_BYTES = 128 * 1024
 # Grace period to drain PTY output after the process exits.
 _PTY_DRAIN_SECONDS = 2.0
@@ -89,8 +89,9 @@ class BashTool:
     """Run a shell command inside the Workspace directory and capture output.
 
     The command runs inside a PTY so programs that check isatty() (git, grep,
-    ls …) emit colour and formatting naturally.  Output is truncated at 128 KB;
-    timeout is 30 seconds.
+    ls …) emit colour and formatting naturally.  Output is truncated at 128 KB.
+    Timeout defaults to five minutes and is configurable via
+    ``bash_timeout_seconds`` in ``.milky-frog/config.toml``.
     """
 
     name = "bash"
@@ -99,7 +100,9 @@ class BashTool:
         "Run a shell command in the workspace and capture its stdout and stderr. "
         "The command is executed with a clean environment (only HOME, PATH, SHELL, "
         "TERM, LANG, LC_ALL, TMPDIR are passed through). "
-        "Output is truncated at 128 KB; timeout is 30 seconds."
+        "Output is truncated at 128 KB. "
+        f"Default timeout is {DEFAULT_BASH_TIMEOUT_SECONDS} seconds; "
+        "override with bash_timeout_seconds in .milky-frog/config.toml."
     )
     input_model: type[BaseModel] = BashInput
 
@@ -111,6 +114,7 @@ class BashTool:
 
         sandbox = context.require_sandbox()
         env = local_command_environment()
+        timeout_seconds = float(load_project_config(sandbox.workspace).bash_timeout_seconds)
 
         loop = asyncio.get_running_loop()
         master_fd, slave_fd = pty.openpty()
@@ -135,7 +139,7 @@ class BashTool:
             read_task = asyncio.create_task(_read_pty(loop, master_fd, _MAX_OUTPUT_BYTES + 1))
 
             try:
-                await asyncio.wait_for(process.wait(), timeout=_BASH_TIMEOUT_SECONDS)
+                await asyncio.wait_for(process.wait(), timeout=timeout_seconds)
             except TimeoutError:
                 process.kill()
                 await process.wait()
@@ -144,7 +148,7 @@ class BashTool:
                     await read_task
                 read_task = None
                 return ToolResult(
-                    f"command timed out after {_BASH_TIMEOUT_SECONDS}s", is_error=True
+                    f"command timed out after {timeout_seconds:g}s", is_error=True
                 )
 
             # Process exited — drain any output still buffered in the PTY.
