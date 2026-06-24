@@ -7,7 +7,7 @@ from typing import Protocol
 from pydantic import BaseModel
 
 from milky_frog.domain import RunCancellation, ToolResult
-from milky_frog.harness.sandbox import LocalSandbox, Sandbox
+from milky_frog.harness.execution_backend import ExecutionBackend, LocalExecutionBackend
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,14 +15,14 @@ class ToolContext:
     run_id: str
     workspace: Path
     cancellation: RunCancellation | None = None
-    sandbox: Sandbox | None = None
+    backend: ExecutionBackend | None = None
 
     def is_cancelled(self) -> bool:
         return self.cancellation is not None and self.cancellation.is_cancelled
 
-    def require_sandbox(self) -> Sandbox:
-        """Return the sandbox, building a default Local Sandbox for the Workspace if absent."""
-        return self.sandbox or LocalSandbox(self.workspace)
+    def require_backend(self) -> ExecutionBackend:
+        """Return the execution backend, building a default for the Workspace if absent."""
+        return self.backend or LocalExecutionBackend(self.workspace)
 
 
 class Tool(Protocol):

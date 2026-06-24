@@ -21,7 +21,7 @@ from milky_frog.domain import (
 from milky_frog.handlers import BaseHandler, EventDispatcher, default_handlers
 from milky_frog.handlers.context import HandlerContext
 from milky_frog.harness.agent_harness import AgentHarness
-from milky_frog.harness.sandbox import LocalSandbox, SandboxFactory
+from milky_frog.harness.execution_backend import ExecutionBackendFactory, LocalExecutionBackend
 from milky_frog.harness.state import seal
 from milky_frog.harness.tools import ToolRegistry, default_tools
 from milky_frog.harness.tools.tool_policy import SessionToolPolicy
@@ -58,7 +58,7 @@ class AgentSessionConfig:
     """
 
     max_model_calls: int = DEFAULT_MAX_MODEL_CALLS
-    sandbox_factory: SandboxFactory = LocalSandbox
+    backend_factory: ExecutionBackendFactory = LocalExecutionBackend
 
 
 class AgentSession:
@@ -216,7 +216,7 @@ class AgentSession:
             tools=ToolRegistry(default_tools()),
             checkpoints=self._checkpoints,
             handlers=self._dispatcher,
-            sandbox_factory=self._config.sandbox_factory,
+            backend_factory=self._config.backend_factory,
         )
 
         for handler in self._handlers:

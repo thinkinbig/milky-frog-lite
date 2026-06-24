@@ -4,10 +4,12 @@ import asyncio
 import contextlib
 import os
 import pty
+from pathlib import Path
 
 from pydantic import BaseModel, Field
 
 from milky_frog.domain import ToolResult
+from milky_frog.harness.execution_backend import default_execution_backend
 from milky_frog.harness.tools.base import ToolContext
 from milky_frog.harness.tools.truncate import truncate_tool_output
 from milky_frog.project import DEFAULT_BASH_TIMEOUT_SECONDS, load_project_config
@@ -15,24 +17,16 @@ from milky_frog.project import DEFAULT_BASH_TIMEOUT_SECONDS, load_project_config
 _MAX_OUTPUT_BYTES = 128 * 1024
 # Grace period to drain PTY output after the process exits.
 _PTY_DRAIN_SECONDS = 2.0
-# Host env vars passed through to a spawned local command (never secrets).
-_COMMAND_ENV_ALLOWLIST = ("HOME", "LANG", "LC_ALL", "PATH", "SHELL", "TERM", "TMPDIR")
 
 
 def local_command_environment() -> dict[str, str]:
     """Build the final environment for a spawned local command.
 
-    Passes through only an allowlist of host env vars and ensures
-    ``/usr/local/bin`` is on ``PATH``.  This is execution-mechanism config, not
-    a Sandbox/Workspace policy — a future Docker runner would supply env
-    differently (e.g. ``docker exec -e``), so it lives with command execution
-    rather than on the Sandbox.
+    Convenience wrapper around ``default_execution_backend(Path.cwd()).build_env()``
+    — kept for callers that need a quick env dict without threading a seam
+    through ``ToolContext``.
     """
-    env = {name: os.environ[name] for name in _COMMAND_ENV_ALLOWLIST if name in os.environ}
-    path = env.get("PATH", "")
-    if "/usr/local/bin" not in path:
-        env["PATH"] = f"/usr/local/bin:{path}" if path else "/usr/local/bin"
-    return env
+    return default_execution_backend(Path.cwd()).build_env()
 
 
 class BashInput(BaseModel):
@@ -88,9 +82,11 @@ class BashTool:
     """Run a shell command inside the Workspace directory and capture output.
 
     The command runs inside a PTY so programs that check isatty() (git, grep,
-    ls …) emit colour and formatting naturally.  Output is truncated at 128 KB.
-    Timeout defaults to five minutes and is configurable via
-    ``bash_timeout_seconds`` in ``.milky-frog/config.toml``.
+    ls …) emit colour and formatting naturally.  Stdin is closed and the
+    environment disables pagers and interactive prompts so git log and similar
+    commands cannot hang waiting for a human.  Output is truncated at 128 KB.
+    Timeout is configurable via ``bash_timeout_seconds`` in
+    ``.milky-frog/config.toml``.
     """
 
     name = "bash"
@@ -100,8 +96,8 @@ class BashTool:
         "Prefer scoped commands over repo-wide dumps — e.g. git diff --stat, "
         "git diff <file> | tail, grep -rl <pattern> <dir>, find -name. "
         "Large output is truncated at 128 KB (head/tail plus a spill file path). "
-        "The command runs with a clean environment (HOME, PATH, SHELL, TERM, LANG, "
-        "LC_ALL, TMPDIR only). "
+        "Commands run non-interactively (no pagers or terminal prompts; stdin closed). "
+        "Host env is limited to HOME, PATH, SHELL, TERM, LANG, LC_ALL, TMPDIR. "
         f"Default timeout is {DEFAULT_BASH_TIMEOUT_SECONDS} seconds; "
         "override with bash_timeout_seconds in .milky-frog/config.toml."
     )
@@ -113,9 +109,9 @@ class BashTool:
         if not command:
             return ToolResult("empty command", is_error=True)
 
-        sandbox = context.require_sandbox()
-        env = local_command_environment()
-        timeout_seconds = float(load_project_config(sandbox.workspace).bash_timeout_seconds)
+        backend = context.require_backend()
+        env = backend.build_env()
+        timeout_seconds = float(load_project_config(backend.workspace).bash_timeout_seconds)
 
         loop = asyncio.get_running_loop()
         master_fd, slave_fd = pty.openpty()
@@ -124,10 +120,10 @@ class BashTool:
             try:
                 process = await asyncio.create_subprocess_shell(
                     command,
-                    stdin=slave_fd,
+                    stdin=asyncio.subprocess.DEVNULL,
                     stdout=slave_fd,
                     stderr=slave_fd,
-                    cwd=str(sandbox.workspace),
+                    cwd=str(backend.workspace),
                     env=env,
                 )
             except OSError as error:
