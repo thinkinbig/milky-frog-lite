@@ -69,11 +69,7 @@ def load_project_config(workspace: Path) -> ProjectConfig:
         output_reserve = DEFAULT_OUTPUT_RESERVE
 
     safety_margin = data.get("safety_margin", DEFAULT_SAFETY_MARGIN)
-    if (
-        isinstance(safety_margin, bool)
-        or not isinstance(safety_margin, int)
-        or safety_margin < 0
-    ):
+    if isinstance(safety_margin, bool) or not isinstance(safety_margin, int) or safety_margin < 0:
         safety_margin = DEFAULT_SAFETY_MARGIN
 
     return ProjectConfig(

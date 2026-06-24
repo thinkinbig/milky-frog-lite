@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from milky_frog.domain import RunUsage, TokenUsage
-from milky_frog.ui.usage import format_run_usage
+from milky_frog.ui.usage import context_fraction, format_context_meter, format_run_usage
 
 
 def test_token_usage_total_and_recorded() -> None:
@@ -65,3 +65,28 @@ def test_format_run_usage_omits_zero_subtotals() -> None:
     summary = format_run_usage(usage)
 
     assert summary == "↑ 200 in · ↓ 50 out · Σ 250 tokens"
+
+
+def test_context_fraction_none_when_nothing_measured_or_no_window() -> None:
+    assert context_fraction(0, 128000) is None
+    assert context_fraction(1000, 0) is None
+
+
+def test_context_fraction_clamps_to_one_when_over_window() -> None:
+    assert context_fraction(64000, 128000) == 0.5
+    assert context_fraction(200000, 128000) == 1.0
+
+
+def test_format_context_meter_silent_until_measured() -> None:
+    assert format_context_meter(0, 128000) is None
+
+
+def test_format_context_meter_renders_bar_and_percent() -> None:
+    # 28k / 128k ≈ 22% -> round(0.21875 * 8) = 2 filled cells of 8.
+    meter = format_context_meter(28000, 128000)
+    assert meter == "28k/128k ██░░░░░░ 22%"
+
+
+def test_format_context_meter_full_window_is_all_filled() -> None:
+    meter = format_context_meter(130000, 128000)
+    assert meter == "130k/128k ████████ 100%"

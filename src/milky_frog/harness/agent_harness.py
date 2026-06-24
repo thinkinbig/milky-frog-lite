@@ -107,7 +107,7 @@ class AgentHarness:
 
                 sandbox = self._sandbox_factory(stored.workspace)
 
-                await self._emitter.before_resume(run_id, prompt, stored.status)
+                await self._emitter.before_resume(run_id, prompt, stored.status, stored.workspace)
 
                 state = self._checkpoints.load_state(run_id)
                 state, _ = seal(state)
@@ -149,7 +149,7 @@ class AgentHarness:
 
                 sandbox = self._sandbox_factory(stored.workspace)
 
-                await self._emitter.before_resume(run_id, None, stored.status)
+                await self._emitter.before_resume(run_id, None, stored.status, stored.workspace)
 
                 state = self._checkpoints.load_state(run_id)
                 self._checkpoints.prepare_resume(run_id, stored.updated_at, state)

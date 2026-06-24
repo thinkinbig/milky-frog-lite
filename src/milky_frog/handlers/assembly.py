@@ -16,7 +16,6 @@ def default_handlers(
     settings: Settings,
     checkpoints: CheckpointStore,
     *,
-    model_name: str = "",
     extra: Sequence[BaseHandler] = (),
 ) -> list[BaseHandler]:
     """Assemble every lifecycle handler bundle for a session, in one place.
@@ -31,7 +30,7 @@ def default_handlers(
         CheckpointHandler(checkpoints),
         PolicyHandler(),
         AgentContextHandler(settings.home),
-        BudgetHandler(model_name),
+        BudgetHandler(),
     ]
     bundles.extend(extra)
     langfuse = LangfuseHandler.from_settings(settings)

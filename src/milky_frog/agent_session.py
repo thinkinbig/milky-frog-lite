@@ -79,7 +79,6 @@ class AgentSession:
         self._handlers: list[BaseHandler] = default_handlers(
             settings,
             self._checkpoints,
-            model_name=model,
             extra=bundles or (),
         )
         for bundle in self._handlers:

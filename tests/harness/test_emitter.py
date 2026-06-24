@@ -209,12 +209,15 @@ async def test_before_resume_notifies_handlers(tmp_path: Path) -> None:
     async def record(event: RunBeforeResume, _ctx=None) -> None:
         seen.append(event)
 
-    await emitter.before_resume("run-1", prompt="continue", status=RunStatus.PAUSED_LIMIT)
+    await emitter.before_resume(
+        "run-1", prompt="continue", status=RunStatus.PAUSED_LIMIT, workspace=tmp_path
+    )
 
     assert len(seen) == 1
     assert seen[0].run_id == "run-1"
     assert seen[0].prompt == "continue"
     assert seen[0].stored_status is RunStatus.PAUSED_LIMIT
+    assert seen[0].workspace == tmp_path
 
 
 @pytest.mark.asyncio

@@ -296,6 +296,7 @@ async def test_langfuse_before_resume_registers_trace_and_span(
             run_id="run-1",
             prompt="continue",
             stored_status=RunStatus.WAITING_FOR_INPUT,
+            workspace=Path("."),
         )
     )
 

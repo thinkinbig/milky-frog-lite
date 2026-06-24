@@ -148,11 +148,11 @@ class RunEmitter:
         )
 
     async def before_resume(
-        self, run_id: str, prompt: str | None, status: RunStatus
+        self, run_id: str, prompt: str | None, status: RunStatus, workspace: Path
     ) -> list[HandlerResult]:
         """Notify handlers before a Run is prepared for resumption."""
         return await self._handlers.notify(
-            RunBeforeResume(run_id=run_id, prompt=prompt, stored_status=status)
+            RunBeforeResume(run_id=run_id, prompt=prompt, stored_status=status, workspace=workspace)
         )
 
     async def before_model(self, run_id: str, request: ModelRequest) -> list[HandlerResult]:

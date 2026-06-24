@@ -21,6 +21,7 @@ from textual.worker import Worker
 
 from milky_frog.agent_session import AgentSession
 from milky_frog.domain import ApprovalDecision, ApprovalVerdict, ResumeError, RunStatus, RunUsage
+from milky_frog.project import load_project_config
 from milky_frog.settings import Settings
 from milky_frog.ui.logo import pixel_frog_logo
 from milky_frog.ui.tui.assembly import tui_presentation_bundle
@@ -50,7 +51,7 @@ from milky_frog.ui.tui.rendering import (
     tool_result_renderable,
 )
 from milky_frog.ui.tui.textual_patch import patch_textual_utf8_decode
-from milky_frog.ui.usage import format_run_usage
+from milky_frog.ui.usage import context_fraction, format_context_meter, format_run_usage
 
 
 def _row(marker: Text, body: RenderableType) -> Table:
@@ -110,10 +111,11 @@ class RunStatusBar(Static):
 
     status_text: reactive[str] = reactive("ready")
 
-    def __init__(self, model: str, workspace: Path) -> None:
+    def __init__(self, model: str, workspace: Path, context_window: int) -> None:
         super().__init__()
         self._model = model
         self._workspace = _short_workspace(workspace)
+        self._context_window = context_window
         self._usage: RunUsage = RunUsage()
         self._run_id: str | None = None
         self._spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
@@ -159,6 +161,10 @@ class RunStatusBar(Static):
         if self._run_id:
             parts.append(Text("  ·  ", style="bright_black"))
             parts.append(Text(f"run {self._run_id[:8]}", style="dim"))
+        meter = format_context_meter(self._usage.context_tokens, self._context_window)
+        if meter:
+            parts.append(Text("  ·  ", style="bright_black"))
+            parts.append(Text(meter, style=_context_meter_style(self._usage, self._context_window)))
         usage_str = format_run_usage(self._usage)
         if usage_str:
             parts.append(Text("  ·  ", style="bright_black"))
@@ -171,6 +177,18 @@ class RunStatusBar(Static):
         else:
             parts.append(Text(state, style="green"))
         return Text.assemble(*parts)
+
+
+def _context_meter_style(usage: RunUsage, context_window: int) -> str:
+    """Dim until the context window fills up, then warn (yellow) and alarm (red)."""
+    fraction = context_fraction(usage.context_tokens, context_window)
+    if fraction is None:
+        return "dim"
+    if fraction >= 0.9:
+        return "bold red"
+    if fraction >= 0.75:
+        return "yellow"
+    return "dim"
 
 
 def _short_workspace(workspace: Path) -> str:
@@ -510,6 +528,7 @@ class MilkyFrogApp(App[None]):
             RunStatusBar(
                 model=self.session.model_name or "unknown",
                 workspace=Path.cwd(),
+                context_window=load_project_config(Path.cwd()).context_window,
             ),
         )
         yield Footer()
@@ -871,7 +890,7 @@ class MilkyFrogApp(App[None]):
             self._handle_resume(task)
             return
 
-        self._start_run(task)
+        self._start_run(task, run_id=self.session.run_id)
 
     def _handle_resume(self, task: str) -> None:
         """Parse ``/resume`` and either attach to a Run or continue it.

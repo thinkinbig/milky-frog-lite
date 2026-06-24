@@ -49,11 +49,14 @@ class RunBeforeResume(BaseEvent):
 
     Pure observation — handlers can inspect / log the stored Run data
     before the Harness loads state, seals interrupted tools, and
-    optionally appends a new user turn.
+    optionally appends a new user turn.  Carries the resolved workspace so
+    handlers can load per-workspace config that ``RunStarted`` would otherwise
+    provide (a resumed Run never sees ``RunStarted``).
     """
 
     prompt: str | None
     stored_status: RunStatus
+    workspace: Path
 
 
 @dataclass(frozen=True)
