@@ -5,9 +5,6 @@ from pydantic import BaseModel, Field
 from milky_frog.domain import ToolResult
 from milky_frog.harness.sandbox import SandboxViolation
 from milky_frog.harness.tools.base import ToolContext
-from milky_frog.harness.tools.truncate import truncate_tool_output
-
-_MAX_BYTES = 256 * 1024
 
 
 class ReadFileInput(BaseModel):
@@ -43,7 +40,5 @@ class ReadFileTool:
         except UnicodeDecodeError:
             return ToolResult(f"not a UTF-8 text file: {params.path}", is_error=True)
 
-        # Use a limit around 64,000 characters for reading files
-        text = truncate_tool_output(text, max_chars=64000, tool_name="read")
-
+        # Output is bounded by the unified truncation seam in the agent loop.
         return ToolResult(text)

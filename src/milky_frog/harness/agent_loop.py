@@ -4,10 +4,12 @@ import asyncio
 import contextlib
 from collections.abc import Coroutine
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
 from milky_frog.domain import (
+    DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT,
     ModelRequest,
     ModelResponse,
     ReasoningDelta,
@@ -30,6 +32,7 @@ from milky_frog.harness.model_retry import (
 )
 from milky_frog.harness.sandbox import Sandbox
 from milky_frog.harness.state import append_model_response, append_tool_result
+from milky_frog.harness.tokens import truncate_tool_output
 from milky_frog.harness.tools import ToolContext, ToolRegistry
 from milky_frog.models import Model
 
@@ -58,6 +61,7 @@ class AgentLoop:
         sandbox: Sandbox,
         *,
         max_calls: int = 30,
+        tool_output_token_limit: int = DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT,
         cancellation: RunCancellation | None = None,
     ) -> RunResult:
         """Drive at most ``max_calls`` model-tool turns.
@@ -65,6 +69,11 @@ class AgentLoop:
         ``state`` is grown in-place (replaced via frozen-dataclass ``replace``)
         and the emitter is notified after every meaningful step so bus
         subscribers (checkpointing, policy, UI, observability) can react.
+
+        ``tool_output_token_limit`` bounds each tool result before it enters the
+        transcript — a per-call cap distinct from the conversation-wide
+        ``BudgetHandler``. The caller sources it from Workspace config so the
+        loop stays config-agnostic.
         """
         run_id = state.run_id
         try:
@@ -125,6 +134,14 @@ class AgentLoop:
                         except ToolRunCancelled:
                             return await self._emitter.finish_cancelled(state)
 
+                    # Unified truncation seam: bound every tool's output the same
+                    # way before it reaches the transcript, persistence, or the UI.
+                    result = replace(
+                        result,
+                        content=truncate_tool_output(
+                            result.content, limit_tokens=tool_output_token_limit
+                        ),
+                    )
                     state = append_tool_result(state, call, result)
                     await self._emitter.after_tool(run_id, call, result, state)
 

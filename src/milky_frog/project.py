@@ -4,24 +4,27 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from milky_frog.domain import DEFAULT_MAX_MODEL_CALLS
+from milky_frog.domain import DEFAULT_MAX_MODEL_CALLS, DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT
 
 PROJECT_DIRNAME = ".milky-frog"
 CONFIG_FILENAME = "config.toml"
-
-CONFIG_TEMPLATE = (
-    f"# Project-level Milky Frog configuration.\n"
-    f"max_model_calls = {DEFAULT_MAX_MODEL_CALLS}\n\n"
-    f"[checkpoint]\n"
-    f"retention_days = 30\n"
-    f"prune_on_start = true\n"
-)
 
 DEFAULT_CONTEXT_WINDOW = 128000
 DEFAULT_OUTPUT_RESERVE = 8000
 DEFAULT_SAFETY_MARGIN = 1000
 DEFAULT_BASH_TIMEOUT_SECONDS = 60
 DEFAULT_RETENTION_DAYS = 30
+
+CONFIG_TEMPLATE = (
+    f"# Project-level Milky Frog configuration.\n"
+    f"max_model_calls = {DEFAULT_MAX_MODEL_CALLS}\n\n"
+    f"# Per-tool output cap (estimated tokens) applied before a result enters the\n"
+    f"# transcript. Independent of the conversation-wide token budget.\n"
+    f"tool_output_token_limit = {DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT}\n\n"
+    f"[checkpoint]\n"
+    f"retention_days = {DEFAULT_RETENTION_DAYS}\n"
+    f"prune_on_start = true\n"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +36,7 @@ class ProjectConfig:
     output_reserve: int = DEFAULT_OUTPUT_RESERVE
     safety_margin: int = DEFAULT_SAFETY_MARGIN
     bash_timeout_seconds: int = DEFAULT_BASH_TIMEOUT_SECONDS
+    tool_output_token_limit: int = DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT
     checkpoint_retention_days: int = DEFAULT_RETENTION_DAYS
     prune_on_start: bool = True
 
@@ -90,6 +94,14 @@ def load_project_config(workspace: Path) -> ProjectConfig:
     ):
         bash_timeout_seconds = DEFAULT_BASH_TIMEOUT_SECONDS
 
+    tool_output_token_limit = data.get("tool_output_token_limit", DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT)
+    if (
+        isinstance(tool_output_token_limit, bool)
+        or not isinstance(tool_output_token_limit, int)
+        or tool_output_token_limit < 100
+    ):
+        tool_output_token_limit = DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT
+
     # ── [checkpoint] section ─────────────────────────────────────────
     cp = data.get("checkpoint", {})
     if not isinstance(cp, dict):
@@ -113,6 +125,7 @@ def load_project_config(workspace: Path) -> ProjectConfig:
         output_reserve=output_reserve,
         safety_margin=safety_margin,
         bash_timeout_seconds=bash_timeout_seconds,
+        tool_output_token_limit=tool_output_token_limit,
         checkpoint_retention_days=checkpoint_retention_days,
         prune_on_start=prune_on_start,
     )

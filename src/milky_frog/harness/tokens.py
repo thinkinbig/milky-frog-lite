@@ -9,6 +9,8 @@ from pydantic import JsonValue
 _PER_MESSAGE_OVERHEAD = 4
 # Rough characters-per-token ratio for the estimator.
 _CHARS_PER_TOKEN = 4
+# Fraction of a truncation budget kept from the head; the remainder is from the tail.
+_HEAD_FRACTION = 0.35
 
 
 class TokenCounter(Protocol):
@@ -53,3 +55,35 @@ class ApproxCharCounter:
 
     def count_tool_schemas(self, schemas: tuple[dict[str, JsonValue], ...]) -> int:
         return sum(self.count_text(json.dumps(schema)) for schema in schemas)
+
+    def truncate_text(self, text: str, *, limit_tokens: int) -> str:
+        """Bound text to roughly ``limit_tokens`` with a head+tail window.
+
+        Keeps the start and end of the output — the parts a model usually needs —
+        and replaces the middle with a marker stating how much was dropped and how
+        to retrieve it. Uses the same character-ratio estimate as ``BudgetHandler``
+        so per-tool truncation and the conversation-wide budget reason about tokens
+        with one ruler. Nothing is spilled to disk.
+        """
+        if limit_tokens <= 0 or self.count_text(text) <= limit_tokens:
+            return text
+
+        max_chars = limit_tokens * _CHARS_PER_TOKEN
+        head_chars = int(max_chars * _HEAD_FRACTION)
+        tail_chars = max_chars - head_chars
+
+        head = text[:head_chars]
+        tail = text[-tail_chars:]
+        omitted_tokens = self.count_text(text[head_chars : len(text) - tail_chars])
+
+        marker = (
+            f"\n\n... [{omitted_tokens} tokens omitted — output truncated to "
+            f"~{limit_tokens} tokens. Re-run a scoped command (e.g. `git diff <path>`) "
+            f"or use read_file over a line range to see the omitted portion.] ...\n\n"
+        )
+        return head + marker + tail
+
+
+def truncate_tool_output(text: str, *, limit_tokens: int) -> str:
+    """Truncate tool output using the shared :class:`ApproxCharCounter` estimate."""
+    return ApproxCharCounter().truncate_text(text, limit_tokens=limit_tokens)

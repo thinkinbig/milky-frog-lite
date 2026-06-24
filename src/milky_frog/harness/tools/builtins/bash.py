@@ -9,10 +9,8 @@ from pydantic import BaseModel, Field
 
 from milky_frog.domain import ToolResult
 from milky_frog.harness.tools.base import ToolContext
-from milky_frog.harness.tools.truncate import truncate_tool_output
 from milky_frog.project import DEFAULT_BASH_TIMEOUT_SECONDS, load_project_config
 
-_MAX_OUTPUT_BYTES = 128 * 1024
 # Grace period to drain PTY output after the process exits.
 _PTY_DRAIN_SECONDS = 2.0
 # Host env vars passed through to a spawned local command (never secrets).
@@ -41,7 +39,7 @@ class BashInput(BaseModel):
         "Prefer narrow, scoped commands: git diff --stat or git diff <file> | tail N "
         "instead of bare git diff; grep -c or grep <path> instead of repo-wide grep; "
         "find with -name instead of listing huge directories. "
-        "Output is truncated at 128 KB with head/tail and a spill path when larger.",
+        "Large output is truncated head/tail before it reaches the model.",
     )
 
 
@@ -88,8 +86,9 @@ class BashTool:
     """Run a shell command inside the Workspace directory and capture output.
 
     The command runs inside a PTY so programs that check isatty() (git, grep,
-    ls …) emit colour and formatting naturally.  Output is truncated at 128 KB.
-    Timeout defaults to five minutes and is configurable via
+    ls …) emit colour and formatting naturally.  Large output is bounded by the
+    unified head/tail truncation seam in the agent loop before it reaches the
+    model. Timeout defaults to five minutes and is configurable via
     ``bash_timeout_seconds`` in ``.milky-frog/config.toml``.
     """
 
@@ -99,7 +98,7 @@ class BashTool:
         "Run a shell command in the workspace and capture its stdout and stderr. "
         "Prefer scoped commands over repo-wide dumps — e.g. git diff --stat, "
         "git diff <file> | tail, grep -rl <pattern> <dir>, find -name. "
-        "Large output is truncated at 128 KB (head/tail plus a spill file path). "
+        "Large output is truncated head/tail before it reaches the model. "
         "The command runs with a clean environment (HOME, PATH, SHELL, TERM, LANG, "
         "LC_ALL, TMPDIR only). "
         f"Default timeout is {DEFAULT_BASH_TIMEOUT_SECONDS} seconds; "
@@ -173,10 +172,8 @@ class BashTool:
         text = raw.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
 
         if process.returncode != 0:
-            text = truncate_tool_output(text, max_chars=128000, tool_name="bash")
             stripped = text.strip() or "(no output)"
             return ToolResult(f"exit code {process.returncode}:\n{stripped}", is_error=True)
 
-        text = truncate_tool_output(text, max_chars=128000, tool_name="bash")
         result = text.rstrip("\n")
         return ToolResult(result if result else "(no output)")

@@ -186,6 +186,9 @@ ModelChunk = TextDelta | ReasoningDelta | StreamDone
 
 
 DEFAULT_MAX_MODEL_CALLS = 30
+# Default per-tool output cap (estimated tokens) applied before a result enters
+# the transcript. Per-workspace override via ``tool_output_token_limit``.
+DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT = 10000
 
 
 @dataclass(slots=True)
@@ -215,6 +218,7 @@ class RunRequest:
     prompt: str
     workspace: Path
     max_model_calls: int = DEFAULT_MAX_MODEL_CALLS
+    tool_output_token_limit: int = DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT
     cancellation: RunCancellation | None = None
 
 

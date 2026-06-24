@@ -294,6 +294,7 @@ class AgentSession:
                         task,
                         workspace,
                         max_model_calls=max_calls,
+                        tool_output_token_limit=project_cfg.tool_output_token_limit,
                         cancellation=self._cancellation,
                     )
                 )
@@ -333,6 +334,7 @@ class AgentSession:
                 result = await self.harness.resume(
                     stored.run_id,
                     max_model_calls=max_calls,
+                    tool_output_token_limit=project_cfg.tool_output_token_limit,
                     cancellation=self._cancellation,
                     prompt=prompt,
                 )
@@ -364,6 +366,7 @@ class AgentSession:
                 result = await self.harness.respond_approval(
                     stored.run_id,
                     max_model_calls=max_calls,
+                    tool_output_token_limit=project_cfg.tool_output_token_limit,
                     cancellation=self._cancellation,
                     approval=verdict,
                 )

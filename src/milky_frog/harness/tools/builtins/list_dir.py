@@ -1,18 +1,10 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from pydantic import BaseModel, Field
 
 from milky_frog.domain import ToolResult
 from milky_frog.harness.sandbox import SandboxViolation
 from milky_frog.harness.tools.base import ToolContext
-from milky_frog.harness.tools.truncate import truncate_tool_output
-
-
-class _DirectoryEntryOrder:
-    def __call__(self, path: Path) -> tuple[bool, str]:
-        return (not path.is_dir(), path.name)
 
 
 class ListDirInput(BaseModel):
@@ -41,7 +33,10 @@ class ListDirTool:
         if not resolved.is_dir():
             return ToolResult(f"not a directory: {params.path}", is_error=True)
         try:
-            entries = sorted(resolved.iterdir(), key=_DirectoryEntryOrder())
+            entries = sorted(
+                resolved.iterdir(),
+                key=lambda path: (not path.is_dir(), path.name),
+            )
         except OSError as error:
             return ToolResult(f"{type(error).__name__}: {error}", is_error=True)
         if not entries:
@@ -49,6 +44,5 @@ class ListDirTool:
         lines = [f"{entry.name}/" if entry.is_dir() else entry.name for entry in entries]
         text = "\n".join(lines)
 
-        text = truncate_tool_output(text, max_chars=32000, tool_name="list_dir")
-
+        # Output is bounded by the unified truncation seam in the agent loop.
         return ToolResult(text)

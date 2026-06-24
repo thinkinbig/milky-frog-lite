@@ -7,6 +7,7 @@ from milky_frog.project import (
     CONFIG_FILENAME,
     CONFIG_TEMPLATE,
     DEFAULT_BASH_TIMEOUT_SECONDS,
+    DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT,
     PROJECT_DIRNAME,
     load_project_config,
 )
@@ -96,3 +97,25 @@ def test_checkpoint_generated_template_round_trips(tmp_path: Path) -> None:
     cfg = load_project_config(tmp_path)
     assert cfg.checkpoint_retention_days == 30
     assert cfg.prune_on_start is True
+
+
+def test_reads_tool_output_token_limit_from_config(tmp_path: Path) -> None:
+    _write_config(tmp_path, "tool_output_token_limit = 4000\n")
+
+    assert load_project_config(tmp_path).tool_output_token_limit == 4000
+
+
+def test_missing_config_uses_default_tool_output_token_limit(tmp_path: Path) -> None:
+    assert load_project_config(tmp_path).tool_output_token_limit == DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT
+
+
+def test_invalid_tool_output_token_limit_falls_back_to_default(tmp_path: Path) -> None:
+    _write_config(tmp_path, "tool_output_token_limit = 10\n")  # below the 100 floor
+
+    assert load_project_config(tmp_path).tool_output_token_limit == DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT
+
+
+def test_generated_template_round_trips_tool_output_token_limit(tmp_path: Path) -> None:
+    _write_config(tmp_path, CONFIG_TEMPLATE)
+
+    assert load_project_config(tmp_path).tool_output_token_limit == DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT

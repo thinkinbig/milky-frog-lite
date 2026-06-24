@@ -259,13 +259,16 @@ async def test_bash_timeout_returns_error(tmp_path: Path, monkeypatch) -> None:
     assert "timed out" in result.content
 
 
-async def test_bash_truncated_output(tmp_path: Path) -> None:
+async def test_bash_returns_full_output_untruncated(tmp_path: Path) -> None:
+    # The bash tool no longer truncates: the agent loop applies the unified
+    # head/tail cap before the result enters the transcript (issue #52).
     result = await BashTool().execute(
         _context(tmp_path), BashTool.input_model(command="python3 -c 'print(\"x\" * 200000)'")
     )
 
     assert not result.is_error
-    assert "Truncated" in result.content
+    assert result.content.count("x") == 200000
+    assert "tokens omitted" not in result.content
 
 
 # ── EditFileTool edge cases ──────────────────────────────────────────────

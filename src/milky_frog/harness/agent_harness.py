@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from milky_frog.checkpoint import CheckpointStore, RunClaimError
 from milky_frog.domain import (
+    DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT,
     ApprovalDecision,
     ApprovalVerdict,
     ResumeError,
@@ -84,6 +85,7 @@ class AgentHarness:
                 self._sandbox_factory(workspace),
                 cancellation=run_request.cancellation,
                 max_calls=run_request.max_model_calls,
+                tool_output_token_limit=run_request.tool_output_token_limit,
             )
 
     async def resume(
@@ -91,6 +93,7 @@ class AgentHarness:
         run_id: str,
         *,
         max_model_calls: int,
+        tool_output_token_limit: int = DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT,
         cancellation: RunCancellation | None = None,
         prompt: str | None = None,
     ) -> RunResult:
@@ -134,6 +137,7 @@ class AgentHarness:
                     resolved.sandbox,
                     cancellation=cancellation,
                     max_calls=max_model_calls,
+                    tool_output_token_limit=tool_output_token_limit,
                 )
         except RunClaimError as error:
             raise ResumeError(str(error)) from error
@@ -144,6 +148,7 @@ class AgentHarness:
         *,
         max_model_calls: int,
         approval: ApprovalVerdict,
+        tool_output_token_limit: int = DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT,
         cancellation: RunCancellation | None = None,
     ) -> RunResult:
         """Release a Run paused on ``WAITING_FOR_APPROVAL`` with the user's verdict."""
@@ -173,6 +178,7 @@ class AgentHarness:
                     resolved.sandbox,
                     cancellation=cancellation,
                     max_calls=max_model_calls,
+                    tool_output_token_limit=tool_output_token_limit,
                 )
         except RunClaimError as error:
             raise ResumeError(str(error)) from error
