@@ -5,7 +5,6 @@ from collections.abc import Callable
 from textual.message import Message
 
 from milky_frog.domain import RunResult, RunStatus, RunUsage
-from milky_frog.handlers.context import HandlerContext
 from milky_frog.events.events import (
     RunAfterModel,
     RunAfterTool,
@@ -21,6 +20,7 @@ from milky_frog.events.events import (
     RunStarted,
 )
 from milky_frog.events.hub import BaseHandler, EventHub
+from milky_frog.handlers.context import HandlerContext
 from milky_frog.ui.messages import (
     AddText,
     AddThinking,

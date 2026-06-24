@@ -5,9 +5,9 @@ from collections.abc import Callable
 
 from textual.message import Message
 
-from milky_frog.handlers.context import HandlerContext
 from milky_frog.events.events import RunAfterTool
 from milky_frog.events.hub import BaseHandler, EventHub
+from milky_frog.handlers.context import HandlerContext
 from milky_frog.ui.messages import BashOutputMsg, GitOutputMsg, GrepOutputMsg
 
 Emit = Callable[[Message], object]
