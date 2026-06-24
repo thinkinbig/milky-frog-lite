@@ -48,10 +48,11 @@ and is safe to commit. Credentials must never be committed.
 
 ## Architecture
 
-The agent loop lives in `harness/runner.py` (`Harness.run`): a linear
+The agent loop lives in `harness/agent_loop.py` (`AgentLoop.advance`): a linear
 model → Tool → model loop bounded by `max_model_calls`, persisting a Checkpoint
 snapshot after meaningful steps and notifying lifecycle Handlers around each model and
-Tool call.
+Tool call. `harness/agent_harness.py` (`AgentHarness`) wraps the loop with run
+start, resume, and approval handling.
 
 `agent_session.py` (`AgentSession`) assembles the concrete pieces from `Settings`
 and owns async resource lifetime plus Run orchestration. `cli/app.py` is the Typer
@@ -82,13 +83,16 @@ Everything else is a **seam** — a `Protocol` with a default adapter, or a smal
 named class — so alternatives can be swapped without touching the Harness:
 
 - `models/` — `Model` protocol, `OpenAIModel` adapter.
-- `harness/tools/` — `Tool` protocol + `ToolRegistry` + built-in Tools.
+- `harness/tools/` — `Tool` protocol + `ToolRegistry` + built-in Tools
+  (`read_file`, `write_file`, `edit_file`, `list_dir`, `grep`, `bash`).
 - `checkpoint/` — `CheckpointStore` protocol, `SqliteCheckpointStore`, `RunSnapshot` serialization (ADR-0014).
 - `harness/state.py` — transcript mutators and `repair_transcript` (interrupted-tool repair).
 - `handlers/` — lifecycle signals + `EventDispatcher` (ADR-0012); only `RunEmitter` publishes.
 - `harness/skills/` — `SkillCatalog`, declarative `SKILL.md` bundles (never executable).
-- `infra/sandbox/` — `LocalSandbox` policy (denies `.git`, `.env`, keys; path-escape
-  guard). A policy boundary, **not** host isolation.
+- `harness/sandbox/` — `Sandbox` protocol + `LocalSandbox`
+  (path deny patterns, subprocess env, `sandbox_factory` injection). Implements the
+  **Local Sandbox** policy from ADR-0003; a policy boundary, **not** host isolation.
+  Future `DockerSandbox` swaps this single seam (ADR-0016).
 
 `domain.py` holds the shared frozen dataclasses / enums (`RunStatus`, `Message`,
 `ToolCall`, `RunRequest`, `RunResult`, …) — the vocabulary every layer uses.
@@ -133,3 +137,4 @@ both):
 
 - [ADR-0012](docs/adr/0012-shrink-handler-registry-to-a-read-only-lifecycle-bus.md) — Handler bus is notify-only.
 - [ADR-0014](docs/adr/0014-persist-checkpoints-as-runstate-snapshots.md) — RunState snapshot persistence.
+- [ADR-0016](docs/adr/0016-unify-command-env-into-sandbox.md) — `CommandEnvironment` merged into `Sandbox` seam.

@@ -24,6 +24,9 @@ CONFIG_TEMPLATE = (
     f"[checkpoint]\n"
     f"retention_days = {DEFAULT_RETENTION_DAYS}\n"
     f"prune_on_start = true\n"
+    f"\n"
+    f"# Additional host env var names forwarded to subprocesses (uppercase identifiers).\n"
+    f'# env_allowlist_extra = ["MY_BUILD_VAR", "DEPLOY_TOKEN"]\n'
 )
 
 
@@ -39,6 +42,7 @@ class ProjectConfig:
     tool_output_token_limit: int = DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT
     checkpoint_retention_days: int = DEFAULT_RETENTION_DAYS
     prune_on_start: bool = True
+    env_allowlist_extra: tuple[str, ...] = ()
 
 
 def project_root(workspace: Path) -> Path:
@@ -119,6 +123,15 @@ def load_project_config(workspace: Path) -> ProjectConfig:
     if not isinstance(prune_on_start, bool):
         prune_on_start = True
 
+    env_allowlist_extra_raw = data.get("env_allowlist_extra", ())
+    if not isinstance(env_allowlist_extra_raw, list):
+        env_allowlist_extra_raw = ()
+    env_allowlist_extra: tuple[str, ...] = tuple(
+        v
+        for v in env_allowlist_extra_raw
+        if isinstance(v, str) and v.isidentifier() and v.isupper()
+    )
+
     return ProjectConfig(
         max_model_calls=max_model_calls,
         context_window=context_window,
@@ -128,4 +141,5 @@ def load_project_config(workspace: Path) -> ProjectConfig:
         tool_output_token_limit=tool_output_token_limit,
         checkpoint_retention_days=checkpoint_retention_days,
         prune_on_start=prune_on_start,
+        env_allowlist_extra=env_allowlist_extra,
     )

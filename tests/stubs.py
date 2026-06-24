@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 from pydantic import BaseModel
 
@@ -19,10 +20,26 @@ from milky_frog.domain import (
 from milky_frog.handlers import EventDispatcher
 from milky_frog.handlers.checkpoint import CheckpointHandler
 from milky_frog.harness.agent_harness import AgentHarness
+from milky_frog.harness.sandbox import LocalSandbox, Sandbox
 from milky_frog.harness.tools import ToolContext, ToolRegistry, ToolResult
 from milky_frog.models import Model
 
 # ── Harness builder ───────────────────────────────────────────────────
+
+
+class RecordingSandboxFactory:
+    """SandboxFactory that records the workspaces it was called with.
+
+    Lets tests assert the Harness actually routes sandbox construction through
+    the injected factory instead of hardcoding ``LocalSandbox``.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[Path] = []
+
+    def __call__(self, workspace: Path) -> Sandbox:
+        self.calls.append(workspace)
+        return LocalSandbox(workspace)
 
 
 def make_harness(
@@ -30,6 +47,7 @@ def make_harness(
     tools: ToolRegistry,
     checkpoints: CheckpointStore,
     handlers: EventDispatcher | None = None,
+    sandbox_factory: RecordingSandboxFactory | None = None,
 ) -> AgentHarness:
     """Build a Harness with checkpointing wired, mirroring production assembly.
 
@@ -39,6 +57,8 @@ def make_harness(
     """
     bus = handlers if handlers is not None else EventDispatcher()
     CheckpointHandler(checkpoints).register(bus)
+    if sandbox_factory is not None:
+        return AgentHarness(model, tools, checkpoints, bus, sandbox_factory=sandbox_factory)
     return AgentHarness(model, tools, checkpoints, bus)
 
 

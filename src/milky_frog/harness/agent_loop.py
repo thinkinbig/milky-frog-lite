@@ -232,7 +232,7 @@ class AgentLoop:
         cancellation: RunCancellation | None,
     ) -> ToolResult:
         tool = self._tools.get(call.name)
-        context = ToolContext(run_id, workspace, cancellation, sandbox)
+        context = ToolContext(run_id, workspace, cancellation, sandbox=sandbox)
         try:
             input_model = tool.input_model.model_validate(call.arguments)
             result: ToolResult = await self._run_cancellable(
@@ -296,7 +296,7 @@ async def execute_tool(
     resolution tool execution before the loop starts).
     """
     tool = tools.get(call.name)
-    context = ToolContext(run_id, workspace, cancellation, sandbox)
+    context = ToolContext(run_id, workspace, cancellation, sandbox=sandbox)
     try:
         input_model = tool.input_model.model_validate(call.arguments)
         result: ToolResult = await AgentLoop._run_cancellable(
