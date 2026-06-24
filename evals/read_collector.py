@@ -17,6 +17,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 
 from milky_frog.handlers import BaseHandler, EventDispatcher, RunAfterTool
+from milky_frog.handlers.context import HandlerContext
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,7 +39,7 @@ class ReadCollector(BaseHandler):
     def register(self, registry: EventDispatcher) -> None:
         registry.on(RunAfterTool)(self._record)
 
-    async def _record(self, event: RunAfterTool) -> None:
+    async def _record(self, event: RunAfterTool, ctx: HandlerContext | None = None) -> None:
         path = event.call.arguments.get("path")
         if not isinstance(path, str):
             return

@@ -265,7 +265,7 @@ async def test_bash_truncated_output(tmp_path: Path) -> None:
     )
 
     assert not result.is_error
-    assert "truncated" in result.content
+    assert "Truncated" in result.content
 
 
 # ── EditFileTool edge cases ──────────────────────────────────────────────

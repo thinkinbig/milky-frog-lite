@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 from typing import Any, Literal, Self
@@ -33,6 +34,8 @@ from milky_frog.settings import LangfuseSettings, Settings
 
 logger = logging.getLogger(__name__)
 
+_FLUSH_TIMEOUT_SECONDS = 10.0
+
 LangfuseLevel = Literal["DEBUG", "DEFAULT", "WARNING", "ERROR"]
 
 _NOTICE_LEVELS: dict[NoticeLevel, LangfuseLevel] = {
@@ -60,6 +63,7 @@ class LangfuseHandler(BaseHandler):
         self._turn_spans: dict[str, Any] = {}
         self._stream_text: dict[str, str] = {}
         self._stream_reasoning: dict[str, str] = {}
+        self._flush_task: asyncio.Task[None] | None = None
 
     def register(self, registry: EventDispatcher) -> None:
         registry.on(RunBeforeStart)(self._before_start)
@@ -91,13 +95,43 @@ class LangfuseHandler(BaseHandler):
     async def aclose(self) -> None:
         if self._client is None:
             return
-        with contextlib.suppress(Exception):
-            self._client.flush()
+        await self._drain_flush()
+        await self._flush_client()
         shutdown = getattr(self._client, "shutdown", None)
         if callable(shutdown):
             with contextlib.suppress(Exception):
-                shutdown()
+                await asyncio.to_thread(shutdown)
         self._client = None
+
+    async def _flush_client(self) -> None:
+        client = self._client
+        if client is None:
+            return
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(client.flush),
+                timeout=_FLUSH_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            logger.warning("Langfuse flush timed out after %gs", _FLUSH_TIMEOUT_SECONDS)
+        except Exception:
+            logger.exception("Langfuse flush error")
+
+    def _schedule_flush(self) -> None:
+        if self._client is None:
+            return
+        task = self._flush_task
+        if task is not None and not task.done():
+            return
+        self._flush_task = asyncio.create_task(self._flush_client())
+
+    async def _drain_flush(self) -> None:
+        task = self._flush_task
+        if task is None:
+            return
+        with contextlib.suppress(Exception):
+            await task
+        self._flush_task = None
 
     @property
     def _langfuse_client(self) -> Langfuse:
@@ -157,8 +191,7 @@ class LangfuseHandler(BaseHandler):
             logger.exception("Langfuse terminal error: %s", type(event).__name__)
         finally:
             self._cleanup_run(event.run_id)
-            with contextlib.suppress(Exception):
-                self._langfuse_client.flush()
+            self._schedule_flush()
 
     def _end_run(self, event: BaseEvent) -> None:
         trace_id = self._trace_ids.get(event.run_id)

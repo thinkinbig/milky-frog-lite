@@ -1,0 +1,45 @@
+[
+  {
+    "task_id": "midlog_error_code",
+    "prompt": "Inspect `build.log` and report the error code on the line containing `CHECKPOINT_FAILED` (the `code=` value only).",
+    "setup_script": "python3 -c \"n=40000; lines=[f'INFO step {i}' for i in range(1,n+1)]; lines[20000]='CHECKPOINT_FAILED code=ERR-7742 module=linker'; open('build.log','w').write('\\n'.join(lines))\"",
+    "expected_in_final_message": "ERR-7742"
+  },
+  {
+    "task_id": "jsonl_failed_count",
+    "prompt": "How many lines in `events.jsonl` contain `\"status\": \"failed\"`? Reply with the count only.",
+    "setup_script": "python3 -c \"import json; lines=[json.dumps({'id':i,'status':'failed' if i%541==0 else 'ok'}) for i in range(20000)]; open('events.jsonl','w').write('\\n'.join(lines))\"",
+    "expected_in_final_message": "37"
+  },
+  {
+    "task_id": "nested_sig_find",
+    "prompt": "Under `node_modules/@acme/widget/lib/internal`, is there a file ending in `.sig`? If so, give its exact filename.",
+    "setup_script": "python3 -c \"from pathlib import Path; base=Path('node_modules/@acme/widget/lib/internal'); base.mkdir(parents=True, exist_ok=True); [ (base/'trace_05000.sig').write_text('x') if i==5000 else (base/f'trace_{i:05d}.bin').write_text('x') for i in range(1,10001) ]\"",
+    "expected_in_final_message": "trace_05000.sig"
+  },
+  {
+    "task_id": "bundle_mid_secret",
+    "prompt": "The file `dist/app.bundle.js` contains a marker `SECRET=` buried in the file (not at the very end). What is the secret value after `SECRET=`?",
+    "setup_script": "python3 -c \"from pathlib import Path; body='A'*4000000; mid=len(body)//2; text=body[:mid]+'SECRET=MID-8844'+body[mid:]; Path('dist').mkdir(exist_ok=True); open('dist/app.bundle.js','w').write('//bundle\\n'+text)\"",
+    "expected_in_final_message": "MID-8844"
+  },
+  {
+    "task_id": "exact_import_count",
+    "prompt": "Which `.js` file in the workspace contains exactly **8001** lines that include the word `import`?",
+    "setup_script": "python3 -c \"open('file_a.js','w').write('import x;\\n'*7999); open('file_b.js','w').write('import x;\\n'*8000); open('file_target.js','w').write('import x;\\n'*8001); open('file_c.js','w').write('import x;\\n'*8002)\"",
+    "expected_in_final_message": "file_target.js"
+  },
+  {
+    "task_id": "git_diff_nested_field",
+    "prompt": "Run `git diff package-lock.json`. What is the value of `legacy-peer-deps` in that diff?",
+    "setup_script": "git init && git config user.email e@e.com && git config user.name e && echo '{}' > package-lock.json && git add . && git commit -m init && python3 -c \"lines=['  \\\"dep-%d\\\": \\\"x\\\",' % i for i in range(20000)]; lines[10000]='  \\\"legacy-peer-deps\\\": \\\"override-9\\\",'; open('package-lock.json','w').write('{\\n'+ '\\n'.join(lines) + '\\n}\\n')\"",
+    "expected_in_final_message": "override-9"
+  },
+  {
+    "task_id": "dual_log_secrets",
+    "prompt": "Read `logs/a.log` and `logs/b.log`. What are the values of `CODE_A` and `CODE_B`?",
+    "setup_script": "python3 -c \"from pathlib import Path; Path('logs').mkdir(); la=[f'INFO {i}' for i in range(1,80001)]; la[-1]='END CODE_A=ALPHA-91'; lb=[f'TRACE {i}' for i in range(1,80001)]; lb[40000]='MIDDLE CODE_B=BRAVO-42 marker'; open('logs/a.log','w').write('\\n'.join(la)); open('logs/b.log','w').write('\\n'.join(lb))\"",
+    "expected_in_final_message": ["ALPHA-91", "BRAVO-42"],
+    "expected_match": "all"
+  }
+]

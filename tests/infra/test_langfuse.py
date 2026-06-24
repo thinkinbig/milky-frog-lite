@@ -213,6 +213,8 @@ async def test_langfuse_terminal_event_flushes_and_cleans_up(
     result = RunResult("run-1", RunStatus.COMPLETED, "done", 1)
     await registry.notify(RunCompleted(run_id="run-1", result=result, state=_run_state()))
 
+    assert handler._flush_task is not None
+    await handler._flush_task
     assert client.flushed == 1
     assert "run-1" not in handler._trace_ids
 

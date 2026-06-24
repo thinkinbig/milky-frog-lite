@@ -1,65 +1,135 @@
 [
   {
-    "task_id": "unify-cancellation-via-generic-run-cancellable",
-    "reads_total": 7,
-    "reads_ok_unique": 7,
-    "in_scope": 3,
-    "out_of_scope": 4,
-    "scope_precision": 0.429,
-    "noise_rate": 0.571,
-    "failed_reads": 0,
-    "duplicate_reads": 0,
-    "edits_total": 2,
-    "reads_per_edit": 3.5,
-    "completed": true,
-    "relevant_hit": 1,
-    "relevant_total": 1,
-    "out_of_scope_paths": [
-      "src/milky_frog/domain.py",
-      "src/milky_frog/harness/tools/base.py",
-      "tests/harness/test_lifecycle.py",
-      "tests/stubs.py"
+    "task_id": "massive_git_diff",
+    "passed": true,
+    "final_message": "The diff for `package-lock.json` shows **`\"final\": \"y\"`** — the value is the string `\"y\"`.",
+    "expected": "\"final\": \"y\" | \"y\"",
+    "model_calls": 4,
+    "tool_calls": [
+      {
+        "name": "bash",
+        "arguments": {
+          "command": "git diff package-lock.json"
+        },
+        "is_error": true,
+        "summary": "bash: git diff package-lock.json"
+      },
+      {
+        "name": "bash",
+        "arguments": {
+          "command": "git diff --stat package-lock.json"
+        },
+        "is_error": false,
+        "summary": "bash: git diff --stat package-lock.json"
+      },
+      {
+        "name": "bash",
+        "arguments": {
+          "command": "git diff package-lock.json | grep -i '\"final\"' "
+        },
+        "is_error": false,
+        "summary": "bash: git diff package-lock.json | grep -i '\"final\"'"
+      }
     ]
   },
   {
-    "task_id": "add-git-tool-for-running-git-subcommands-in-work",
-    "reads_total": 10,
-    "reads_ok_unique": 9,
-    "in_scope": 7,
-    "out_of_scope": 2,
-    "scope_precision": 0.778,
-    "noise_rate": 0.222,
-    "failed_reads": 1,
-    "duplicate_reads": 0,
-    "edits_total": 0,
-    "reads_per_edit": null,
-    "completed": false,
-    "relevant_hit": 1,
-    "relevant_total": 1,
-    "out_of_scope_paths": [
-      "src/milky_frog/domain.py",
-      "CLAUDE.md"
+    "task_id": "massive_file_read",
+    "passed": true,
+    "final_message": "The secret code at the very end of `dist/main.bundle.js` is **`998877`**.",
+    "expected": "998877",
+    "model_calls": 2,
+    "tool_calls": [
+      {
+        "name": "read_file",
+        "arguments": {
+          "path": "dist/main.bundle.js"
+        },
+        "is_error": false,
+        "summary": "read_file: dist/main.bundle.js"
+      }
     ]
   },
   {
-    "task_id": "inject-sandboxfactory-into-harness-simplify-sqli",
-    "reads_total": 10,
-    "reads_ok_unique": 10,
-    "in_scope": 7,
-    "out_of_scope": 3,
-    "scope_precision": 0.7,
-    "noise_rate": 0.3,
-    "failed_reads": 0,
-    "duplicate_reads": 0,
-    "edits_total": 2,
-    "reads_per_edit": 5.0,
-    "completed": true,
-    "relevant_hit": 4,
-    "relevant_total": 4,
-    "out_of_scope_paths": [
-      "src/milky_frog/infra/sandbox/local.py",
-      "src/milky_frog/checkpoint/__init__.py",
-      "src/milky_frog/checkpoint/base.py"
+    "task_id": "massive_dir_list",
+    "passed": true,
+    "final_message": "The `node_modules` directory contains 10,000 `.txt` files (`pkg_00001.txt` through `pkg_10000.txt`). \n\nYes, there is one file ending with `.secret`:\n\n**`pkg_05000.secret`**",
+    "expected": "pkg_05000.secret",
+    "model_calls": 3,
+    "tool_calls": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "node_modules"
+        },
+        "is_error": false,
+        "summary": "list_dir: node_modules"
+      },
+      {
+        "name": "bash",
+        "arguments": {
+          "command": "find node_modules -name '*.secret' -maxdepth 1 2>/dev/null"
+        },
+        "is_error": false,
+        "summary": "bash: find node_modules -name '*.secret' -maxdepth 1 2>/dev/null"
+      }
+    ]
+  },
+  {
+    "task_id": "massive_grep",
+    "passed": true,
+    "final_message": "The file with the most `import` occurrences is **`file_winner.js`** — it contains **1001** lines with the word `import`, compared to 1000 in each of the other files (`file_0.js` through `file_4.js`).",
+    "expected": "file_winner.js",
+    "model_calls": 4,
+    "tool_calls": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "is_error": false,
+        "summary": "list_dir: ."
+      },
+      {
+        "name": "bash",
+        "arguments": {
+          "command": "grep -c 'import' file_*.js"
+        },
+        "is_error": false,
+        "summary": "bash: grep -c 'import' file_*.js"
+      },
+      {
+        "name": "bash",
+        "arguments": {
+          "command": "head -5 file_winner.js && echo \"...\" && tail -3 file_winner.js"
+        },
+        "is_error": false,
+        "summary": "bash: head -5 file_winner.js && echo \"...\" && tail -3 file_winner.js"
+      }
+    ]
+  },
+  {
+    "task_id": "noisy_build_log",
+    "passed": true,
+    "final_message": "The exact error message printed at the very end of the log is:\n\n**`FATAL ERROR: Out of memory during linking.`**",
+    "expected": "FATAL ERROR: Out of memory during linking",
+    "model_calls": 3,
+    "tool_calls": [
+      {
+        "name": "list_dir",
+        "arguments": {
+          "path": "."
+        },
+        "is_error": false,
+        "summary": "list_dir: ."
+      },
+      {
+        "name": "bash",
+        "arguments": {
+          "command": "./build.sh 2>&1"
+        },
+        "is_error": true,
+        "summary": "bash: ./build.sh 2>&1"
+      }
     ]
   }
 ]

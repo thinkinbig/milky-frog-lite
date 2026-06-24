@@ -24,7 +24,8 @@ def test_system_prompt_includes_base_identity(tmp_path: Path) -> None:
     prompt = system_prompt(workspace)
 
     assert "Milky Frog" in prompt
-    assert "grep first" not in prompt
+    assert "<rules>" in prompt
+    assert "prefer narrow commands" in prompt.lower()
     assert f"Current working directory: {workspace.resolve().as_posix()}" in prompt
 
 
