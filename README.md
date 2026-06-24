@@ -76,7 +76,7 @@ src/milky_frog/
 ├── agent_session.py # async runtime assembly and Run orchestration
 ├── checkpoint/   # CheckpointStore seam, RunSnapshot JSON, SQLite adapter
 ├── cli/          # Typer command surface
-├── handlers/     # lifecycle signals, EventDispatcher (RunEmitter publishes)
+├── handlers/     # lifecycle signals, EventHub (Harness publishes)
 ├── harness/      # Harness loop, Tool registry, Sandbox, state, Skill catalog
 ├── infra/        # SQLite, OpenAI, observability adapters
 ├── models/       # model-provider seam

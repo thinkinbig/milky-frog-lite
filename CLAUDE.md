@@ -67,7 +67,7 @@ qualifier, and never merge them into one base type:
 | Lane | Where | Lifetime | Purpose |
 |------|-------|----------|---------|
 | **Checkpoint snapshot** | `checkpoint/snapshot.py`, `runs.state_json` | Durable (SQLite) | Resume source of truth |
-| **Lifecycle signal** | `handlers/events.py`, dispatcher in `handlers/dispatcher.py` (`EventDispatcher`) | Ephemeral (in-process) | UI streaming, Langfuse (`notify`) |
+| **Lifecycle signal** | `handlers/events.py`, hub in `handlers/hub.py` (`EventHub`) | Ephemeral (in-process) | UI streaming, Langfuse (`broadcast`) |
 | **Handler control return** | `HandlerResult` in `handlers/context.py` | Per-step | Authorization, context build, token budget |
 
 RunState snapshots are serialized via Pydantic models in `checkpoint/snapshot.py` (ADR-0014).
@@ -92,7 +92,7 @@ named class — so alternatives can be swapped without touching the Harness:
   (`read_file`, `write_file`, `edit_file`, `list_dir`, `grep`, `bash`).
 - `checkpoint/` — `CheckpointStore` protocol, `SqliteCheckpointStore`, `RunSnapshot` serialization (ADR-0014).
 - `harness/state.py` — transcript mutators and `repair_transcript` (interrupted-tool repair).
-- `handlers/` — lifecycle signals + `EventDispatcher` (ADR-0012); only `RunEmitter` publishes.
+- `handlers/` — lifecycle signals + `EventHub` (ADR-0012); the Harness publishes.
 - `ui/protocols.py` — `RunAdvancer`, `RunCanceller` for the interactive loop.
 - `harness/skills/` — `SkillCatalog`, declarative `SKILL.md` bundles (never executable).
 - `harness/sandbox/` — `Sandbox` protocol + `LocalSandbox`

@@ -4,29 +4,28 @@ from pathlib import Path
 
 import pytest
 
+from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import RunResult, RunState, RunStatus, ToolCall
 from milky_frog.handlers import (
     CheckpointHandler,
-    EventDispatcher,
+    EventHub,
     RunCancelled,
     RunFailed,
     RunNotice,
     RunTurnEnd,
     RunTurnStart,
 )
-from milky_frog.harness.emitter import RunEmitter
-from milky_frog.infra.checkpoint.sqlite import SqliteCheckpointStore
 
 
-def _make_emitter(store: SqliteCheckpointStore, registry: EventDispatcher) -> RunEmitter:
+def _make_dispatcher(store: SqliteCheckpointStore, registry: EventHub) -> EventHub:
     CheckpointHandler(store).register(registry)
-    return RunEmitter(registry)
+    return registry
 
 
 @pytest.mark.asyncio
 async def test_run_cancelled_persists_checkpoint_before_handler(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    registry = EventDispatcher()
+    registry = EventHub()
     checkpoint_seen = False
 
     @registry.on(RunCancelled)
@@ -35,11 +34,11 @@ async def test_run_cancelled_persists_checkpoint_before_handler(tmp_path: Path) 
         run = store.get_run(_event.run_id)
         checkpoint_seen = run is not None and run.status is RunStatus.CANCELLED
 
-    emitter = _make_emitter(store, registry)
+    dispatcher = _make_dispatcher(store, registry)
     state = RunState(run_id="run-1", workspace=tmp_path)
     store.create_run(state.run_id, tmp_path)
 
-    await emitter.run_cancelled(
+    await dispatcher.run_cancelled(
         state,
         RunResult(state.run_id, RunStatus.CANCELLED, "cancelled", 0),
     )
@@ -50,7 +49,7 @@ async def test_run_cancelled_persists_checkpoint_before_handler(tmp_path: Path) 
 @pytest.mark.asyncio
 async def test_run_failed_persists_checkpoint_before_handler(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    registry = EventDispatcher()
+    registry = EventHub()
     checkpoint_seen = False
 
     @registry.on(RunFailed)
@@ -59,11 +58,11 @@ async def test_run_failed_persists_checkpoint_before_handler(tmp_path: Path) -> 
         run = store.get_run(_event.run_id)
         checkpoint_seen = run is not None and run.status is RunStatus.FAILED
 
-    emitter = _make_emitter(store, registry)
+    dispatcher = _make_dispatcher(store, registry)
     state = RunState(run_id="run-2", workspace=tmp_path)
     store.create_run(state.run_id, tmp_path)
 
-    await emitter.run_failed(
+    await dispatcher.run_failed(
         state,
         RunResult(state.run_id, RunStatus.FAILED, "RuntimeError: boom", 0),
     )
@@ -74,18 +73,18 @@ async def test_run_failed_persists_checkpoint_before_handler(tmp_path: Path) -> 
 @pytest.mark.asyncio
 async def test_finish_failed_returns_result_and_notifies(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    registry = EventDispatcher()
+    registry = EventHub()
     failed: list[RunFailed] = []
 
     @registry.on(RunFailed)
     async def record(event: RunFailed, _ctx=None) -> None:
         failed.append(event)
 
-    emitter = _make_emitter(store, registry)
+    dispatcher = _make_dispatcher(store, registry)
     state = RunState(run_id="run-3", workspace=tmp_path)
     store.create_run(state.run_id, tmp_path)
 
-    result = await emitter.finish_failed(state, RuntimeError("boom"))
+    result = await dispatcher.finish_failed(state, RuntimeError("boom"))
 
     assert result.status is RunStatus.FAILED
     assert result.final_message == "RuntimeError: boom"
@@ -95,15 +94,15 @@ async def test_finish_failed_returns_result_and_notifies(tmp_path: Path) -> None
 
 @pytest.mark.asyncio
 async def test_turn_started_notifies_handler(tmp_path: Path) -> None:
-    registry = EventDispatcher()
+    registry = EventHub()
     seen: list[RunTurnStart] = []
 
     @registry.on(RunTurnStart)
     async def record(event: RunTurnStart, _ctx=None) -> None:
         seen.append(event)
 
-    emitter = RunEmitter(registry)
-    await emitter.turn_started("run-1", model_call=3)
+    dispatcher = registry
+    await dispatcher.turn_started("run-1", model_call=3)
 
     assert len(seen) == 1
     assert seen[0].run_id == "run-1"
@@ -112,15 +111,15 @@ async def test_turn_started_notifies_handler(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_turn_ended_notifies_handler(tmp_path: Path) -> None:
-    registry = EventDispatcher()
+    registry = EventHub()
     seen: list[RunTurnEnd] = []
 
     @registry.on(RunTurnEnd)
     async def record(event: RunTurnEnd, _ctx=None) -> None:
         seen.append(event)
 
-    emitter = RunEmitter(registry)
-    await emitter.turn_ended("run-1", model_call=2)
+    dispatcher = registry
+    await dispatcher.turn_ended("run-1", model_call=2)
 
     assert len(seen) == 1
     assert seen[0].run_id == "run-1"
@@ -129,15 +128,15 @@ async def test_turn_ended_notifies_handler(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_run_notice_notifies_handler() -> None:
-    registry = EventDispatcher()
+    registry = EventHub()
     seen: list[RunNotice] = []
 
     @registry.on(RunNotice)
     async def record(event: RunNotice, _ctx=None) -> None:
         seen.append(event)
 
-    emitter = RunEmitter(registry)
-    await emitter.run_notice("run-1", "retrying model connection", level="warning")
+    dispatcher = registry
+    await dispatcher.run_notice("run-1", "retrying model connection", level="warning")
 
     assert len(seen) == 1
     assert seen[0].message == "retrying model connection"
@@ -155,8 +154,8 @@ async def test_run_before_start_collects_system_prompt_sections(
     from milky_frog.handlers.context import SystemPromptSection
     from milky_frog.handlers.events import RunBeforeStart
 
-    registry = EventDispatcher()
-    emitter = RunEmitter(registry)
+    registry = EventHub()
+    dispatcher = registry
 
     @registry.on(RunBeforeStart)
     async def inject_skill(event: RunBeforeStart, _ctx=None) -> SystemPromptSection | None:
@@ -164,7 +163,7 @@ async def test_run_before_start_collects_system_prompt_sections(
             return SystemPromptSection(content="custom skill content")
         return None
 
-    sections = await emitter.run_before_start(
+    sections = await dispatcher.run_before_start(
         "run-1",
         RunRequest(prompt="hi", workspace=tmp_path),
         tmp_path,
@@ -178,8 +177,8 @@ async def test_run_started_notifies_handlers(tmp_path: Path) -> None:
     from milky_frog.domain import RunRequest, RunState
     from milky_frog.handlers.events import RunStarted
 
-    registry = EventDispatcher()
-    emitter = RunEmitter(registry)
+    registry = EventHub()
+    dispatcher = registry
     seen: list[RunStarted] = []
 
     @registry.on(RunStarted)
@@ -188,7 +187,7 @@ async def test_run_started_notifies_handlers(tmp_path: Path) -> None:
 
     state = RunState(run_id="run-1", workspace=tmp_path)
     request = RunRequest(prompt="hi", workspace=tmp_path)
-    await emitter.run_started("run-1", request, state)
+    await dispatcher.run_started("run-1", request, state)
 
     assert len(seen) == 1
     assert seen[0].run_id == "run-1"
@@ -201,15 +200,15 @@ async def test_before_resume_notifies_handlers(tmp_path: Path) -> None:
     from milky_frog.domain import RunStatus
     from milky_frog.handlers.events import RunBeforeResume
 
-    registry = EventDispatcher()
-    emitter = RunEmitter(registry)
+    registry = EventHub()
+    dispatcher = registry
     seen: list[RunBeforeResume] = []
 
     @registry.on(RunBeforeResume)
     async def record(event: RunBeforeResume, _ctx=None) -> None:
         seen.append(event)
 
-    await emitter.before_resume(
+    await dispatcher.before_resume(
         "run-1", prompt="continue", status=RunStatus.PAUSED_LIMIT, workspace=tmp_path
     )
 
@@ -225,8 +224,8 @@ async def test_before_model_notifies_handlers() -> None:
     from milky_frog.domain import Message, MessageRole, ModelRequest
     from milky_frog.handlers.events import RunBeforeModel
 
-    registry = EventDispatcher()
-    emitter = RunEmitter(registry)
+    registry = EventHub()
+    dispatcher = registry
     seen: list[RunBeforeModel] = []
 
     @registry.on(RunBeforeModel)
@@ -237,7 +236,7 @@ async def test_before_model_notifies_handlers() -> None:
         messages=(Message(role=MessageRole.USER, content="hi"),),
         tools=(),
     )
-    await emitter.before_model("run-1", request)
+    await dispatcher.before_model("run-1", request)
 
     assert len(seen) == 1
     assert seen[0].run_id == "run-1"
@@ -249,8 +248,8 @@ async def test_on_model_chunk_notifies_handlers() -> None:
     from milky_frog.domain import Message, MessageRole, ModelRequest, TextDelta
     from milky_frog.handlers.events import RunModelChunk
 
-    registry = EventDispatcher()
-    emitter = RunEmitter(registry)
+    registry = EventHub()
+    dispatcher = registry
     seen: list[RunModelChunk] = []
 
     @registry.on(RunModelChunk)
@@ -261,7 +260,7 @@ async def test_on_model_chunk_notifies_handlers() -> None:
         messages=(Message(role=MessageRole.USER, content="hi"),),
         tools=(),
     )
-    await emitter.on_model_chunk("run-1", request, TextDelta("hello"))
+    await dispatcher.on_model_chunk("run-1", request, TextDelta("hello"))
 
     assert len(seen) == 1
     assert seen[0].chunk.content == "hello"
@@ -272,8 +271,8 @@ async def test_on_model_reasoning_notifies_handlers() -> None:
     from milky_frog.domain import Message, MessageRole, ModelRequest, ReasoningDelta
     from milky_frog.handlers.events import RunModelReasoning
 
-    registry = EventDispatcher()
-    emitter = RunEmitter(registry)
+    registry = EventHub()
+    dispatcher = registry
     seen: list[RunModelReasoning] = []
 
     @registry.on(RunModelReasoning)
@@ -284,7 +283,7 @@ async def test_on_model_reasoning_notifies_handlers() -> None:
         messages=(Message(role=MessageRole.USER, content="hi"),),
         tools=(),
     )
-    await emitter.on_model_reasoning("run-1", request, ReasoningDelta("thinking..."))
+    await dispatcher.on_model_reasoning("run-1", request, ReasoningDelta("thinking..."))
 
     assert len(seen) == 1
     assert seen[0].chunk.content == "thinking..."
@@ -302,8 +301,8 @@ async def test_after_model_notifies_handlers(tmp_path: Path) -> None:
     )
     from milky_frog.handlers.events import RunAfterModel
 
-    registry = EventDispatcher()
-    emitter = RunEmitter(registry)
+    registry = EventHub()
+    dispatcher = registry
     seen: list[RunAfterModel] = []
 
     @registry.on(RunAfterModel)
@@ -316,7 +315,7 @@ async def test_after_model_notifies_handlers(tmp_path: Path) -> None:
     )
     response = ModelResponse(content="hello", usage=TokenUsage(input_tokens=10, output_tokens=5))
     state = RunState(run_id="run-1", workspace=tmp_path)
-    await emitter.after_model("run-1", request, response, state)
+    await dispatcher.after_model("run-1", request, response, state)
 
     assert len(seen) == 1
     assert seen[0].response.content == "hello"
@@ -327,8 +326,8 @@ async def test_after_model_notifies_handlers(tmp_path: Path) -> None:
 async def test_before_tool_notifies_handlers() -> None:
     from milky_frog.handlers.events import RunBeforeTool
 
-    registry = EventDispatcher()
-    emitter = RunEmitter(registry)
+    registry = EventHub()
+    dispatcher = registry
     seen: list[RunBeforeTool] = []
 
     @registry.on(RunBeforeTool)
@@ -336,7 +335,7 @@ async def test_before_tool_notifies_handlers() -> None:
         seen.append(event)
 
     call = ToolCall("call-1", "echo", {"text": "hello"})
-    await emitter.before_tool("run-1", call)
+    await dispatcher.before_tool("run-1", call)
 
     assert len(seen) == 1
     assert seen[0].call.name == "echo"
@@ -347,8 +346,8 @@ async def test_after_tool_notifies_handlers(tmp_path: Path) -> None:
     from milky_frog.domain import RunState, ToolResult
     from milky_frog.handlers.events import RunAfterTool
 
-    registry = EventDispatcher()
-    emitter = RunEmitter(registry)
+    registry = EventHub()
+    dispatcher = registry
     seen: list[RunAfterTool] = []
 
     @registry.on(RunAfterTool)
@@ -358,7 +357,7 @@ async def test_after_tool_notifies_handlers(tmp_path: Path) -> None:
     call = ToolCall("call-1", "echo", {"text": "hello"})
     result = ToolResult("hello back")
     state = RunState(run_id="run-1", workspace=tmp_path)
-    await emitter.after_tool("run-1", call, result, state)
+    await dispatcher.after_tool("run-1", call, result, state)
 
     assert len(seen) == 1
     assert seen[0].call.name == "echo"
@@ -371,8 +370,8 @@ async def test_finish_completed_returns_result_and_notifies(tmp_path: Path) -> N
     from milky_frog.domain import RunStatus
     from milky_frog.handlers.events import RunCompleted
 
-    registry = EventDispatcher()
-    emitter = RunEmitter(registry)
+    registry = EventHub()
+    dispatcher = registry
     seen: list[RunCompleted] = []
 
     @registry.on(RunCompleted)
@@ -380,7 +379,7 @@ async def test_finish_completed_returns_result_and_notifies(tmp_path: Path) -> N
         seen.append(event)
 
     state = RunState(run_id="run-1", workspace=tmp_path, completed_model_calls=3)
-    result = await emitter.finish_completed(state, "all done")
+    result = await dispatcher.finish_completed(state, "all done")
 
     assert result.status is RunStatus.COMPLETED
     assert result.final_message == "all done"
@@ -394,8 +393,8 @@ async def test_finish_paused_returns_result_and_notifies(tmp_path: Path) -> None
     from milky_frog.domain import RunStatus
     from milky_frog.handlers.events import RunPaused
 
-    registry = EventDispatcher()
-    emitter = RunEmitter(registry)
+    registry = EventHub()
+    dispatcher = registry
     seen: list[RunPaused] = []
 
     @registry.on(RunPaused)
@@ -403,7 +402,7 @@ async def test_finish_paused_returns_result_and_notifies(tmp_path: Path) -> None
         seen.append(event)
 
     state = RunState(run_id="run-1", workspace=tmp_path, completed_model_calls=5)
-    result = await emitter.finish_paused(state, max_model_calls=10)
+    result = await dispatcher.finish_paused(state, max_model_calls=10)
 
     assert result.status is RunStatus.PAUSED_LIMIT
     assert "model call limit" in result.final_message
@@ -417,8 +416,8 @@ async def test_finish_cancelled_returns_result_and_notifies(tmp_path: Path) -> N
     from milky_frog.domain import RunStatus
     from milky_frog.handlers.events import RunCancelled
 
-    registry = EventDispatcher()
-    emitter = RunEmitter(registry)
+    registry = EventHub()
+    dispatcher = registry
     seen: list[RunCancelled] = []
 
     @registry.on(RunCancelled)
@@ -426,7 +425,7 @@ async def test_finish_cancelled_returns_result_and_notifies(tmp_path: Path) -> N
         seen.append(event)
 
     state = RunState(run_id="run-1", workspace=tmp_path, completed_model_calls=2)
-    result = await emitter.finish_cancelled(state, reason="user cancelled")
+    result = await dispatcher.finish_cancelled(state, reason="user cancelled")
 
     assert result.status is RunStatus.CANCELLED
     assert result.final_message == "user cancelled"
@@ -440,8 +439,8 @@ async def test_finish_approval_needed_returns_result_and_notifies(tmp_path: Path
     from milky_frog.domain import RunStatus
     from milky_frog.handlers.events import RunPaused
 
-    registry = EventDispatcher()
-    emitter = RunEmitter(registry)
+    registry = EventHub()
+    dispatcher = registry
     seen: list[RunPaused] = []
 
     @registry.on(RunPaused)
@@ -450,7 +449,7 @@ async def test_finish_approval_needed_returns_result_and_notifies(tmp_path: Path
 
     state = RunState(run_id="run-1", workspace=tmp_path, completed_model_calls=1)
     call = ToolCall("call-1", "write", {"path": "main.py"})
-    result = await emitter.finish_approval_needed(state, call)
+    result = await dispatcher.finish_approval_needed(state, call)
 
     assert result.status is RunStatus.WAITING_FOR_APPROVAL
     assert "write" in result.final_message
@@ -463,10 +462,10 @@ async def test_finish_approval_needed_returns_result_and_notifies(tmp_path: Path
 @pytest.mark.asyncio
 async def test_finish_approval_needed_format_for_bash(tmp_path: Path) -> None:
     state = RunState(run_id="run-1", workspace=tmp_path)
-    emitter = RunEmitter(EventDispatcher())
+    dispatcher = EventHub()
 
     call = ToolCall("call-1", "bash", {"command": "rm -rf /"})
-    result = await emitter.finish_approval_needed(state, call)
+    result = await dispatcher.finish_approval_needed(state, call)
 
     assert result.status is RunStatus.WAITING_FOR_APPROVAL
     assert "bash" in result.final_message
@@ -478,10 +477,10 @@ async def test_finish_approval_needed_format_for_bash_no_command(
     tmp_path: Path,
 ) -> None:
     state = RunState(run_id="run-1", workspace=tmp_path)
-    emitter = RunEmitter(EventDispatcher())
+    dispatcher = EventHub()
 
     call = ToolCall("call-1", "bash", {})
-    result = await emitter.finish_approval_needed(state, call)
+    result = await dispatcher.finish_approval_needed(state, call)
 
     assert result.status is RunStatus.WAITING_FOR_APPROVAL
     assert "bash" in result.final_message
@@ -492,10 +491,10 @@ async def test_finish_approval_needed_format_for_read_with_path(
     tmp_path: Path,
 ) -> None:
     state = RunState(run_id="run-1", workspace=tmp_path)
-    emitter = RunEmitter(EventDispatcher())
+    dispatcher = EventHub()
 
     call = ToolCall("call-1", "read", {"path": "secret.txt"})
-    result = await emitter.finish_approval_needed(state, call)
+    result = await dispatcher.finish_approval_needed(state, call)
 
     assert result.status is RunStatus.WAITING_FOR_APPROVAL
     assert "read" in result.final_message
@@ -507,10 +506,10 @@ async def test_finish_approval_needed_format_for_read_no_path(
     tmp_path: Path,
 ) -> None:
     state = RunState(run_id="run-1", workspace=tmp_path)
-    emitter = RunEmitter(EventDispatcher())
+    dispatcher = EventHub()
 
     call = ToolCall("call-1", "read", {})
-    result = await emitter.finish_approval_needed(state, call)
+    result = await dispatcher.finish_approval_needed(state, call)
 
     assert result.status is RunStatus.WAITING_FOR_APPROVAL
     assert "read" in result.final_message
@@ -521,10 +520,10 @@ async def test_finish_approval_needed_format_for_write_no_path(
     tmp_path: Path,
 ) -> None:
     state = RunState(run_id="run-1", workspace=tmp_path)
-    emitter = RunEmitter(EventDispatcher())
+    dispatcher = EventHub()
 
     call = ToolCall("call-1", "write", {})
-    result = await emitter.finish_approval_needed(state, call)
+    result = await dispatcher.finish_approval_needed(state, call)
 
     assert result.status is RunStatus.WAITING_FOR_APPROVAL
     assert "write" in result.final_message
@@ -535,10 +534,10 @@ async def test_finish_approval_needed_format_for_edit_with_path(
     tmp_path: Path,
 ) -> None:
     state = RunState(run_id="run-1", workspace=tmp_path)
-    emitter = RunEmitter(EventDispatcher())
+    dispatcher = EventHub()
 
     call = ToolCall("call-1", "edit", {"path": "main.py"})
-    result = await emitter.finish_approval_needed(state, call)
+    result = await dispatcher.finish_approval_needed(state, call)
 
     assert result.status is RunStatus.WAITING_FOR_APPROVAL
     assert "edit" in result.final_message
@@ -550,10 +549,10 @@ async def test_finish_approval_needed_format_for_edit_no_path(
     tmp_path: Path,
 ) -> None:
     state = RunState(run_id="run-1", workspace=tmp_path)
-    emitter = RunEmitter(EventDispatcher())
+    dispatcher = EventHub()
 
     call = ToolCall("call-1", "edit", {})
-    result = await emitter.finish_approval_needed(state, call)
+    result = await dispatcher.finish_approval_needed(state, call)
 
     assert result.status is RunStatus.WAITING_FOR_APPROVAL
     assert "edit" in result.final_message
@@ -564,10 +563,10 @@ async def test_finish_approval_needed_format_for_generic_tool_with_preview(
     tmp_path: Path,
 ) -> None:
     state = RunState(run_id="run-1", workspace=tmp_path)
-    emitter = RunEmitter(EventDispatcher())
+    dispatcher = EventHub()
 
     call = ToolCall("call-1", "my_tool", {"pattern": "def foo", "path": "src/"})
-    result = await emitter.finish_approval_needed(state, call)
+    result = await dispatcher.finish_approval_needed(state, call)
 
     assert result.status is RunStatus.WAITING_FOR_APPROVAL
     assert "my_tool" in result.final_message
@@ -579,10 +578,10 @@ async def test_finish_approval_needed_format_for_generic_tool_no_preview(
     tmp_path: Path,
 ) -> None:
     state = RunState(run_id="run-1", workspace=tmp_path)
-    emitter = RunEmitter(EventDispatcher())
+    dispatcher = EventHub()
 
     call = ToolCall("call-1", "my_tool", {"count": 42})
-    result = await emitter.finish_approval_needed(state, call)
+    result = await dispatcher.finish_approval_needed(state, call)
 
     assert result.status is RunStatus.WAITING_FOR_APPROVAL
     assert "my_tool" in result.final_message

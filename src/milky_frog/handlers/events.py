@@ -160,9 +160,29 @@ class RunNotice(BaseEvent):
     """Ephemeral user-facing message during a Run.
 
     Not a lifecycle phase — examples: model connection retries, rate-limit
-    warnings. Published by ``RunEmitter``; UI Handlers subscribe and render.
+    warnings. Published by the Harness via ``EventHub``; UI Handlers subscribe and render.
     Not checkpointed.
     """
 
     message: str
     level: NoticeLevel = "info"
+
+
+LIFECYCLE_EVENT_TYPES: tuple[type[BaseEvent], ...] = (
+    RunBeforeStart,
+    RunBeforeResume,
+    RunStarted,
+    RunBeforeModel,
+    RunModelReasoning,
+    RunModelChunk,
+    RunAfterModel,
+    RunBeforeTool,
+    RunAfterTool,
+    RunTurnStart,
+    RunTurnEnd,
+    RunCompleted,
+    RunPaused,
+    RunCancelled,
+    RunFailed,
+    RunNotice,
+)

@@ -21,7 +21,7 @@ from milky_frog.domain import (
     ToolRunCancelled,
     is_cancelled,
 )
-from milky_frog.harness.emitter import RunEmitter
+from milky_frog.handlers import EventHub
 from milky_frog.harness.model_retry import (
     MODEL_RETRY_BASE_DELAY_S,
     MODEL_RETRY_MAX_ATTEMPTS,
@@ -37,20 +37,19 @@ from milky_frog.models import Model
 class AgentLoop:
     """Pure async model → tool → model loop.
 
-    Drives the loop, emits lifecycle+streaming events directly to the shared
-    ``EventDispatcher`` bus (via ``RunEmitter``).  Knows nothing about
-    checkpoints or project config — those are handled by bus subscribers
-    (``CheckpointHandler``, ``PolicyHandler``).
+    Drives the loop and publishes lifecycle+streaming events on the shared
+    ``EventHub``.  Knows nothing about checkpoints or project config —
+    those are handled by bus subscribers (``CheckpointHandler``, ``PolicyHandler``).
 
     ``advance()`` takes a ``RunState`` and returns a ``RunResult`` — the
     caller (``Harness``) is responsible for seeding / repairing state and
     handling pre-loop approval resolution.
     """
 
-    def __init__(self, model: Model, tools: ToolRegistry, emitter: RunEmitter) -> None:
+    def __init__(self, model: Model, tools: ToolRegistry, hub: EventHub) -> None:
         self._model = model
         self._tools = tools
-        self._emitter = emitter
+        self._hub = hub
 
     async def advance(
         self,
@@ -63,18 +62,19 @@ class AgentLoop:
         """Drive at most ``max_calls`` model-tool turns.
 
         ``state`` is grown in-place (replaced via frozen-dataclass ``replace``)
-        and the emitter is notified after every meaningful step so bus
+        and the hub broadcasts after every meaningful step so Handlers
         subscribers (checkpointing, policy, UI, observability) can react.
         """
         run_id = state.run_id
         try:
             while max_calls <= 0 or state.completed_model_calls < max_calls:
                 if is_cancelled(cancellation):
-                    return await self._emitter.finish_cancelled(state)
+                    return await self._hub.finish_cancelled(state)
 
                 request = ModelRequest(state.messages, self._tools.schemas())
-                await self._emitter.turn_started(run_id, model_call=state.completed_model_calls + 1)
-                before_model_results = await self._emitter.before_model(run_id, request)
+                model_call = state.completed_model_calls + 1
+                await self._hub.turn_started(run_id, model_call=model_call)
+                before_model_results = await self._hub.before_model(run_id, request)
 
                 from milky_frog.handlers import BudgetedRequest
 
@@ -87,22 +87,23 @@ class AgentLoop:
                 try:
                     response = await self._model_turn_with_retry(run_id, request, cancellation)
                 except ToolRunCancelled:
-                    return await self._emitter.finish_cancelled(state)
+                    return await self._hub.finish_cancelled(state)
 
                 state = append_model_response(state, response)
-                await self._emitter.after_model(run_id, request, response, state)
+                await self._hub.after_model(run_id, request, response, state)
 
                 # No tool calls → agent is done.
                 if not response.tool_calls:
-                    await self._emitter.turn_ended(run_id, model_call=state.completed_model_calls)
-                    return await self._emitter.finish_completed(state, response.content)
+                    model_call = state.completed_model_calls
+                    await self._hub.turn_ended(run_id, model_call=model_call)
+                    return await self._hub.finish_completed(state, response.content)
 
                 # Execute each tool call with policy check via the bus.
                 for call in response.tool_calls:
                     if is_cancelled(cancellation):
-                        return await self._emitter.finish_cancelled(state)
+                        return await self._hub.finish_cancelled(state)
 
-                    check_results = await self._emitter.before_tool(run_id, call)
+                    check_results = await self._hub.before_tool(run_id, call)
 
                     from milky_frog.handlers import ApprovalResult, BlockResult
 
@@ -112,7 +113,7 @@ class AgentLoop:
                     if blocked:
                         result = ToolResult(blocked[0].reason, is_error=True)
                     elif approvals:
-                        return await self._emitter.finish_approval_needed(state, call)
+                        return await self._hub.finish_approval_needed(state, call)
                     else:
                         try:
                             result = await self._execute_tool(
@@ -123,22 +124,23 @@ class AgentLoop:
                                 cancellation,
                             )
                         except ToolRunCancelled:
-                            return await self._emitter.finish_cancelled(state)
+                            return await self._hub.finish_cancelled(state)
 
                     state = append_tool_result(state, call, result)
-                    await self._emitter.after_tool(run_id, call, result, state)
+                    await self._hub.after_tool(run_id, call, result, state)
 
-                await self._emitter.turn_ended(run_id, model_call=state.completed_model_calls)
+                model_call = state.completed_model_calls
+                await self._hub.turn_ended(run_id, model_call=model_call)
 
             # Only reachable when max_calls > 0 (unlimited loops never pause).
-            return await self._emitter.finish_paused(state, max_calls)
+            return await self._hub.finish_paused(state, max_calls)
 
         except asyncio.CancelledError:
             if is_cancelled(cancellation):
-                return await self._emitter.finish_cancelled(state)
+                return await self._hub.finish_cancelled(state)
             raise
         except Exception as error:
-            return await self._emitter.finish_failed(state, error)
+            return await self._hub.finish_failed(state, error)
 
     # ── Model + Tool execution helpers ──────────────────────────────
 
@@ -162,7 +164,7 @@ class AgentLoop:
             except Exception as error:
                 if not is_retriable_model_error(error) or attempt >= MODEL_RETRY_MAX_ATTEMPTS:
                     raise
-                await self._emitter.run_notice(
+                await self._hub.run_notice(
                     run_id,
                     (
                         f"Cannot reach model ({type(error).__name__}) — "
@@ -196,9 +198,9 @@ class AgentLoop:
         async with contextlib.aclosing(self._model.stream(request)) as model_stream:
             async for chunk in model_stream:
                 if isinstance(chunk, TextDelta):
-                    await self._emitter.on_model_chunk(run_id, observer_request, chunk)
+                    await self._hub.on_model_chunk(run_id, observer_request, chunk)
                 elif isinstance(chunk, ReasoningDelta):
-                    await self._emitter.on_model_reasoning(run_id, observer_request, chunk)
+                    await self._hub.on_model_reasoning(run_id, observer_request, chunk)
                 elif isinstance(chunk, StreamDone):
                     response = chunk.response
                     break

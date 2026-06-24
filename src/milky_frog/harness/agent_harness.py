@@ -17,10 +17,9 @@ from milky_frog.domain import (
     ToolCall,
     ToolResult,
 )
-from milky_frog.handlers import ApprovalResult, BlockResult, EventDispatcher
+from milky_frog.handlers import ApprovalResult, BlockResult, EventHub
 from milky_frog.harness.agent_loop import AgentLoop
 from milky_frog.harness.agent_loop import execute_tool as _execute_tool
-from milky_frog.harness.emitter import RunEmitter
 from milky_frog.harness.sandbox import LocalSandbox, Sandbox, SandboxFactory
 from milky_frog.harness.state import (
     append_tool_result,
@@ -56,16 +55,15 @@ class AgentHarness:
         model: Model,
         tools: ToolRegistry,
         checkpoints: CheckpointStore,
-        handlers: EventDispatcher,
+        hub: EventHub,
         sandbox_factory: SandboxFactory = LocalSandbox,
     ) -> None:
         self._model = model
         self._tools = tools
         self._checkpoints = checkpoints
         self._sandbox_factory = sandbox_factory
-        self._handlers = handlers
-        self._emitter = RunEmitter(handlers)
-        self._agent_loop = AgentLoop(model, tools, self._emitter)
+        self._hub = hub
+        self._agent_loop = AgentLoop(model, tools, hub)
 
     async def run(self, run_request: RunRequest) -> RunResult:
         """Start a fresh Run: seed the transcript, then advance."""
@@ -73,13 +71,13 @@ class AgentHarness:
         workspace = run_request.workspace.resolve(strict=True)
         with self._checkpoints.claim(run_id):
             self._checkpoints.create_run(run_id, workspace)
-            extra_sections = await self._emitter.run_before_start(run_id, run_request, workspace)
+            extra_sections = await self._hub.run_before_start(run_id, run_request, workspace)
             state = start_run(
                 RunState(run_id=run_id, workspace=workspace),
                 run_request.prompt,
                 extra_sections,
             )
-            await self._emitter.run_started(run_id, run_request, state)
+            await self._hub.run_started(run_id, run_request, state)
             sandbox = self._make_sandbox(workspace)
             return await self._agent_loop.advance(
                 state,
@@ -111,7 +109,7 @@ class AgentHarness:
 
                 sandbox = self._make_sandbox(stored.workspace)
 
-                await self._emitter.before_resume(run_id, prompt, stored.status, stored.workspace)
+                await self._hub.before_resume(run_id, prompt, stored.status, stored.workspace)
 
                 state = self._checkpoints.load_state(run_id)
                 if not waiting_approval:
@@ -158,7 +156,7 @@ class AgentHarness:
 
                 sandbox = self._make_sandbox(stored.workspace)
 
-                await self._emitter.before_resume(run_id, None, stored.status, stored.workspace)
+                await self._hub.before_resume(run_id, None, stored.status, stored.workspace)
 
                 state = self._checkpoints.load_state(run_id)
                 self._checkpoints.prepare_resume(run_id, stored.updated_at, state)
@@ -205,7 +203,7 @@ class AgentHarness:
             return plan
         for call in pending:
             if cancellation is not None and cancellation.is_cancelled:
-                return await self._emitter.finish_cancelled(plan.state)
+                return await self._hub.finish_cancelled(plan.state)
 
             resolved = await self._resolve_pending_call(
                 plan,
@@ -221,7 +219,7 @@ class AgentHarness:
                 state=append_tool_result(plan.state, call, resolved),
                 sandbox=plan.sandbox,
             )
-            await self._emitter.after_tool(run_id, call, resolved, plan.state)
+            await self._hub.after_tool(run_id, call, resolved, plan.state)
         return plan
 
     async def _resolve_pending_call(
@@ -252,16 +250,16 @@ class AgentHarness:
             return result
 
         if require_verdict:
-            return await self._emitter.finish_approval_needed(plan.state, call)
+            return await self._hub.finish_approval_needed(plan.state, call)
 
         # No verdict: fall back to the tool policy, which may pause again.
-        check_results = await self._emitter.before_tool(run_id, call)
+        check_results = await self._hub.before_tool(run_id, call)
         blocked = [r for r in check_results if isinstance(r, BlockResult)]
         approvals = [r for r in check_results if isinstance(r, ApprovalResult)]
         if blocked:
             return ToolResult(blocked[0].reason, is_error=True)
         if approvals:
-            return await self._emitter.finish_approval_needed(plan.state, call)
+            return await self._hub.finish_approval_needed(plan.state, call)
         r: ToolResult = await _execute_tool(
             self._tools,
             run_id,

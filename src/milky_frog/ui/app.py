@@ -25,10 +25,10 @@ from milky_frog.domain import ApprovalDecision, ApprovalVerdict, ResumeError, Ru
 from milky_frog.harness.state import unmatched_tool_calls
 from milky_frog.project import load_project_config
 from milky_frog.settings import Settings
+from milky_frog.ui.assembly import tui_presentation_bundle
 from milky_frog.ui.cli import runs_table
 from milky_frog.ui.logo import welcome_banner
-from milky_frog.ui.tui.assembly import tui_presentation_bundle
-from milky_frog.ui.tui.messages import (
+from milky_frog.ui.messages import (
     AddText,
     AddThinking,
     ApprovalOptionSelected,
@@ -43,7 +43,7 @@ from milky_frog.ui.tui.messages import (
     ToolResultMsg,
     UpdateUsage,
 )
-from milky_frog.ui.tui.rendering import (
+from milky_frog.ui.rendering import (
     COMMANDS,
     DiffKind,
     bash_output_renderable,
@@ -54,7 +54,7 @@ from milky_frog.ui.tui.rendering import (
     summarize_tool_result,
     tool_result_renderable,
 )
-from milky_frog.ui.tui.textual_patch import patch_textual_utf8_decode
+from milky_frog.ui.textual_patch import patch_textual_utf8_decode
 from milky_frog.ui.usage import context_fraction, format_context_meter, format_run_usage
 
 

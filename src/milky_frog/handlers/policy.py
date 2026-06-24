@@ -9,19 +9,19 @@ from __future__ import annotations
 
 from milky_frog.domain import ToolDecision
 from milky_frog.handlers.context import ApprovalResult, BlockResult, HandlerContext, HandlerResult
-from milky_frog.handlers.dispatcher import BaseHandler, EventDispatcher
 from milky_frog.handlers.events import RunBeforeTool
+from milky_frog.handlers.hub import BaseHandler, EventHub
 
 
 class PolicyHandler(BaseHandler):
     """Enforces session-level tool policy on ``RunBeforeTool`` events.
 
     The policy is always read from ``ctx.policy`` — a mutable
-    ``SessionToolPolicy`` set by ``AgentSession`` on the dispatcher context.
+    ``SessionToolPolicy`` set by ``AgentSession`` on the hub context.
     """
 
-    def register(self, registry: EventDispatcher) -> None:
-        registry.on(RunBeforeTool)(self._on_before_tool)
+    def register(self, hub: EventHub) -> None:
+        hub.on(RunBeforeTool)(self._on_before_tool)
 
     async def _on_before_tool(
         self, event: RunBeforeTool, ctx: HandlerContext

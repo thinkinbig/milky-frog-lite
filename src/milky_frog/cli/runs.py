@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import ResumeError
-from milky_frog.infra.checkpoint.sqlite import SqliteCheckpointStore
 from milky_frog.settings import Settings
 
 

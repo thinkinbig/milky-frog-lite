@@ -22,7 +22,7 @@ A parallel policy-injection mechanism would have been redundant.
 
 ## Decision
 
-One bus. `EventDispatcher` (`handlers/dispatcher.py`) is the only dispatch point;
+One hub. `EventHub` (`handlers/hub.py`) is the only broadcast point;
 **only `RunEmitter` publishes**, and handlers never publish. Most handlers are
 pure observation and return `None`.
 
@@ -75,7 +75,7 @@ policy 注入机制纯属冗余。
 
 ## 决策
 
-一条总线。`EventDispatcher`（`handlers/dispatcher.py`）是唯一派发点；**只有
+一条中心。`EventHub`（`handlers/hub.py`）是唯一广播点；**只有
 `RunEmitter` 发布**，handler 从不发布。多数 handler 是纯观察，返回 `None`。
 
 policy 与 context build **就在这条总线上**表达——通过一个封闭、类型化的

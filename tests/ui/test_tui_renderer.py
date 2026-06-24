@@ -11,20 +11,20 @@ from milky_frog.domain import (
     TextDelta,
     TokenUsage,
 )
-from milky_frog.handlers import EventDispatcher
+from milky_frog.handlers import EventHub
 from milky_frog.handlers.events import (
     RunAfterModel,
     RunModelChunk,
     RunNotice,
     RunPaused,
 )
-from milky_frog.ui.tui.messages import (
+from milky_frog.ui.messages import (
     AddText,
     ApprovalRequired,
     RunNoticeMsg,
     UpdateUsage,
 )
-from milky_frog.ui.tui.presentation import TuiPresentationHandler
+from milky_frog.ui.presentation import TuiPresentationHandler
 
 _WORKSPACE = Path("/tmp")
 
@@ -39,10 +39,10 @@ class _MessageSink:
 
 async def test_presentation_maps_run_notice() -> None:
     sink = _MessageSink()
-    bus = EventDispatcher()
+    bus = EventHub()
     TuiPresentationHandler(sink).register(bus)
 
-    await bus.notify(RunNotice(run_id="run-1", message="retrying connection", level="warning"))
+    await bus.broadcast(RunNotice(run_id="run-1", message="retrying connection", level="warning"))
 
     assert len(sink.messages) == 1
     message = sink.messages[0]
@@ -53,17 +53,17 @@ async def test_presentation_maps_run_notice() -> None:
 
 async def test_presentation_maps_model_chunk_and_approval_pause() -> None:
     sink = _MessageSink()
-    bus = EventDispatcher()
+    bus = EventHub()
     TuiPresentationHandler(sink).register(bus)
 
-    await bus.notify(
+    await bus.broadcast(
         RunModelChunk(
             run_id="run-1",
             request=ModelRequest((), ()),
             chunk=TextDelta("hi"),
         )
     )
-    await bus.notify(
+    await bus.broadcast(
         RunPaused(
             run_id="run-1",
             result=RunResult(
@@ -84,11 +84,11 @@ async def test_presentation_maps_model_chunk_and_approval_pause() -> None:
 
 async def test_presentation_accumulates_usage_on_after_model() -> None:
     sink = _MessageSink()
-    bus = EventDispatcher()
+    bus = EventHub()
     TuiPresentationHandler(sink).register(bus)
     request = ModelRequest((), ())
 
-    await bus.notify(
+    await bus.broadcast(
         RunAfterModel(
             run_id="run-1",
             request=request,

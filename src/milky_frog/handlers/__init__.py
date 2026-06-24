@@ -1,4 +1,4 @@
-from milky_frog.handlers.assembly import default_handlers
+from milky_frog.handlers.assembly import session_handler_bundles
 from milky_frog.handlers.checkpoint import CheckpointHandler
 from milky_frog.handlers.context import (
     ApprovalResult,
@@ -8,7 +8,6 @@ from milky_frog.handlers.context import (
     HandlerResult,
     SystemPromptSection,
 )
-from milky_frog.handlers.dispatcher import BaseHandler, EventDispatcher
 from milky_frog.handlers.events import (
     BaseEvent,
     NoticeLevel,
@@ -29,6 +28,7 @@ from milky_frog.handlers.events import (
     RunTurnEnd,
     RunTurnStart,
 )
+from milky_frog.handlers.hub import BaseHandler, EventHub
 from milky_frog.handlers.skills import AgentContextHandler
 from milky_frog.infra.observability.langfuse import LangfuseHandler
 
@@ -40,7 +40,7 @@ __all__ = [
     "BlockResult",
     "BudgetedRequest",
     "CheckpointHandler",
-    "EventDispatcher",
+    "EventHub",
     "HandlerContext",
     "HandlerResult",
     "LangfuseHandler",
@@ -62,5 +62,5 @@ __all__ = [
     "RunTurnEnd",
     "RunTurnStart",
     "SystemPromptSection",
-    "default_handlers",
+    "session_handler_bundles",
 ]

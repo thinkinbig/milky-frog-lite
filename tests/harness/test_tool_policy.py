@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from milky_frog.domain import ToolCall, ToolDecision
+from milky_frog.harness.tools import default_tools
+from milky_frog.harness.tools.registry import ToolRegistry
 from milky_frog.harness.tools.tool_policy import (
     SessionToolPolicy,
     approval_free_tool_names,
@@ -35,44 +37,61 @@ class PerCallApprovalTool:
     async def execute(self, context, input): ...
 
 
+def _policy(*tools: object) -> SessionToolPolicy:
+    return SessionToolPolicy(ToolRegistry(tuple(tools)))  # type: ignore[arg-type]
+
+
 # ── Init ────────────────────────────────────────────────────────────────
 
 
-def test_init_with_default_tools() -> None:
-    policy = SessionToolPolicy()
-    # Should have loaded the default built-in tools
-    assert "read_file" in policy._tools_by_name
-    assert "write_file" in policy._tools_by_name
+def test_init_binds_to_registry_tools() -> None:
+    registry = ToolRegistry(default_tools())
+    policy = SessionToolPolicy(registry)
+
+    registry.get("read_file")
+    registry.get("write_file")
+    assert policy._registry is registry
     assert policy._mode == "default"
     assert policy._overrides == {}
 
 
 def test_init_with_custom_tools() -> None:
-    policy = SessionToolPolicy(tools=(AlwaysNeedsApprovalTool(), NeverNeedsApprovalTool()))
-    assert "needs_approval" in policy._tools_by_name
-    assert "safe_tool" in policy._tools_by_name
+    registry = ToolRegistry((AlwaysNeedsApprovalTool(), NeverNeedsApprovalTool()))
+    policy = SessionToolPolicy(registry)
+
+    registry.get("needs_approval")
+    registry.get("safe_tool")
     assert policy._mode == "default"
+
+
+def test_policy_sees_tools_registered_after_construction() -> None:
+    registry = ToolRegistry()
+    policy = SessionToolPolicy(registry)
+    registry.register(NeverNeedsApprovalTool())
+
+    decision = policy.decide(ToolCall("id", "safe_tool", {}))
+    assert decision is ToolDecision.ALLOW
 
 
 # ── auto_approve / reset ────────────────────────────────────────────────
 
 
 def test_auto_approve_approves_known_tool() -> None:
-    policy = SessionToolPolicy(tools=(NeverNeedsApprovalTool(),))
+    policy = _policy(NeverNeedsApprovalTool())
     policy.auto_approve()
     decision = policy.decide(ToolCall("id", "safe_tool", {}))
     assert decision is ToolDecision.ALLOW
 
 
 def test_auto_approve_approves_unknown_tool() -> None:
-    policy = SessionToolPolicy(tools=(NeverNeedsApprovalTool(),))
+    policy = _policy(NeverNeedsApprovalTool())
     policy.auto_approve()
     decision = policy.decide(ToolCall("id", "unknown_tool", {}))
     assert decision is ToolDecision.ALLOW
 
 
 def test_reset_restores_default_mode() -> None:
-    policy = SessionToolPolicy(tools=(AlwaysNeedsApprovalTool(),))
+    policy = _policy(AlwaysNeedsApprovalTool())
     policy.auto_approve()
     policy.reset()
     decision = policy.decide(ToolCall("id", "needs_approval", {}))
@@ -80,7 +99,7 @@ def test_reset_restores_default_mode() -> None:
 
 
 def test_reset_clears_overrides() -> None:
-    policy = SessionToolPolicy(tools=(AlwaysNeedsApprovalTool(),))
+    policy = _policy(AlwaysNeedsApprovalTool())
     policy.deny("needs_approval")
     policy.reset()
     decision = policy.decide(ToolCall("id", "needs_approval", {}))
@@ -92,7 +111,7 @@ def test_reset_clears_overrides() -> None:
 
 def test_require_approval_override() -> None:
     tool = NeverNeedsApprovalTool()
-    policy = SessionToolPolicy(tools=(tool,))
+    policy = _policy(tool)
     policy.require_approval("safe_tool")
     decision = policy.decide(ToolCall("id", "safe_tool", {}))
     assert decision is ToolDecision.NEEDS_APPROVAL
@@ -100,7 +119,7 @@ def test_require_approval_override() -> None:
 
 def test_deny_override() -> None:
     tool = NeverNeedsApprovalTool()
-    policy = SessionToolPolicy(tools=(tool,))
+    policy = _policy(tool)
     policy.deny("safe_tool")
     decision = policy.decide(ToolCall("id", "safe_tool", {}))
     assert decision is ToolDecision.DENY
@@ -108,7 +127,7 @@ def test_deny_override() -> None:
 
 def test_deny_override_always_wins_even_in_auto_approve() -> None:
     tool = NeverNeedsApprovalTool()
-    policy = SessionToolPolicy(tools=(tool,))
+    policy = _policy(tool)
     policy.deny("safe_tool")
     policy.auto_approve()
     decision = policy.decide(ToolCall("id", "safe_tool", {}))
@@ -117,7 +136,7 @@ def test_deny_override_always_wins_even_in_auto_approve() -> None:
 
 def test_allow_override() -> None:
     tool = AlwaysNeedsApprovalTool()
-    policy = SessionToolPolicy(tools=(tool,))
+    policy = _policy(tool)
     policy.allow("needs_approval")
     decision = policy.decide(ToolCall("id", "needs_approval", {}))
     assert decision is ToolDecision.ALLOW
@@ -127,31 +146,31 @@ def test_allow_override() -> None:
 
 
 def test_default_unknown_tool_needs_approval() -> None:
-    policy = SessionToolPolicy(tools=())
+    policy = _policy()
     decision = policy.decide(ToolCall("id", "unknown", {}))
     assert decision is ToolDecision.NEEDS_APPROVAL
 
 
 def test_default_needs_approval_tool_prompts() -> None:
-    policy = SessionToolPolicy(tools=(AlwaysNeedsApprovalTool(),))
+    policy = _policy(AlwaysNeedsApprovalTool())
     decision = policy.decide(ToolCall("id", "needs_approval", {}))
     assert decision is ToolDecision.NEEDS_APPROVAL
 
 
 def test_default_safe_tool_is_allowed() -> None:
-    policy = SessionToolPolicy(tools=(NeverNeedsApprovalTool(),))
+    policy = _policy(NeverNeedsApprovalTool())
     decision = policy.decide(ToolCall("id", "safe_tool", {}))
     assert decision is ToolDecision.ALLOW
 
 
 def test_default_per_call_approval_denies_dangerous() -> None:
-    policy = SessionToolPolicy(tools=(PerCallApprovalTool(),))
+    policy = _policy(PerCallApprovalTool())
     decision = policy.decide(ToolCall("id", "per_call", {"dangerous": True}))
     assert decision is ToolDecision.NEEDS_APPROVAL
 
 
 def test_default_per_call_approval_allows_safe() -> None:
-    policy = SessionToolPolicy(tools=(PerCallApprovalTool(),))
+    policy = _policy(PerCallApprovalTool())
     decision = policy.decide(ToolCall("id", "per_call", {"dangerous": False}))
     assert decision is ToolDecision.ALLOW
 
@@ -160,14 +179,16 @@ def test_default_per_call_approval_allows_safe() -> None:
 
 
 def test_approval_free_tool_names_returns_safe_tools() -> None:
-    tools = (AlwaysNeedsApprovalTool(), NeverNeedsApprovalTool(), PerCallApprovalTool())
-    names = approval_free_tool_names(tools)
+    registry = ToolRegistry(
+        (AlwaysNeedsApprovalTool(), NeverNeedsApprovalTool(), PerCallApprovalTool())
+    )
+    names = approval_free_tool_names(registry)
     assert names == frozenset({"safe_tool"})
 
 
 def test_approval_free_tool_names_empty_when_all_require_approval() -> None:
-    tools = (AlwaysNeedsApprovalTool(),)
-    names = approval_free_tool_names(tools)
+    registry = ToolRegistry((AlwaysNeedsApprovalTool(),))
+    names = approval_free_tool_names(registry)
     assert names == frozenset()
 
 

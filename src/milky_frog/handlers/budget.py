@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from milky_frog.domain import Message, MessageRole, ModelRequest
 from milky_frog.handlers.context import BudgetedRequest, HandlerContext
-from milky_frog.handlers.dispatcher import BaseHandler, EventDispatcher
+from milky_frog.handlers.hub import BaseHandler, EventHub
 
 if TYPE_CHECKING:
     from milky_frog.handlers.events import (
@@ -40,16 +40,14 @@ class OnlineAffineCalibrator:
     ``intercept_``).
 
     It is an ordinary least-squares line fit *online*, keeping no sample
-    history: each measurement only updates four exponential moving averages of
-    the moments ``E[x], E[y], E[x²], E[xy]`` (``x`` the raw estimate, ``y`` the
-    real token count), and the coefficients are read straight off them::
+    history beyond running sums of ``x``, ``y``, ``x²``, and ``xy``. Each
+    measurement updates those totals and the coefficients are read straight off
+    them::
 
         coef_      = Cov(x, y) / Var(x)
         intercept_ = E[y] - coef_ * E[x]
 
-    with ``Var(x) = E[x²] - E[x]²`` and ``Cov(x, y) = E[xy] - E[x]·E[y]``. The
-    EMA weight ``alpha`` makes recent measurements count more, so the fit tracks
-    provider drift while a single odd request only nudges it.
+    with ``Var(x) = E[x²] - E[x]²`` and ``Cov(x, y) = E[xy] - E[x]·E[y]``.
 
     The constructor hyperparameters are safety bounds, not part of the
     regression: ``min_coef`` floors a prediction at ``min_coef * raw`` because
@@ -57,29 +55,27 @@ class OnlineAffineCalibrator:
     window), ``max_coef`` caps the slope, ``max_intercept`` caps the fixed
     overhead, and ``min_variance`` is the spread below which the samples are too
     colinear to fit a slope — there the fit degrades to a pure proportional
-    ratio ``real / raw`` with no intercept.
+    ratio ``sum(y) / sum(x)`` with no intercept.
     """
 
     def __init__(
         self,
         *,
-        alpha: float = 0.3,
         min_coef: float = 0.25,
         max_coef: float = 8.0,
         min_variance: float = 1.0,
         max_intercept: float | None = None,
     ) -> None:
-        self.alpha = alpha
         self.min_coef = min_coef
         self.max_coef = max_coef
         self.min_variance = min_variance
         self.max_intercept = max_intercept
         self._fitted = False
-        # EMA moments of (x=raw, y=real).
-        self._mx = 0.0
-        self._my = 0.0
-        self._mxx = 0.0
-        self._mxy = 0.0
+        self._count = 0
+        self._sum_x = 0.0
+        self._sum_y = 0.0
+        self._sum_xx = 0.0
+        self._sum_xy = 0.0
 
     @property
     def fitted(self) -> bool:
@@ -89,43 +85,43 @@ class OnlineAffineCalibrator:
     def partial_fit(self, raw: float, real: float) -> None:
         """Fold one ``(raw estimate, real token count)`` measurement into the fit.
 
-        Non-positive measurements are ignored (no usage to anchor to). The first
-        valid sample seeds the moments exactly; later ones blend in via the EMA.
+        Non-positive measurements are ignored (no usage to anchor to).
         """
         if raw <= 0 or real <= 0:
             return
-        if not self._fitted:
-            self._mx, self._my = raw, real
-            self._mxx, self._mxy = raw * raw, raw * real
-            self._fitted = True
-            return
-        a = self.alpha
-        self._mx += a * (raw - self._mx)
-        self._my += a * (real - self._my)
-        self._mxx += a * (raw * raw - self._mxx)
-        self._mxy += a * (raw * real - self._mxy)
+        self._count += 1
+        self._sum_x += raw
+        self._sum_y += real
+        self._sum_xx += raw * raw
+        self._sum_xy += raw * real
+        self._fitted = True
 
     @property
     def coef_(self) -> float:
         """Slope: real tokens per raw token, bounded to ``[0, max_coef]``."""
-        if not self._fitted or self._mx <= 0:
+        if not self._fitted or self._count == 0:
             return 1.0
-        variance = self._mxx - self._mx * self._mx
+        n = self._count
+        variance = n * self._sum_xx - self._sum_x * self._sum_x
         if variance > self.min_variance:
-            slope = (self._mxy - self._mx * self._my) / variance
+            slope = (n * self._sum_xy - self._sum_x * self._sum_y) / variance
+        elif self._sum_x > 0:
+            slope = self._sum_y / self._sum_x  # too colinear: proportional ratio
         else:
-            slope = self._my / self._mx  # too colinear: proportional ratio
+            slope = 1.0
         return min(self.max_coef, max(0.0, slope))
 
     @property
     def intercept_(self) -> float:
         """Fixed request overhead, anchored through the data centroid."""
-        if not self._fitted or self._mx <= 0:
+        if not self._fitted or self._count == 0:
             return 0.0
-        variance = self._mxx - self._mx * self._mx
+        n = self._count
+        variance = n * self._sum_xx - self._sum_x * self._sum_x
         if variance <= self.min_variance:
             return 0.0  # proportional fallback carries no intercept
-        value = max(0.0, self._my - self.coef_ * self._mx)
+        mean_x = self._sum_x / n
+        value = max(0.0, self._sum_y / n - self.coef_ * mean_x)
         if self.max_intercept is not None:
             value = min(value, self.max_intercept)
         return value
@@ -165,8 +161,6 @@ class BudgetHandler(BaseHandler):
     # Predictions are clamped to this band around the raw estimate.
     _MIN_CALIBRATION = 0.25
     _MAX_CALIBRATION = 8.0
-    # EMA weight for each new measurement; smooths noise while tracking drift.
-    _MOMENT_ALPHA = 0.3
     # Minimum spread in raw estimates before a slope can be fit; below this the
     # samples are too colinear and we fall back to the proportional ratio.
     _MIN_VARIANCE = 1.0
@@ -176,13 +170,12 @@ class BudgetHandler(BaseHandler):
         self._config: BudgetConfig | None = None
         self._input_budget = 0
         self._calibrator = OnlineAffineCalibrator(
-            alpha=self._MOMENT_ALPHA,
             min_coef=self._MIN_CALIBRATION,
             max_coef=self._MAX_CALIBRATION,
             min_variance=self._MIN_VARIANCE,
         )
 
-    def register(self, registry: EventDispatcher) -> None:
+    def register(self, hub: EventHub) -> None:
         from milky_frog.handlers.events import (
             RunAfterModel,
             RunBeforeModel,
@@ -190,10 +183,10 @@ class BudgetHandler(BaseHandler):
             RunStarted,
         )
 
-        registry.on(RunStarted)(self._on_run_started)
-        registry.on(RunBeforeResume)(self._on_run_before_resume)
-        registry.on(RunBeforeModel)(self._on_run_before_model)
-        registry.on(RunAfterModel)(self._on_run_after_model)
+        hub.on(RunStarted)(self._on_run_started)
+        hub.on(RunBeforeResume)(self._on_run_before_resume)
+        hub.on(RunBeforeModel)(self._on_run_before_model)
+        hub.on(RunAfterModel)(self._on_run_after_model)
 
     async def _on_run_started(self, event: RunStarted, ctx: HandlerContext) -> None:
         """Initialize the counter and budget config when a fresh run starts."""

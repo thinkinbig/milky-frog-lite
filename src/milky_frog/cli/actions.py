@@ -5,11 +5,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from milky_frog.checkpoint import CleanupScope, StoredRun
+from milky_frog.checkpoint import CleanupScope, SqliteCheckpointStore, StoredRun
 from milky_frog.checkpoint.snapshot import dump_run_state
 from milky_frog.diagnostics import CheckStatus, Diagnostic
 from milky_frog.domain import RunState
-from milky_frog.infra.checkpoint.sqlite import SqliteCheckpointStore
 from milky_frog.project import (
     CONFIG_FILENAME,
     CONFIG_TEMPLATE,

@@ -10,7 +10,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
 
-from milky_frog.handlers import BaseHandler, EventDispatcher, RunAfterTool
+from milky_frog.handlers import BaseHandler, EventHub, RunAfterTool
 from milky_frog.handlers.context import HandlerContext
 
 
@@ -45,8 +45,8 @@ class ToolCallCollector(BaseHandler):
     def __init__(self) -> None:
         self.calls: dict[str, list[ToolCallRecord]] = defaultdict(list)
 
-    def register(self, registry: EventDispatcher) -> None:
-        registry.on(RunAfterTool)(self._record)
+    def register(self, hub: EventHub) -> None:
+        hub.on(RunAfterTool)(self._record)
 
     async def _record(self, event: RunAfterTool, ctx: HandlerContext | None = None) -> None:
         self.calls[event.run_id].append(

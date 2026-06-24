@@ -1,5 +1,6 @@
+from milky_frog.ui.app import MilkyFrogApp
 from milky_frog.ui.logo import ascii_banner, pixel_frog_logo, welcome_banner
-from milky_frog.ui.tui import MilkyFrogApp, TuiPresentationHandler
+from milky_frog.ui.presentation import TuiPresentationHandler
 from milky_frog.ui.usage import context_fraction, format_context_meter, format_run_usage
 
 __all__ = [

@@ -53,7 +53,7 @@ A handler that returns ``None`` is pure observation; returning a
 class HandlerContext:
     """Framework-managed resources passed to every handler at notify time.
 
-    Populated by ``AgentSession`` via ``EventDispatcher.set_context`` so handlers
+    Populated by ``AgentSession`` via ``EventHub.set_context`` so handlers
     can access mutable runtime state without being coupled to AgentSession.
     """
 

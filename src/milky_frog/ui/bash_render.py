@@ -6,9 +6,9 @@ from collections.abc import Callable
 from textual.message import Message
 
 from milky_frog.handlers.context import HandlerContext
-from milky_frog.handlers.dispatcher import BaseHandler, EventDispatcher
 from milky_frog.handlers.events import RunAfterTool
-from milky_frog.ui.tui.messages import BashOutputMsg, GitOutputMsg, GrepOutputMsg
+from milky_frog.handlers.hub import BaseHandler, EventHub
+from milky_frog.ui.messages import BashOutputMsg, GitOutputMsg, GrepOutputMsg
 
 Emit = Callable[[Message], object]
 
@@ -27,8 +27,8 @@ class BashRenderHandler(BaseHandler):
     def __init__(self, emit: Emit) -> None:
         self._emit = emit
 
-    def register(self, registry: EventDispatcher) -> None:
-        registry.on(RunAfterTool)(self._on_after_tool)
+    def register(self, hub: EventHub) -> None:
+        hub.on(RunAfterTool)(self._on_after_tool)
 
     async def _on_after_tool(self, event: RunAfterTool, ctx: HandlerContext | None = None) -> None:
         if event.call.name != "bash":

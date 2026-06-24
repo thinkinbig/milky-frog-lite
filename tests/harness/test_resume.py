@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import (
     ApprovalDecision,
     ApprovalVerdict,
@@ -19,12 +20,11 @@ from milky_frog.domain import (
     RunStatus,
     StreamDone,
 )
-from milky_frog.handlers import EventDispatcher
+from milky_frog.handlers import EventHub
 from milky_frog.harness.state import (
     INTERRUPTED_TOOL_RESULT,
 )
 from milky_frog.harness.tools import ToolRegistry
-from milky_frog.infra.checkpoint.sqlite import SqliteCheckpointStore
 from tests.checkpoint_helpers import (
     run_status,
     seed_assistant_turn,
@@ -48,7 +48,7 @@ from tests.stubs import (
 @pytest.mark.asyncio
 async def test_fold_reconstructs_live_transcript(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    harness = make_harness(FakeModel(), ToolRegistry((EchoTool(),)), store, EventDispatcher())
+    harness = make_harness(FakeModel(), ToolRegistry((EchoTool(),)), store, EventHub())
 
     result = await harness.run(RunRequest("echo hello", tmp_path))
 
@@ -67,9 +67,7 @@ async def test_fold_reconstructs_live_transcript(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_resume_continues_paused_run(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    harness = make_harness(
-        PauseThenFinishModel(), ToolRegistry((EchoTool(),)), store, EventDispatcher()
-    )
+    harness = make_harness(PauseThenFinishModel(), ToolRegistry((EchoTool(),)), store, EventHub())
 
     paused = await harness.run(RunRequest("go", tmp_path, max_model_calls=1))
     assert paused.status is RunStatus.PAUSED_LIMIT
@@ -97,9 +95,7 @@ async def test_resume_repairs_interrupted_tool_call(tmp_path: Path) -> None:
             assert tool_msgs and tool_msgs[-1].content == INTERRUPTED_TOOL_RESULT
             yield StreamDone(ModelResponse(content="recovered"))
 
-    harness = make_harness(
-        InterruptionAwareModel(), ToolRegistry((EchoTool(),)), store, EventDispatcher()
-    )
+    harness = make_harness(InterruptionAwareModel(), ToolRegistry((EchoTool(),)), store, EventHub())
     result = await harness.resume(run_id, max_model_calls=30)
 
     assert result.status is RunStatus.COMPLETED
@@ -112,7 +108,7 @@ async def test_resume_repairs_interrupted_tool_call(tmp_path: Path) -> None:
 async def test_resume_continues_completed_without_prompt(tmp_path: Path) -> None:
     """Resume without prompt on a COMPLETED run calls the model (no more rejection)."""
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    harness = make_harness(FakeModel(), ToolRegistry((EchoTool(),)), store, EventDispatcher())
+    harness = make_harness(FakeModel(), ToolRegistry((EchoTool(),)), store, EventHub())
 
     result = await harness.run(RunRequest("echo hello", tmp_path))
     assert result.status is RunStatus.COMPLETED
@@ -130,7 +126,7 @@ async def test_resume_continues_failed_without_prompt(tmp_path: Path) -> None:
     run_id = "run-failed-no-prompt"
     seed_failed_run(store, run_id, tmp_path)
 
-    harness = make_harness(ContinuationModel("go"), ToolRegistry(), store, EventDispatcher())
+    harness = make_harness(ContinuationModel("go"), ToolRegistry(), store, EventHub())
     result = await harness.resume(run_id, max_model_calls=30)
     assert result.status is RunStatus.COMPLETED
 
@@ -141,7 +137,7 @@ async def test_resume_with_prompt_continues_failed_run(tmp_path: Path) -> None:
     run_id = "run-failed"
     seed_failed_run(store, run_id, tmp_path)
 
-    harness = make_harness(ContinuationModel("try again"), ToolRegistry(), store, EventDispatcher())
+    harness = make_harness(ContinuationModel("try again"), ToolRegistry(), store, EventHub())
     result = await harness.resume(run_id, max_model_calls=30, prompt="try again")
 
     assert result.status is RunStatus.COMPLETED
@@ -163,7 +159,7 @@ async def test_resume_recovers_orphaned_running_run(tmp_path: Path) -> None:
             assert tool_msgs and tool_msgs[-1].content == INTERRUPTED_TOOL_RESULT
             yield StreamDone(ModelResponse(content="recovered"))
 
-    harness = make_harness(RecoveryModel(), ToolRegistry((EchoTool(),)), store, EventDispatcher())
+    harness = make_harness(RecoveryModel(), ToolRegistry((EchoTool(),)), store, EventHub())
     result = await harness.resume(run_id, max_model_calls=30)
 
     assert result.status is RunStatus.COMPLETED
@@ -175,7 +171,7 @@ async def test_resume_rejects_live_owned_run(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
     run_id = "run-live"
     seed_run(store, run_id, tmp_path)
-    harness = make_harness(FakeModel(), ToolRegistry((EchoTool(),)), store, EventDispatcher())
+    harness = make_harness(FakeModel(), ToolRegistry((EchoTool(),)), store, EventHub())
 
     with store.claim(run_id), pytest.raises(ResumeError, match="already active"):
         await harness.resume(run_id, max_model_calls=30)
@@ -188,7 +184,7 @@ async def test_resume_completes_via_model_when_clean_tail(tmp_path: Path) -> Non
     run_id = "run-final-response"
     seed_assistant_turn(store, run_id, tmp_path, content="already done")
 
-    harness = make_harness(ContinuationModel("go"), ToolRegistry(), store, EventDispatcher())
+    harness = make_harness(ContinuationModel("go"), ToolRegistry(), store, EventHub())
     result = await harness.resume(run_id, max_model_calls=30)
 
     assert result.status is RunStatus.COMPLETED
@@ -199,7 +195,7 @@ async def test_resume_completes_via_model_when_clean_tail(tmp_path: Path) -> Non
 @pytest.mark.asyncio
 async def test_resume_projects_running_before_advance(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    harness = make_harness(FakeModel(), ToolRegistry((EchoTool(),)), store, EventDispatcher())
+    harness = make_harness(FakeModel(), ToolRegistry((EchoTool(),)), store, EventHub())
     done = await harness.run(RunRequest("echo hello", tmp_path))
     assert done.status is RunStatus.COMPLETED
 
@@ -215,7 +211,7 @@ async def test_resume_projects_running_before_advance(tmp_path: Path) -> None:
             yield StreamDone(ModelResponse(content="ack"))
 
     model = StatusCapturingModel()
-    second = make_harness(model, ToolRegistry((EchoTool(),)), store, EventDispatcher())
+    second = make_harness(model, ToolRegistry((EchoTool(),)), store, EventHub())
     await second.resume(done.run_id, max_model_calls=30, prompt="follow up")
 
     assert model.seen_running
@@ -224,7 +220,7 @@ async def test_resume_projects_running_before_advance(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_resume_rejects_unknown_run(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    harness = make_harness(FakeModel(), ToolRegistry(), store, EventDispatcher())
+    harness = make_harness(FakeModel(), ToolRegistry(), store, EventHub())
 
     with pytest.raises(ResumeError, match="unknown Run"):
         await harness.resume("does-not-exist", max_model_calls=30)
@@ -233,12 +229,12 @@ async def test_resume_rejects_unknown_run(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_resume_with_prompt_continues_completed_run(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    first = make_harness(FakeModel(), ToolRegistry((EchoTool(),)), store, EventDispatcher())
+    first = make_harness(FakeModel(), ToolRegistry((EchoTool(),)), store, EventHub())
     done = await first.run(RunRequest("echo hello", tmp_path))
     assert done.status is RunStatus.COMPLETED
 
     second = make_harness(
-        ContinuationModel("follow up"), ToolRegistry((EchoTool(),)), store, EventDispatcher()
+        ContinuationModel("follow up"), ToolRegistry((EchoTool(),)), store, EventHub()
     )
     result = await second.resume(done.run_id, max_model_calls=30, prompt="follow up")
 
@@ -260,7 +256,7 @@ async def test_resume_resurfaces_waiting_for_approval(tmp_path: Path) -> None:
         status=RunStatus.WAITING_FOR_APPROVAL,
         final_message="approval needed",
     )
-    harness = make_harness(FakeModel(), ToolRegistry((EchoTool(),)), store, EventDispatcher())
+    harness = make_harness(FakeModel(), ToolRegistry((EchoTool(),)), store, EventHub())
 
     result = await harness.resume(run_id, max_model_calls=30)
 
@@ -279,7 +275,7 @@ async def test_resume_rejects_prompt_while_waiting_for_approval(tmp_path: Path) 
         status=RunStatus.WAITING_FOR_APPROVAL,
         final_message="approval needed",
     )
-    harness = make_harness(FakeModel(), ToolRegistry((EchoTool(),)), store, EventDispatcher())
+    harness = make_harness(FakeModel(), ToolRegistry((EchoTool(),)), store, EventHub())
 
     with pytest.raises(ResumeError, match="waiting for tool approval"):
         await harness.resume(run_id, max_model_calls=30, prompt="continue anyway")
@@ -296,7 +292,7 @@ async def test_respond_approval_executes_pending_tool(tmp_path: Path) -> None:
         status=RunStatus.WAITING_FOR_APPROVAL,
         final_message="approval needed",
     )
-    harness = make_harness(FakeModel(), ToolRegistry((EchoTool(),)), store, EventDispatcher())
+    harness = make_harness(FakeModel(), ToolRegistry((EchoTool(),)), store, EventHub())
 
     result = await harness.respond_approval(
         run_id,
@@ -313,7 +309,7 @@ async def test_respond_approval_rejects_non_waiting_run(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
     run_id = "completed-run"
     seed_run(store, run_id, tmp_path, status=RunStatus.COMPLETED, final_message="done")
-    harness = make_harness(FakeModel(), ToolRegistry(), store, EventDispatcher())
+    harness = make_harness(FakeModel(), ToolRegistry(), store, EventHub())
 
     with pytest.raises(ResumeError, match="not waiting for tool approval"):
         await harness.respond_approval(

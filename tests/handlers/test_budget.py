@@ -371,40 +371,38 @@ async def test_calibration_makes_trimming_react_to_real_tool_cost() -> None:
 
 
 @pytest.mark.asyncio
-async def test_calibration_ema_smooths_instead_of_jumping() -> None:
-    """A second measurement blends with the first via EMA, not a hard replace."""
+async def test_calibration_same_size_uses_mean_ratio() -> None:
+    """Repeated measurements at the same raw size average into one ratio."""
     handler = _budget_handler(FixedCostCounter(per_message=10), input_budget=1000)
     request = ModelRequest((Message(MessageRole.USER, "hi"),), ())  # raw = 10
 
-    # First seeds: 20/10 = 2.0 -> predicts 20.
     await handler._on_run_after_model(
         _after_model_event(request, input_tokens=20), HandlerContext()
     )
     assert handler._count_request_tokens(request) == 20
 
-    # Second at same size: ratio 40/10 = 4.0. EMA my = 0.7*20 + 0.3*40 = 26,
-    # so prediction is 26, not a jump to 40.
     await handler._on_run_after_model(
         _after_model_event(request, input_tokens=40), HandlerContext()
     )
-    assert handler._count_request_tokens(request) == 26
+    # Colinear points -> sum(y)/sum(x) = 60/20 = 3x -> 30.
+    assert handler._count_request_tokens(request) == 30
 
 
 @pytest.mark.asyncio
-async def test_calibration_ema_only_nudges_on_outlier() -> None:
-    """A converged estimate moves only fractionally toward an outlier."""
+async def test_calibration_outlier_at_same_size_averages_in() -> None:
+    """An outlier at the same raw size moves the estimate to the mean ratio."""
     handler = _budget_handler(FixedCostCounter(per_message=10), input_budget=1000)
     request = ModelRequest((Message(MessageRole.USER, "hi"),), ())  # raw = 10
 
     await handler._on_run_after_model(
         _after_model_event(request, input_tokens=20), HandlerContext()
-    )  # seed -> predicts 20
+    )
 
-    # Outlier 80 at same size. EMA my = 0.7*20 + 0.3*80 = 38, predicts 38 (not 80).
     await handler._on_run_after_model(
         _after_model_event(request, input_tokens=80), HandlerContext()
     )
-    assert handler._count_request_tokens(request) == 38
+    # sum(y)/sum(x) = 100/20 = 5x -> 50.
+    assert handler._count_request_tokens(request) == 50
 
 
 # --- OnlineAffineCalibrator (direct unit tests) ---------------------------------
@@ -443,8 +441,7 @@ def test_calibrator_single_sample_is_proportional() -> None:
 def test_calibrator_recovers_affine_line_from_two_sizes() -> None:
     """Two differently-sized points recover slope and fixed intercept."""
     cal = OnlineAffineCalibrator()
-    # Points (10, 120) and (30, 160) lie on real = 100 + 2*raw after the EMA
-    # blend; mirror the handler-level affine test's arithmetic.
+    # Points (10, 120) and (30, 160) lie on real = 100 + 2*raw.
     cal.partial_fit(10, 120)
     cal.partial_fit(30, 160)
     assert cal.coef_ == pytest.approx(2.0)
@@ -476,10 +473,10 @@ def test_calibrator_caps_intercept_at_max_intercept() -> None:
     assert cal.intercept_ == 50.0
 
 
-def test_calibrator_ema_tracks_drift_without_jumping() -> None:
-    """A second measurement blends in via the EMA rather than replacing the first."""
-    cal = OnlineAffineCalibrator(alpha=0.3)
-    cal.partial_fit(10, 20)  # seed: 2x
+def test_calibrator_same_size_averages_ratio() -> None:
+    """Repeated measurements at the same raw size use the mean ratio."""
+    cal = OnlineAffineCalibrator()
+    cal.partial_fit(10, 20)
     assert cal.predict(10) == 20.0
-    cal.partial_fit(10, 40)  # same size -> proportional; my = 0.7*20 + 0.3*40 = 26
-    assert cal.predict(10) == pytest.approx(26.0)
+    cal.partial_fit(10, 40)
+    assert cal.predict(10) == pytest.approx(30.0)

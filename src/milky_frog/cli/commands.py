@@ -5,6 +5,7 @@ from typing import Annotated
 
 import typer
 
+from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.cli.actions import (
     build_doctor_diagnostics,
     initialize_workspace,
@@ -18,8 +19,8 @@ from milky_frog.cli.launch import (
 )
 from milky_frog.cli.runs import find_last_run, resolve_run_id
 from milky_frog.domain import ResumeError
-from milky_frog.infra.checkpoint.sqlite import SqliteCheckpointStore
 from milky_frog.settings import Settings
+from milky_frog.ui.app import TuiLaunch
 from milky_frog.ui.cli import (
     console,
     render_diagnostics,
@@ -28,7 +29,6 @@ from milky_frog.ui.cli import (
     render_run,
     render_runs,
 )
-from milky_frog.ui.tui.app import TuiLaunch
 
 
 def register_commands(app: typer.Typer) -> None:

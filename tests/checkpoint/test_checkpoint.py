@@ -4,11 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from milky_frog.checkpoint import CleanupScope, RunClaimError
+from milky_frog.checkpoint import CleanupScope, RunClaimError, SqliteCheckpointStore
 from milky_frog.checkpoint.snapshot import dump_run_state, load_run_state
 from milky_frog.domain import MessageRole, RunState, RunStatus
 from milky_frog.harness.state import append_user_message, start_run
-from milky_frog.infra.checkpoint.sqlite import SqliteCheckpointStore
 from tests.checkpoint_helpers import seed_run
 
 

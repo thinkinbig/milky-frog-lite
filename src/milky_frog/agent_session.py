@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import TracebackType
 
-from milky_frog.checkpoint.base import CleanupScope, StoredRun
+from milky_frog.checkpoint import CleanupScope, SqliteCheckpointStore, StoredRun
 from milky_frog.domain import (
     DEFAULT_MAX_MODEL_CALLS,
     ApprovalVerdict,
@@ -17,14 +17,13 @@ from milky_frog.domain import (
     RunResult,
     RunStatus,
 )
-from milky_frog.handlers import BaseHandler, EventDispatcher, default_handlers
+from milky_frog.handlers import BaseHandler, EventHub, session_handler_bundles
 from milky_frog.handlers.context import HandlerContext
 from milky_frog.harness.agent_harness import AgentHarness
 from milky_frog.harness.sandbox import LocalSandbox, SandboxFactory
 from milky_frog.harness.state import seal
 from milky_frog.harness.tools import ToolRegistry, default_tools
 from milky_frog.harness.tools.tool_policy import SessionToolPolicy
-from milky_frog.infra.checkpoint.sqlite import SqliteCheckpointStore
 from milky_frog.models import OpenAIModel
 from milky_frog.project import load_project_config
 from milky_frog.settings import Settings
@@ -86,7 +85,7 @@ class AgentSession:
         settings: Settings,
         *,
         config: AgentSessionConfig | None = None,
-        handlers: EventDispatcher | None = None,
+        hub: EventHub | None = None,
         bundles: list[BaseHandler] | None = None,
         interactive: bool = False,
     ) -> None:
@@ -96,12 +95,12 @@ class AgentSession:
         self._api_key = api_key
         self._model_name = model
         self._base_url = settings.base_url
-        self._dispatcher_override = handlers
+        self._hub_override = hub
         self._extra_bundles = list(bundles or ())
         self._interactive = interactive
 
         self._checkpoints: SqliteCheckpointStore | None = None
-        self._dispatcher: EventDispatcher | None = None
+        self._hub: EventHub | None = None
         self._handlers: list[BaseHandler] = []
         self._model: OpenAIModel | None = None
         self._harness: AgentHarness | None = None
@@ -125,8 +124,8 @@ class AgentSession:
         return self._model_name
 
     @property
-    def dispatcher(self) -> EventDispatcher:
-        return _active(self._dispatcher)
+    def hub(self) -> EventHub:
+        return _active(self._hub)
 
     @property
     def checkpoints(self) -> SqliteCheckpointStore:
@@ -156,10 +155,10 @@ class AgentSession:
         settings: Settings,
         *,
         config: AgentSessionConfig | None = None,
-        handlers: EventDispatcher | None = None,
+        hub: EventHub | None = None,
         bundles: list[BaseHandler] | None = None,
     ) -> AgentSession:
-        return cls(settings, config=config, handlers=handlers, bundles=bundles)
+        return cls(settings, config=config, hub=hub, bundles=bundles)
 
     # ── Async resource lifecycle ─────────────────────────────────────
 
@@ -192,17 +191,18 @@ class AgentSession:
                     project_cfg.checkpoint_retention_days,
                 )
 
-        self._dispatcher = self._dispatcher_override or EventDispatcher()
-        self._handlers = default_handlers(
+        self._hub = self._hub_override or EventHub()
+        self._handlers = session_handler_bundles(
             self._settings,
             self._checkpoints,
             extra=self._extra_bundles,
         )
         for bundle in self._handlers:
-            bundle.register(self._dispatcher)
+            bundle.register(self._hub)
 
-        self._policy = SessionToolPolicy()
-        self._dispatcher.set_context(HandlerContext(policy=self._policy))
+        registry = ToolRegistry(default_tools())
+        self._policy = SessionToolPolicy(registry)
+        self._hub.set_context(HandlerContext(policy=self._policy))
 
         self._model = OpenAIModel(
             api_key=self._api_key,
@@ -213,9 +213,9 @@ class AgentSession:
 
         self._harness = AgentHarness(
             model=self._model,
-            tools=ToolRegistry(default_tools()),
+            tools=registry,
             checkpoints=self._checkpoints,
-            handlers=self._dispatcher,
+            hub=self._hub,
             sandbox_factory=self._config.sandbox_factory,
         )
 
@@ -249,7 +249,7 @@ class AgentSession:
         self._model = None
         self._handlers = []
         self._checkpoints = None
-        self._dispatcher = None
+        self._hub = None
         self._policy = None
 
     # ── Orchestration (sync) ──────────────────────────────────────────

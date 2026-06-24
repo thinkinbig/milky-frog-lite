@@ -6,7 +6,6 @@ from textual.message import Message
 
 from milky_frog.domain import RunResult, RunStatus, RunUsage
 from milky_frog.handlers.context import HandlerContext
-from milky_frog.handlers.dispatcher import BaseHandler, EventDispatcher
 from milky_frog.handlers.events import (
     RunAfterModel,
     RunAfterTool,
@@ -21,7 +20,8 @@ from milky_frog.handlers.events import (
     RunPaused,
     RunStarted,
 )
-from milky_frog.ui.tui.messages import (
+from milky_frog.handlers.hub import BaseHandler, EventHub
+from milky_frog.ui.messages import (
     AddText,
     AddThinking,
     ApprovalRequired,
@@ -38,7 +38,7 @@ Emit = Callable[[Message], object]
 class TuiPresentationHandler(BaseHandler):
     """Lifecycle Handler bundle: maps Harness signals to Textual messages.
 
-    Registered on the shared ``EventDispatcher`` beside checkpointing,
+    Registered on the shared ``EventHub`` beside checkpointing,
     policy, and observability.  ``MilkyFrogApp`` supplies ``post_message`` as
     the emit target so this bundle stays free of widget types.
     """
@@ -47,19 +47,19 @@ class TuiPresentationHandler(BaseHandler):
         self._emit = emit
         self._running = RunUsage()
 
-    def register(self, registry: EventDispatcher) -> None:
-        registry.on(RunStarted)(self._on_started)
-        registry.on(RunBeforeModel)(self._on_before_model)
-        registry.on(RunModelChunk)(self._on_model_chunk)
-        registry.on(RunModelReasoning)(self._on_model_reasoning)
-        registry.on(RunAfterModel)(self._on_after_model)
-        registry.on(RunBeforeTool)(self._on_before_tool)
-        registry.on(RunAfterTool)(self._on_after_tool)
-        registry.on(RunNotice)(self._on_notice)
-        registry.on(RunPaused)(self._on_paused)
-        registry.on(RunCompleted)(self._on_terminal)
-        registry.on(RunFailed)(self._on_terminal)
-        registry.on(RunCancelled)(self._on_terminal)
+    def register(self, hub: EventHub) -> None:
+        hub.on(RunStarted)(self._on_started)
+        hub.on(RunBeforeModel)(self._on_before_model)
+        hub.on(RunModelChunk)(self._on_model_chunk)
+        hub.on(RunModelReasoning)(self._on_model_reasoning)
+        hub.on(RunAfterModel)(self._on_after_model)
+        hub.on(RunBeforeTool)(self._on_before_tool)
+        hub.on(RunAfterTool)(self._on_after_tool)
+        hub.on(RunNotice)(self._on_notice)
+        hub.on(RunPaused)(self._on_paused)
+        hub.on(RunCompleted)(self._on_terminal)
+        hub.on(RunFailed)(self._on_terminal)
+        hub.on(RunCancelled)(self._on_terminal)
 
     async def _on_started(self, event: RunStarted, ctx: HandlerContext | None = None) -> None:
         self._running = RunUsage()

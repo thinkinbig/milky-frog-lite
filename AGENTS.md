@@ -56,7 +56,7 @@ start, resume, and approval handling.
 
 `agent_session.py` (`AgentSession`) assembles the concrete pieces from `Settings`
 and owns async resource lifetime plus Run orchestration. `cli/app.py` is the Typer
-command surface; `ui/tui/app.py` wires the interactive loop through Textual.
+command surface; `ui/app.py` wires the interactive loop through Textual.
 `ui/` renders one-shot command output via Rich and interactive Runs via Textual.
 
 ### Three event lanes (do not unify)
@@ -67,12 +67,12 @@ qualifier, and never merge them into one base type:
 | Lane | Where | Lifetime | Purpose |
 |------|-------|----------|---------|
 | **Checkpoint snapshot** | `checkpoint/snapshot.py`, `runs.state_json` | Durable (SQLite) | Resume source of truth |
-| **Lifecycle signal** | `handlers/events.py`, bus in `handlers/dispatcher.py` | Ephemeral (in-process) | UI streaming, Langfuse (`notify`) |
+| **Lifecycle signal** | `handlers/events.py`, hub in `handlers/hub.py` | Ephemeral (in-process) | UI streaming, Langfuse (`broadcast`) |
 | **Harness policy** | Explicit `Protocol` deps on `Harness` (future) | Per-call | Authorization, context build, etc. |
 
 RunState snapshots are serialized via Pydantic models in `checkpoint/snapshot.py` (ADR-0014).
 Lifecycle signals are frozen dataclass subclasses in `handlers/events.py`.
-Only `RunEmitter` publishes lifecycle signals. Handlers subscribe via
+Only the Harness publishes lifecycle signals via ``EventHub``. Handlers subscribe via
 `observe` / `on` / `subscribe`; most return `None`. `RunBeforeTool` and
 `RunBeforeStart` may return `HandlerResult` values that influence the next
 Harness step. Handlers do not publish signals themselves.
@@ -87,7 +87,7 @@ named class — so alternatives can be swapped without touching the Harness:
   (`read_file`, `write_file`, `edit_file`, `list_dir`, `grep`, `bash`).
 - `checkpoint/` — `CheckpointStore` protocol, `SqliteCheckpointStore`, `RunSnapshot` serialization (ADR-0014).
 - `harness/state.py` — transcript mutators and `repair_transcript` (interrupted-tool repair).
-- `handlers/` — lifecycle signals + `EventDispatcher` (ADR-0012); only `RunEmitter` publishes.
+- `handlers/` — lifecycle signals + `EventHub` (ADR-0012); the Harness publishes.
 - `harness/skills/` — `SkillCatalog`, declarative `SKILL.md` bundles (never executable).
 - `harness/sandbox/` — `Sandbox` protocol + `LocalSandbox`
   (path deny patterns, subprocess env, `sandbox_factory` injection). Implements the

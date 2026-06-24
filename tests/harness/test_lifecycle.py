@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
+from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import (
     ModelChunk,
     ModelRequest,
@@ -21,7 +22,7 @@ from milky_frog.domain import (
     ToolCall,
 )
 from milky_frog.handlers import (
-    EventDispatcher,
+    EventHub,
     RunBeforeTool,
     RunCancelled,
     RunFailed,
@@ -31,14 +32,13 @@ from milky_frog.handlers import (
     RunTurnStart,
 )
 from milky_frog.harness.tools import ToolContext, ToolRegistry, ToolResult
-from milky_frog.infra.checkpoint.sqlite import SqliteCheckpointStore
 from tests.checkpoint_helpers import run_status, tool_messages
 from tests.stubs import EchoTool, FakeModel, SlowStreamModel, make_harness
 
 
 @pytest.mark.asyncio
 async def test_dispatches_run_lifecycle_events(tmp_path: Path) -> None:
-    registry = EventDispatcher()
+    registry = EventHub()
     seen: list[str] = []
 
     @registry.subscribe
@@ -49,7 +49,7 @@ async def test_dispatches_run_lifecycle_events(tmp_path: Path) -> None:
         model=FakeModel(),
         tools=ToolRegistry((EchoTool(),)),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
-        handlers=registry,
+        hub=registry,
     )
 
     result = await harness.run(RunRequest("echo hello", tmp_path))
@@ -64,7 +64,7 @@ async def test_dispatches_run_lifecycle_events(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_dispatches_run_paused_event(tmp_path: Path) -> None:
-    registry = EventDispatcher()
+    registry = EventHub()
     paused: list[RunPaused] = []
 
     @registry.on(RunPaused)
@@ -82,7 +82,7 @@ async def test_dispatches_run_paused_event(tmp_path: Path) -> None:
         model=NoToolModel(),
         tools=ToolRegistry((EchoTool(),)),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
-        handlers=registry,
+        hub=registry,
     )
 
     result = await harness.run(RunRequest("loop forever", tmp_path, max_model_calls=1))
@@ -94,7 +94,7 @@ async def test_dispatches_run_paused_event(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_cancellation_stops_run(tmp_path: Path) -> None:
-    registry = EventDispatcher()
+    registry = EventHub()
     cancelled: list[RunCancelled] = []
 
     @registry.on(RunCancelled)
@@ -106,7 +106,7 @@ async def test_cancellation_stops_run(tmp_path: Path) -> None:
         model=SlowStreamModel(),
         tools=ToolRegistry(),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
-        handlers=registry,
+        hub=registry,
     )
 
     async def run_and_cancel() -> RunResult:
@@ -153,7 +153,7 @@ async def test_cancellation_during_tool_execution(tmp_path: Path) -> None:
         model=SlowToolModel(),
         tools=ToolRegistry((SlowTool(),)),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
-        handlers=EventDispatcher(),
+        hub=EventHub(),
     )
 
     async def run_and_cancel() -> RunResult:
@@ -183,7 +183,7 @@ def test_tool_context_exposes_cancellation_poll() -> None:
 @pytest.mark.asyncio
 async def test_cancelled_handler_runs_after_checkpoint(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    registry = EventDispatcher()
+    registry = EventHub()
     checkpoint_seen = False
 
     @registry.on(RunCancelled)
@@ -197,7 +197,7 @@ async def test_cancelled_handler_runs_after_checkpoint(tmp_path: Path) -> None:
         model=SlowStreamModel(),
         tools=ToolRegistry(),
         checkpoints=store,
-        handlers=registry,
+        hub=registry,
     )
 
     async def run_and_cancel() -> RunResult:
@@ -219,7 +219,7 @@ async def test_external_cancellation_reraises(tmp_path: Path) -> None:
         model=SlowStreamModel(),
         tools=ToolRegistry(),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
-        handlers=EventDispatcher(),
+        hub=EventHub(),
     )
 
     task = asyncio.create_task(harness.run(RunRequest("slow", tmp_path)))
@@ -253,7 +253,7 @@ async def test_external_cancellation_kills_orphan_stream(tmp_path: Path) -> None
         model=model,
         tools=ToolRegistry(),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
-        handlers=EventDispatcher(),
+        hub=EventHub(),
     )
 
     task = asyncio.create_task(harness.run(RunRequest("slow", tmp_path)))
@@ -269,7 +269,7 @@ async def test_external_cancellation_kills_orphan_stream(tmp_path: Path) -> None
 
 @pytest.mark.asyncio
 async def test_dispatches_run_failed_event(tmp_path: Path) -> None:
-    registry = EventDispatcher()
+    registry = EventHub()
     failed: list[RunFailed] = []
 
     @registry.on(RunFailed)
@@ -286,7 +286,7 @@ async def test_dispatches_run_failed_event(tmp_path: Path) -> None:
         model=BrokenModel(),
         tools=ToolRegistry(),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
-        handlers=registry,
+        hub=registry,
     )
 
     result = await harness.run(RunRequest("fail", tmp_path))
@@ -302,7 +302,7 @@ async def test_dispatches_run_failed_event(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_before_tool_handler_cannot_mutate_executed_call(tmp_path: Path) -> None:
-    handlers = EventDispatcher()
+    handlers = EventHub()
 
     @handlers.observe(RunBeforeTool)
     async def mutate_handler_copy(event: RunBeforeTool, _ctx=None) -> None:
@@ -319,7 +319,7 @@ async def test_before_tool_handler_cannot_mutate_executed_call(tmp_path: Path) -
 
 @pytest.mark.asyncio
 async def test_run_started_handler_cannot_control_live_run(tmp_path: Path) -> None:
-    handlers = EventDispatcher()
+    handlers = EventHub()
 
     @handlers.observe(RunStarted)
     async def mutate_handler_snapshot(event: RunStarted, _ctx=None) -> None:
@@ -345,7 +345,7 @@ async def test_run_started_handler_cannot_control_live_run(tmp_path: Path) -> No
 @pytest.mark.asyncio
 async def test_dispatches_run_turn_events(tmp_path: Path) -> None:
     """RunTurnStart and RunTurnEnd fire with correct numbering across two turns."""
-    registry = EventDispatcher()
+    registry = EventHub()
     starts: list[RunTurnStart] = []
     ends: list[RunTurnEnd] = []
 
@@ -361,7 +361,7 @@ async def test_dispatches_run_turn_events(tmp_path: Path) -> None:
         model=FakeModel(),
         tools=ToolRegistry((EchoTool(),)),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
-        handlers=registry,
+        hub=registry,
     )
 
     await harness.run(RunRequest("echo hello", tmp_path, max_model_calls=2))
@@ -379,7 +379,7 @@ async def test_dispatches_run_turn_events(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_turn_events_fire_before_complete(tmp_path: Path) -> None:
     """RunTurnEnd fires before RunCompleted when model returns no tool calls."""
-    registry = EventDispatcher()
+    registry = EventHub()
     order: list[str] = []
 
     @registry.subscribe
@@ -395,7 +395,7 @@ async def test_turn_events_fire_before_complete(tmp_path: Path) -> None:
         model=ContentModel(),
         tools=ToolRegistry(),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
-        handlers=registry,
+        hub=registry,
     )
 
     await harness.run(RunRequest("go", tmp_path))
