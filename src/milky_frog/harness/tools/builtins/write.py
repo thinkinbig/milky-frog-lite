@@ -3,7 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from milky_frog.domain import ToolResult
-from milky_frog.harness.sandbox import SandboxViolation
+from milky_frog.harness.execution_backend import SandboxViolation
 from milky_frog.harness.tools.base import ToolContext
 
 
@@ -26,9 +26,9 @@ class WriteFileTool:
 
     async def execute(self, context: ToolContext, input: BaseModel) -> ToolResult:
         params = WriteFileInput.model_validate(input)
-        sandbox = context.require_sandbox()
+        backend = context.require_backend()
         try:
-            resolved = sandbox.resolve(params.path)
+            resolved = backend.resolve(params.path)
         except SandboxViolation as error:
             return ToolResult(str(error), is_error=True)
         if resolved.is_dir():
