@@ -10,7 +10,6 @@ from pydantic import BaseModel, Field
 from milky_frog.domain import ToolResult
 from milky_frog.harness.sandbox import Sandbox, SandboxViolation
 from milky_frog.harness.tools.base import ToolContext
-from milky_frog.harness.tools.truncate import truncate_tool_output
 
 # Cap a single matched line so one minified file can't dominate the output.
 _MAX_LINE_CHARS = 300
@@ -88,10 +87,7 @@ class GrepTool:
 
         if not lines:
             return ToolResult("(no matches)")
-        output = truncate_tool_output(
-            "\n".join(lines), max_chars=_MAX_OUTPUT_CHARS, tool_name="grep"
-        )
-        return ToolResult(output)
+        return ToolResult("\n".join(lines))
 
 
 def _iter_allowed_files(sandbox: Sandbox, root: Path) -> Iterator[Path]:

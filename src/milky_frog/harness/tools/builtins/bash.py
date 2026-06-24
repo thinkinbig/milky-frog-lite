@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 
 from milky_frog.domain import ToolResult
 from milky_frog.harness.tools.base import ToolContext
-from milky_frog.harness.tools.truncate import truncate_tool_output
 from milky_frog.project import DEFAULT_BASH_TIMEOUT_SECONDS
 
 # Grace period to drain PTY output after the process exits.
