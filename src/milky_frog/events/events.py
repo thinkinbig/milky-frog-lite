@@ -33,10 +33,10 @@ class BaseEvent:
 class RunBeforeStart(BaseEvent):
     """Dispatched before the transcript is seeded and the Run is stored.
 
-    Handlers may return ``SystemPromptSection`` to inject content into the
-    system prompt that ``start_run`` assembles.  Pure-observation handlers
-    return ``None``.  The event carries the resolved workspace path so
-    handlers (e.g. Skills) can read skill files from disk.
+    Pure observation — handlers may inspect the request and workspace but
+    cannot inject content into the system prompt via this event.  Context
+    injection happens through the ``ContextLoader`` protocol injected into
+    ``AgentHarness``.
     """
 
     request: RunRequest

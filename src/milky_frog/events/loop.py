@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, cast
 from milky_frog.core.runtime.execute_tool import run_cancellable
 from milky_frog.core.sandbox import Sandbox
 from milky_frog.domain import (
+    DEFAULT_MAX_MODEL_CALLS,
     ModelRequest,
     ModelResponse,
     ReasoningDelta,
@@ -54,7 +55,7 @@ class AgentLoop:
         state: RunState,
         sandbox: Sandbox,
         *,
-        max_calls: int = 30,
+        max_calls: int = DEFAULT_MAX_MODEL_CALLS,
         cancellation: RunCancellation | None = None,
         budget: TokenBudget | None = None,
     ) -> RunResult:

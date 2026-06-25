@@ -1,13 +1,13 @@
+from __future__ import annotations
+
 from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
 
 from milky_frog.checkpoint import SqliteCheckpointStore
-from milky_frog.core.handlers import SystemPromptSection
 from milky_frog.domain import ModelChunk, ModelRequest, ModelResponse, RunRequest, StreamDone
-from milky_frog.events import EventHub, RunBeforeStart
-from milky_frog.handlers.skills import AgentContextHandler
+from milky_frog.harness.prompt import make_context_loader
 from milky_frog.harness.skills import SkillCatalog
 from milky_frog.harness.tools import ToolRegistry
 from tests.stubs import make_harness
@@ -34,54 +34,35 @@ def test_project_skill_overrides_user_skill(tmp_path: Path) -> None:
     assert catalog.load("review").instructions == "project instructions"
 
 
-# ── AgentContextHandler ────────────────────────────────────────────────────
+# ── ContextLoader ──────────────────────────────────────────────────────────
 
 
-def _make_event(workspace: Path) -> RunBeforeStart:
-    return RunBeforeStart(
-        run_id="run-1",
-        request=RunRequest("hello", workspace),
-        workspace=workspace,
-    )
-
-
-@pytest.mark.asyncio
-async def test_handler_injects_skill_catalog_metadata(tmp_path: Path) -> None:
+def test_context_loader_injects_skill_catalog_metadata(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     home = tmp_path / "home"
     _write_skill(home / "skills", "review", "Code review skill", "Always check for typos.")
 
-    bus = EventHub()
-    AgentContextHandler(home).register(bus)
+    loader = make_context_loader(home)
+    section = loader(workspace)
 
-    results = await bus.broadcast(_make_event(workspace))
-    injected = [r for r in results if isinstance(r, SystemPromptSection)]
-
-    assert len(injected) == 1
-    assert "<name>review</name>" in injected[0].content
-    assert "Code review skill" in injected[0].content
-    assert "Always check for typos." not in injected[0].content
+    assert section is not None
+    assert "<name>review</name>" in section
+    assert "Code review skill" in section
+    assert "Always check for typos." not in section  # metadata only, not instructions
 
 
-@pytest.mark.asyncio
-async def test_handler_returns_none_when_no_context(tmp_path: Path) -> None:
+def test_context_loader_returns_none_when_no_context(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     home = tmp_path / "home"
     home.mkdir()
 
-    bus = EventHub()
-    AgentContextHandler(home).register(bus)
-
-    results = await bus.broadcast(_make_event(workspace))
-    injected = [r for r in results if isinstance(r, SystemPromptSection)]
-
-    assert injected == []
+    loader = make_context_loader(home)
+    assert loader(workspace) is None
 
 
-@pytest.mark.asyncio
-async def test_project_skills_override_user_skills_in_handler(tmp_path: Path) -> None:
+def test_context_loader_project_skills_override_user_skills(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     project_skills = workspace / ".milky-frog" / "skills"
     workspace.mkdir()
@@ -89,19 +70,15 @@ async def test_project_skills_override_user_skills_in_handler(tmp_path: Path) ->
     _write_skill(home / "skills", "review", "user", "user instructions")
     _write_skill(project_skills, "review", "project", "project instructions")
 
-    bus = EventHub()
-    AgentContextHandler(home).register(bus)
+    loader = make_context_loader(home)
+    section = loader(workspace)
 
-    results = await bus.broadcast(_make_event(workspace))
-    injected = [r for r in results if isinstance(r, SystemPromptSection)]
-
-    assert len(injected) == 1
-    assert "<description>project</description>" in injected[0].content
-    assert "<description>user</description>" not in injected[0].content
+    assert section is not None
+    assert "<description>project</description>" in section
+    assert "<description>user</description>" not in section
 
 
-@pytest.mark.asyncio
-async def test_handler_skips_malformed_skill(tmp_path: Path) -> None:
+def test_context_loader_skips_malformed_skill(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     home = tmp_path / "home"
@@ -110,15 +87,12 @@ async def test_handler_skips_malformed_skill(tmp_path: Path) -> None:
     bad.mkdir()
     (bad / "SKILL.md").write_text("no frontmatter here", encoding="utf-8")
 
-    bus = EventHub()
-    AgentContextHandler(home).register(bus)
+    loader = make_context_loader(home)
+    section = loader(workspace)
 
-    results = await bus.broadcast(_make_event(workspace))
-    injected = [r for r in results if isinstance(r, SystemPromptSection)]
-
-    assert len(injected) == 1
-    assert "<name>good</name>" in injected[0].content
-    assert "<name>bad</name>" not in injected[0].content
+    assert section is not None
+    assert "<name>good</name>" in section
+    assert "<name>bad</name>" not in section
 
 
 # ── Integration: skill catalog reaches the system message ─────────────────
@@ -126,7 +100,7 @@ async def test_handler_skips_malformed_skill(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_skill_catalog_appears_in_system_message(tmp_path: Path) -> None:
-    """Skill metadata injected via RunBeforeStart must be visible in the first
+    """Skill metadata injected via ContextLoader must be visible in the first
     system message of the persisted transcript — the one the model actually sees."""
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -139,14 +113,11 @@ async def test_skill_catalog_appears_in_system_message(tmp_path: Path) -> None:
             yield StreamDone(ModelResponse(content="done"))
 
     store = SqliteCheckpointStore(tmp_path / "state.db")
-    bus = EventHub()
-    AgentContextHandler(home).register(bus)
-
     harness = make_harness(
         model=ImmediateModel(),
         tools=ToolRegistry(),
         checkpoints=store,
-        hub=bus,
+        context_loader=make_context_loader(home),
     )
     result = await harness.run(RunRequest("hello", workspace))
 

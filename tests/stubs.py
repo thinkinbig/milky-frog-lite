@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from milky_frog.adapters.local import LocalSandbox
 from milky_frog.checkpoint import CheckpointStore
-from milky_frog.core.runtime.assemble import assemble_agent_harness
+from milky_frog.core.runtime.assemble import make_agent_harness
 from milky_frog.core.sandbox import Sandbox
 from milky_frog.domain import (
     ModelChunk,
@@ -23,6 +23,7 @@ from milky_frog.domain import (
 from milky_frog.events import EventHub
 from milky_frog.handlers.checkpoint import CheckpointHandler
 from milky_frog.harness.harness import AgentHarness
+from milky_frog.harness.prompt_context import ContextLoader
 from milky_frog.harness.tools import ToolContext, ToolRegistry, ToolResult
 from milky_frog.models import Model
 
@@ -50,21 +51,23 @@ def make_harness(
     checkpoints: CheckpointStore,
     hub: EventHub | None = None,
     sandbox_factory: RecordingSandboxFactory | None = None,
+    context_loader: ContextLoader | None = None,
 ) -> AgentHarness:
     """Build a Harness with checkpointing wired, mirroring production assembly.
 
-    Production wires ``CheckpointHandler`` via ``handlers.session_handler_bundles``; the
+    Production wires ``CheckpointHandler`` via ``make_session_handlers``; the
     Harness no longer self-registers it. Tests that need a resumable Run use this
     helper so the snapshot handler lands on the same hub they inspect.
     """
     bus = hub if hub is not None else EventHub()
     CheckpointHandler(checkpoints).register(bus)
-    harness = assemble_agent_harness(
+    harness = make_agent_harness(
         model,
         checkpoints,
         bus,
         tools=tools,
         sandbox_factory=sandbox_factory or LocalSandbox,
+        context_loader=context_loader,
     )
     harness.policy.auto_approve()
     return harness

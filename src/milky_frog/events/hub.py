@@ -121,10 +121,8 @@ class EventHub:
 
     # ── Harness publish API (delegates to RunEmitter) ────────────────────
 
-    async def run_before_start(
-        self, run_id: str, request: RunRequest, workspace: Path
-    ) -> tuple[str, ...]:
-        return await self._emitter.run_before_start(run_id, request, workspace)
+    async def run_before_start(self, run_id: str, request: RunRequest, workspace: Path) -> None:
+        await self._emitter.run_before_start(run_id, request, workspace)
 
     async def run_started(
         self, run_id: str, request: RunRequest, state: RunState

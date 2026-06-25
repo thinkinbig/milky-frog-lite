@@ -8,7 +8,7 @@ from types import TracebackType
 
 from milky_frog.adapters.local import LocalSandbox
 from milky_frog.adapters.models import OpenAIModel
-from milky_frog.core.runtime.assemble import assemble_agent_harness
+from milky_frog.core.runtime.assemble import make_agent_harness, make_session_handlers
 from milky_frog.core.runtime.checkpoint import RunCheckpointFacade
 from milky_frog.core.runtime.foreground import ForegroundRun
 from milky_frog.core.sandbox import SandboxFactory
@@ -19,8 +19,8 @@ from milky_frog.domain import (
     RunResult,
 )
 from milky_frog.events import BaseHandler, EventHub
-from milky_frog.handlers.bundles import session_handler_bundles
 from milky_frog.harness.harness import AgentHarness
+from milky_frog.harness.prompt import make_context_loader
 from milky_frog.project import load_project_config
 from milky_frog.settings import Settings
 
@@ -168,18 +168,18 @@ class AgentSession:
         workspace = Path.cwd()
 
         project_cfg = load_project_config(workspace)
-        if project_cfg.prune_on_start and project_cfg.checkpoint_retention_days > 0:
-            cutoff = datetime.now(UTC) - timedelta(days=project_cfg.checkpoint_retention_days)
+        if project_cfg.checkpoint.prune_on_start and project_cfg.checkpoint.retention_days > 0:
+            cutoff = datetime.now(UTC) - timedelta(days=project_cfg.checkpoint.retention_days)
             pruned = self._checkpoints.prune(cutoff, workspace)
             if pruned:
                 logger.info(
                     "Pruned %d stale checkpoint(s) (retention: %d days)",
                     pruned,
-                    project_cfg.checkpoint_retention_days,
+                    project_cfg.checkpoint.retention_days,
                 )
 
         self._hub = self._hub_override or EventHub()
-        self._handlers = session_handler_bundles(
+        self._handlers = make_session_handlers(
             self._settings,
             store,
             extra=self._extra_bundles,
@@ -194,11 +194,14 @@ class AgentSession:
         )
         await self._model.__aenter__()
 
-        self._harness = assemble_agent_harness(
+        self._harness = make_agent_harness(
             model=self._model,
             checkpoints=store,
             hub=self._hub,
             sandbox_factory=self._config.sandbox_factory,
+            context_loader=make_context_loader(self._settings.home),
+            max_retries=self._settings.max_retries,
+            retry_base_delay=self._settings.retry_base_delay,
         )
 
         self._foreground = ForegroundRun(

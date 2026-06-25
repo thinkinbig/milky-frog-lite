@@ -20,6 +20,7 @@ from milky_frog.domain import (
 from milky_frog.events import EventHub
 from milky_frog.events.loop import AgentLoop
 from milky_frog.events.tool_step import ToolStepExecutor
+from milky_frog.harness.prompt_context import ContextLoader
 from milky_frog.harness.state import (
     append_tool_result,
     append_user_message,
@@ -43,7 +44,7 @@ class AgentHarness:
     delegates the model→Tool→model loop to an injected ``AgentLoop``.
 
     Runtime wiring (``AgentLoop``, ``ToolStepExecutor``, ``SessionToolPolicy``)
-    lives in ``assemble_agent_harness`` so this class stays a thin coordinator.
+    lives in ``make_agent_harness`` so this class stays a thin coordinator.
     """
 
     def __init__(
@@ -55,6 +56,7 @@ class AgentHarness:
         policy: SessionToolPolicy,
         sandbox_factory: SandboxFactory = LocalSandbox,
         budget: TokenBudget | None = None,
+        context_loader: ContextLoader | None = None,
     ) -> None:
         self._checkpoints = checkpoints
         self._hub = hub
@@ -63,6 +65,7 @@ class AgentHarness:
         self._policy = policy
         self._sandbox_factory = sandbox_factory
         self._budget = budget
+        self._context_loader = context_loader
 
     @property
     def policy(self) -> SessionToolPolicy:
@@ -74,7 +77,12 @@ class AgentHarness:
         workspace = run_request.workspace.resolve(strict=True)
         with self._checkpoints.claim(run_id):
             self._checkpoints.create_run(run_id, workspace)
-            extra_sections = await self._hub.run_before_start(run_id, run_request, workspace)
+            extra_sections: tuple[str, ...] = ()
+            if self._context_loader is not None:
+                section = self._context_loader(workspace)
+                if section is not None:
+                    extra_sections = (section,)
+            await self._hub.run_before_start(run_id, run_request, workspace)
             state = start_run(
                 RunState(run_id=run_id, workspace=workspace),
                 run_request.prompt,

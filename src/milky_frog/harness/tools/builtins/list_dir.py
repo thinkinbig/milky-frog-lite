@@ -49,6 +49,6 @@ class ListDirTool:
         lines = [f"{entry.name}/" if entry.is_dir() else entry.name for entry in entries]
         text = "\n".join(lines)
 
-        text = truncate_tool_output(text, max_chars=32000, tool_name="list_dir")
+        text = truncate_tool_output(text, max_chars=sandbox.config.search_output_max_chars)
 
         return ToolResult(text)

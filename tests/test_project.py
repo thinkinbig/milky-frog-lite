@@ -69,16 +69,16 @@ def test_checkpoint_retention_days_from_config(tmp_path: Path) -> None:
     )
 
     cfg = load_project_config(tmp_path)
-    assert cfg.checkpoint_retention_days == 7
-    assert cfg.prune_on_start is False
+    assert cfg.checkpoint.retention_days == 7
+    assert cfg.checkpoint.prune_on_start is False
 
 
 def test_checkpoint_missing_section_uses_defaults(tmp_path: Path) -> None:
     _write_config(tmp_path, "max_model_calls = 10\n")
 
     cfg = load_project_config(tmp_path)
-    assert cfg.checkpoint_retention_days == 30
-    assert cfg.prune_on_start is True
+    assert cfg.checkpoint.retention_days == 30
+    assert cfg.checkpoint.prune_on_start is True
 
 
 def test_checkpoint_invalid_retention_falls_back(tmp_path: Path) -> None:
@@ -87,12 +87,28 @@ def test_checkpoint_invalid_retention_falls_back(tmp_path: Path) -> None:
         "[checkpoint]\nretention_days = -1\n",
     )
 
-    assert load_project_config(tmp_path).checkpoint_retention_days == 30
+    assert load_project_config(tmp_path).checkpoint.retention_days == 30
 
 
 def test_checkpoint_generated_template_round_trips(tmp_path: Path) -> None:
     _write_config(tmp_path, CONFIG_TEMPLATE)
 
     cfg = load_project_config(tmp_path)
-    assert cfg.checkpoint_retention_days == 30
-    assert cfg.prune_on_start is True
+    assert cfg.checkpoint.retention_days == 30
+    assert cfg.checkpoint.prune_on_start is True
+
+
+def test_boolean_rejected_for_integer_field(tmp_path: Path) -> None:
+    _write_config(tmp_path, "max_model_calls = true\n")
+
+    assert load_project_config(tmp_path).max_model_calls == DEFAULT_MAX_MODEL_CALLS
+
+
+def test_invalid_env_allowlist_extra_filtered(tmp_path: Path) -> None:
+    _write_config(
+        tmp_path,
+        'env_allowlist_extra = ["VALID_VAR", "bad-var", "123", "lower_case", "ANOTHER"]\n',
+    )
+
+    cfg = load_project_config(tmp_path)
+    assert cfg.env_allowlist_extra == ("VALID_VAR", "ANOTHER")

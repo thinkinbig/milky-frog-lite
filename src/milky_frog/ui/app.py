@@ -25,7 +25,7 @@ from milky_frog.core.controller import RunController
 from milky_frog.domain import ApprovalDecision, ApprovalVerdict, ResumeError, RunStatus, RunUsage
 from milky_frog.project import load_project_config
 from milky_frog.settings import Settings
-from milky_frog.ui.bundles import tui_presentation_bundle
+from milky_frog.ui.bundles import make_tui_presentation_handlers
 from milky_frog.ui.cli import runs_table
 from milky_frog.ui.logo import welcome_banner
 from milky_frog.ui.messages import (
@@ -435,7 +435,7 @@ class MilkyFrogApp(App[None]):
         # in ``run()`` so Textual's sync outer loop can bracket the lifecycle).
         self._session = AgentSession(
             settings,
-            bundles=tui_presentation_bundle(self.post_message),
+            bundles=make_tui_presentation_handlers(self.post_message),
             interactive=True,
         )
         self._worker: Worker[None] | None = None

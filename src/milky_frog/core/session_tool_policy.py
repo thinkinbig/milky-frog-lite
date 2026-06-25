@@ -15,7 +15,7 @@ from milky_frog.harness.tools.registry import ToolRegistry, UnknownToolError
 class SessionToolPolicy:
     """Mutable session-level tool policy for one ``ToolRegistry``.
 
-    Wired at assembly time by ``assemble_agent_harness``; exposed as
+    Wired at assembly time by ``make_agent_harness``; exposed as
     ``session.policy``.  ``ToolStepExecutor`` calls ``decide()`` inline before
     each tool execution, so changes take effect immediately.
 

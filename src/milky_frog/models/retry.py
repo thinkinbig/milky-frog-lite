@@ -7,9 +7,6 @@ from typing import Any
 from milky_frog.domain import ModelChunk, ModelRequest
 from milky_frog.models.base import Model
 
-_MAX_ATTEMPTS = 3
-_BASE_DELAY_S = 1.0
-
 
 def is_retriable_model_error(error: BaseException) -> bool:
     if isinstance(error, (ConnectionError, TimeoutError, OSError)):
@@ -28,22 +25,27 @@ class RetryingModel:
         self,
         inner: Model,
         notify: Callable[[str, str], Coroutine[Any, Any, Any]],
+        *,
+        max_attempts: int = 3,
+        base_delay: float = 1.0,
     ) -> None:
         self._inner = inner
         self._notify = notify
+        self._max_attempts = max_attempts
+        self._base_delay = base_delay
 
     async def stream(self, request: ModelRequest) -> AsyncGenerator[ModelChunk, None]:
-        for attempt in range(1, _MAX_ATTEMPTS + 1):
+        for attempt in range(1, self._max_attempts + 1):
             try:
                 async for chunk in self._inner.stream(request):
                     yield chunk
                 return
             except Exception as error:
-                if not is_retriable_model_error(error) or attempt >= _MAX_ATTEMPTS:
+                if not is_retriable_model_error(error) or attempt >= self._max_attempts:
                     raise
                 await self._notify(
                     request.run_id,
                     f"Cannot reach model ({type(error).__name__}) — "
-                    f"retrying ({attempt + 1}/{_MAX_ATTEMPTS})",
+                    f"retrying ({attempt + 1}/{self._max_attempts})",
                 )
-                await asyncio.sleep(_BASE_DELAY_S * attempt)
+                await asyncio.sleep(self._base_delay * attempt)

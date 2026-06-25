@@ -23,12 +23,8 @@ from milky_frog.domain import (
 from milky_frog.events import BaseHandler, EventHub, RunCancelled
 from milky_frog.harness.harness import AgentHarness
 from milky_frog.models import OpenAIModel
-from milky_frog.settings import LangfuseSettings, Settings
+from milky_frog.settings import Settings
 from tests.checkpoint_helpers import run_status, seed_interrupted_tool_run, seed_run
-
-_NO_LANGFUSE = LangfuseSettings(
-    enabled=False, public_key=None, secret_key=None, host="https://cloud.langfuse.com"
-)
 
 
 @pytest.mark.asyncio
@@ -43,7 +39,12 @@ async def test_session_runs_through_configured_runtime(
         yield StreamDone(ModelResponse(content="done"))
 
     monkeypatch.setattr(OpenAIModel, "stream", fake_stream)
-    settings = Settings(tmp_path, "test-key", "https://example.test", "test-model", _NO_LANGFUSE)
+    settings = Settings(
+        home=tmp_path,
+        api_key="test-key",
+        base_url="https://example.test",
+        model="test-model",
+    )
 
     async with AgentSession.from_settings(settings) as session:
         result = await session.start_new("build it", tmp_path)
@@ -66,7 +67,12 @@ async def test_session_cancel_stops_foreground_run(
         yield StreamDone(ModelResponse(content="done"))
 
     monkeypatch.setattr(OpenAIModel, "stream", slow_stream)
-    settings = Settings(tmp_path, "test-key", "https://example.test", "test-model", _NO_LANGFUSE)
+    settings = Settings(
+        home=tmp_path,
+        api_key="test-key",
+        base_url="https://example.test",
+        model="test-model",
+    )
     hub = EventHub()
     cancelled: list[RunCancelled] = []
 
@@ -105,7 +111,7 @@ async def test_session_context_manager_closes_its_bundles(tmp_path: Path) -> Non
             self.closed += 1
 
     spy = SpyHandler()
-    settings = Settings(tmp_path, "test-key", None, "test-model", _NO_LANGFUSE)
+    settings = Settings(home=tmp_path, api_key="test-key", model="test-model")
 
     async with AgentSession.from_settings(settings, bundles=[spy]):
         pass
@@ -133,7 +139,7 @@ async def test_session_close_isolates_failing_bundle(tmp_path: Path) -> None:
             self.closed += 1
 
     spy = SpyHandler()
-    settings = Settings(tmp_path, "test-key", None, "test-model", _NO_LANGFUSE)
+    settings = Settings(home=tmp_path, api_key="test-key", model="test-model")
 
     async with AgentSession.from_settings(settings, bundles=[FailingHandler(), spy]):
         pass
@@ -144,7 +150,7 @@ async def test_session_close_isolates_failing_bundle(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_session_exit_is_idempotent(tmp_path: Path) -> None:
     """Double __aexit__ must not raise."""
-    settings = Settings(tmp_path, "test-key", None, "test-model", _NO_LANGFUSE)
+    settings = Settings(home=tmp_path, api_key="test-key", model="test-model")
     session = AgentSession.from_settings(settings)
 
     await session.__aenter__()
@@ -154,7 +160,7 @@ async def test_session_exit_is_idempotent(tmp_path: Path) -> None:
 
 
 def test_session_rejects_missing_model_configuration(tmp_path: Path) -> None:
-    settings = Settings(tmp_path, None, None, None, _NO_LANGFUSE)
+    settings = Settings(home=tmp_path, api_key=None, model=None)
 
     with pytest.raises(MissingModelConfiguration, match="model configuration is missing"):
         AgentSession.from_settings(settings)
@@ -164,7 +170,8 @@ def test_session_rejects_missing_model_configuration(tmp_path: Path) -> None:
 def test_session_rejects_empty_model_configuration(
     tmp_path: Path, api_key: str, model: str
 ) -> None:
-    settings = Settings(tmp_path, api_key, None, model, _NO_LANGFUSE)
+    # Empty strings are coerced to None by the pydantic validator.
+    settings = Settings(home=tmp_path, api_key=api_key, model=model)
 
     with pytest.raises(MissingModelConfiguration, match="model configuration is missing"):
         AgentSession.from_settings(settings)
@@ -179,7 +186,12 @@ async def test_session_resume_advances_stored_run(
         yield StreamDone(ModelResponse(content="resumed"))
 
     monkeypatch.setattr(OpenAIModel, "stream", fake_stream)
-    settings = Settings(tmp_path, "test-key", "https://example.test", "test-model", _NO_LANGFUSE)
+    settings = Settings(
+        home=tmp_path,
+        api_key="test-key",
+        base_url="https://example.test",
+        model="test-model",
+    )
     store = SqliteCheckpointStore(settings.database_path)
     run_id = "paused-run"
     seed_run(store, run_id, tmp_path, status=RunStatus.PAUSED_LIMIT, final_message="limit")
@@ -194,7 +206,12 @@ async def test_session_resume_advances_stored_run(
 
 @pytest.mark.asyncio
 async def test_session_resume_resurfaces_waiting_for_approval(tmp_path: Path) -> None:
-    settings = Settings(tmp_path, "test-key", "https://example.test", "test-model", _NO_LANGFUSE)
+    settings = Settings(
+        home=tmp_path,
+        api_key="test-key",
+        base_url="https://example.test",
+        model="test-model",
+    )
     store = SqliteCheckpointStore(settings.database_path)
     run_id = "approval-run"
     seed_interrupted_tool_run(
@@ -215,7 +232,12 @@ async def test_session_resume_resurfaces_waiting_for_approval(tmp_path: Path) ->
 
 @pytest.mark.asyncio
 async def test_session_resume_rejects_unknown_run(tmp_path: Path) -> None:
-    settings = Settings(tmp_path, "test-key", "https://example.test", "test-model", _NO_LANGFUSE)
+    settings = Settings(
+        home=tmp_path,
+        api_key="test-key",
+        base_url="https://example.test",
+        model="test-model",
+    )
 
     async with AgentSession.from_settings(settings) as session:
         with pytest.raises(ResumeError, match="unknown Run"):
@@ -231,7 +253,12 @@ async def test_session_respond_approval_executes_pending_tool(
         yield StreamDone(ModelResponse(content="done"))
 
     monkeypatch.setattr(OpenAIModel, "stream", fake_stream)
-    settings = Settings(tmp_path, "test-key", "https://example.test", "test-model", _NO_LANGFUSE)
+    settings = Settings(
+        home=tmp_path,
+        api_key="test-key",
+        base_url="https://example.test",
+        model="test-model",
+    )
     (tmp_path / "note.txt").write_text("hi", encoding="utf-8")
     store = SqliteCheckpointStore(settings.database_path)
     run_id = "approval-run"
@@ -260,7 +287,12 @@ async def test_session_persists_cancel_on_interrupt(
         raise asyncio.CancelledError()
 
     monkeypatch.setattr(AgentHarness, "resume", interrupted_resume)
-    settings = Settings(tmp_path, "test-key", "https://example.test", "test-model", _NO_LANGFUSE)
+    settings = Settings(
+        home=tmp_path,
+        api_key="test-key",
+        base_url="https://example.test",
+        model="test-model",
+    )
     store = SqliteCheckpointStore(settings.database_path)
     run_id = "running-run"
     seed_run(store, run_id, tmp_path, status=RunStatus.RUNNING)
@@ -274,7 +306,12 @@ async def test_session_persists_cancel_on_interrupt(
 
 @pytest.mark.asyncio
 async def test_session_persists_cancel_on_exit_while_busy(tmp_path: Path) -> None:
-    settings = Settings(tmp_path, "test-key", "https://example.test", "test-model", _NO_LANGFUSE)
+    settings = Settings(
+        home=tmp_path,
+        api_key="test-key",
+        base_url="https://example.test",
+        model="test-model",
+    )
     store = SqliteCheckpointStore(settings.database_path)
     run_id = "running-run"
     seed_run(store, run_id, tmp_path, status=RunStatus.RUNNING)
@@ -291,7 +328,12 @@ async def test_session_persists_cancel_on_exit_while_busy(tmp_path: Path) -> Non
 
 @pytest.mark.asyncio
 async def test_session_exit_leaves_waiting_for_approval_unchanged(tmp_path: Path) -> None:
-    settings = Settings(tmp_path, "test-key", "https://example.test", "test-model", _NO_LANGFUSE)
+    settings = Settings(
+        home=tmp_path,
+        api_key="test-key",
+        base_url="https://example.test",
+        model="test-model",
+    )
     store = SqliteCheckpointStore(settings.database_path)
     run_id = "approval-run"
     seed_interrupted_tool_run(
@@ -314,7 +356,7 @@ async def test_session_exit_leaves_waiting_for_approval_unchanged(tmp_path: Path
 
 @pytest.mark.asyncio
 async def test_session_requires_enter_before_checkpoints(tmp_path: Path) -> None:
-    settings = Settings(tmp_path, "test-key", None, "test-model", _NO_LANGFUSE)
+    settings = Settings(home=tmp_path, api_key="test-key", model="test-model")
     session = AgentSession.from_settings(settings)
 
     with pytest.raises(InactiveAgentSession, match="not active"):
@@ -323,7 +365,12 @@ async def test_session_requires_enter_before_checkpoints(tmp_path: Path) -> None
 
 @pytest.mark.asyncio
 async def test_session_respond_approval_rejects_non_waiting_run(tmp_path: Path) -> None:
-    settings = Settings(tmp_path, "test-key", "https://example.test", "test-model", _NO_LANGFUSE)
+    settings = Settings(
+        home=tmp_path,
+        api_key="test-key",
+        base_url="https://example.test",
+        model="test-model",
+    )
     store = SqliteCheckpointStore(settings.database_path)
     run_id = "completed-run"
     seed_run(store, run_id, tmp_path, status=RunStatus.COMPLETED, final_message="done")

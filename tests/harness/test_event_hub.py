@@ -147,32 +147,6 @@ async def test_run_notice_notifies_handler() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_before_start_collects_system_prompt_sections(
-    tmp_path: Path,
-) -> None:
-    from milky_frog.core.handlers import SystemPromptSection
-    from milky_frog.domain import RunRequest
-    from milky_frog.events.events import RunBeforeStart
-
-    registry = EventHub()
-    dispatcher = registry
-
-    @registry.on(RunBeforeStart)
-    async def inject_skill(event: RunBeforeStart, _ctx=None) -> SystemPromptSection | None:
-        if event.workspace == tmp_path:
-            return SystemPromptSection(content="custom skill content")
-        return None
-
-    sections = await dispatcher.run_before_start(
-        "run-1",
-        RunRequest(prompt="hi", workspace=tmp_path),
-        tmp_path,
-    )
-
-    assert "custom skill content" in sections
-
-
-@pytest.mark.asyncio
 async def test_run_started_notifies_handlers(tmp_path: Path) -> None:
     from milky_frog.domain import RunRequest, RunState
     from milky_frog.events.events import RunStarted

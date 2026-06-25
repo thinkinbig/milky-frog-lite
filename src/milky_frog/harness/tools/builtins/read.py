@@ -43,7 +43,6 @@ class ReadFileTool:
         except UnicodeDecodeError:
             return ToolResult(f"not a UTF-8 text file: {params.path}", is_error=True)
 
-        # Use a limit around 64,000 characters for reading files
-        text = truncate_tool_output(text, max_chars=64000, tool_name="read")
+        text = truncate_tool_output(text, max_chars=sandbox.config.read_output_max_chars)
 
         return ToolResult(text)

@@ -51,10 +51,10 @@ and is safe to commit. Credentials must never be committed.
 The agent loop lives in `events/loop.py` (`AgentLoop.advance`): a linear
 model → Tool → model loop bounded by `max_model_calls`, persisting a Checkpoint
 snapshot after meaningful steps and notifying lifecycle Handlers around each model and
-Tool call. `harness/agent_harness.py` (`AgentHarness`) wraps the loop with run
-start, resume, and approval handling.
+Tool call. `harness/harness.py` (`AgentHarness`) wraps the loop with run start,
+resume, and approval handling.
 
-`agent_session.py` (`AgentSession`) assembles the concrete pieces from `Settings`
+`app/session.py` (`AgentSession`) assembles the concrete pieces from `Settings`
 and owns the sync→async boundary (a reused event loop). `cli/app.py` is the Typer
 command surface and drives the foreground interactive loop. `ui/` renders
 everything via Rich.
@@ -68,18 +68,20 @@ qualifier, and never merge them into one base type:
 |------|-------|----------|---------|
 | **Checkpoint snapshot** | `checkpoint/snapshot.py`, `runs.state_json` | Durable (SQLite) | Resume source of truth |
 | **Lifecycle signal** | `events/events.py`, hub in `events/hub.py` (`EventHub`) | Ephemeral (in-process) | UI streaming, Langfuse (`broadcast`) |
-| **Handler control return** | `HandlerResult` in `handlers/context.py` | Per-step | Authorization, context build, token budget |
+| **Handler control return** | `HandlerResult` in `core/handlers/results.py` | Per-step | Future authorization seams (`BlockResult`, `ApprovalResult`) |
 
 RunState snapshots are serialized via Pydantic models in `checkpoint/snapshot.py` (ADR-0014).
 Lifecycle signals are frozen dataclass subclasses in `events/events.py`.
 Only `RunEmitter` publishes lifecycle signals; Handlers never publish. They
-subscribe via `observe` / `on` / `subscribe`; most return `None` (pure
-observation). Policy and context build are **not** a separate Harness mechanism —
-they are expressed as `HandlerResult` control returns that the emitter applies to
-the next step:
+subscribe via `observe` / `on` / `subscribe`; all return `None` (pure observation).
 
-- `RunBeforeStart` → `SystemPromptSection` (additive context injection; e.g. `AgentContextHandler`).
-- `RunBeforeModel` → carries the full `ModelRequest` and collects `HandlerResult`; this is the seam for per-call request shaping such as token budgeting (a reductive rewrite — needs its own result variant).
+`RunBeforeStart` is **pure observation** — handlers cannot inject content into the system
+prompt via this event. Context injection uses the `ContextLoader` protocol
+(`harness/prompt_context.py`) injected directly into `AgentHarness` and wired via
+`make_context_loader(settings.home)` in `make_agent_harness`.
+
+Future control-return seams (currently undefined):
+- `RunBeforeModel` → per-call request shaping such as token budgeting (needs its own result variant).
 - `RunBeforeTool` → `BlockResult` / `ApprovalResult` (authorization; `PolicyHandler`).
 
 ### Seams
@@ -93,7 +95,7 @@ named class — so alternatives can be swapped without touching the Harness:
 - `checkpoint/` — `CheckpointStore` protocol, `SqliteCheckpointStore`, `RunSnapshot` serialization (ADR-0014).
 - `harness/state.py` — transcript mutators and `repair_transcript` (interrupted-tool repair).
 - `events/` — lifecycle signals, `EventHub`, `AgentLoop` (ADR-0012); the Harness publishes.
-- `handlers/` — lifecycle Handler bundles (checkpoint, policy, budget, Langfuse, skills).
+- `handlers/` — lifecycle Handler bundles (checkpoint, Langfuse).
 - `ui/protocols.py` — `RunAdvancer`, `RunCanceller` for the interactive loop.
 - `harness/skills/` — `SkillCatalog`, declarative `SKILL.md` bundles (never executable).
 - `harness/sandbox/` — `Sandbox` protocol + `LocalSandbox`

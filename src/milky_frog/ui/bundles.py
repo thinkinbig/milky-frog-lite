@@ -5,7 +5,7 @@ from milky_frog.ui.bash_render import BashRenderHandler
 from milky_frog.ui.presentation import Emit, TuiPresentationHandler
 
 
-def tui_presentation_bundle(emit: Emit) -> list[BaseHandler]:
+def make_tui_presentation_handlers(emit: Emit) -> list[BaseHandler]:
     """Build the TUI lifecycle handlers for ``AgentSession(..., bundles=[...])``.
 
     Returns two handlers registered on the shared hub alongside

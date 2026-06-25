@@ -34,8 +34,6 @@ from milky_frog.settings import LangfuseSettings, Settings
 
 logger = logging.getLogger(__name__)
 
-_FLUSH_TIMEOUT_SECONDS = 10.0
-
 LangfuseLevel = Literal["DEBUG", "DEFAULT", "WARNING", "ERROR"]
 
 _NOTICE_LEVELS: dict[NoticeLevel, LangfuseLevel] = {
@@ -107,13 +105,14 @@ class LangfuseHandler(BaseHandler):
         client = self._client
         if client is None:
             return
+        timeout = self._settings.flush_timeout_seconds
         try:
             await asyncio.wait_for(
                 asyncio.to_thread(client.flush),
-                timeout=_FLUSH_TIMEOUT_SECONDS,
+                timeout=timeout,
             )
         except TimeoutError:
-            logger.warning("Langfuse flush timed out after %gs", _FLUSH_TIMEOUT_SECONDS)
+            logger.warning("Langfuse flush timed out after %gs", timeout)
         except Exception:
             logger.exception("Langfuse flush error")
 

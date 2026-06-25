@@ -1,21 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from typing import Never
 
+type HandlerResult = Never
+"""Placeholder for future per-step control returns (``BlockResult``, ``ApprovalResult``).
 
-@dataclass(frozen=True, slots=True)
-class SystemPromptSection:
-    """Return from a ``RunBeforeStart`` handler to inject content into the system prompt.
-
-    Sections are appended after the base system prompt in registration order.
-    """
-
-    content: str
-
-
-type HandlerResult = SystemPromptSection
-"""Control return a handler may emit at a ``RunBefore*`` seam.
-
-A handler that returns ``None`` is pure observation; returning a
-``HandlerResult`` signals intent to extend the current step.
+No variants are defined yet — handlers always return ``None``.  The event bus
+collects ``HandlerResult`` values as infrastructure for future seams such as
+``RunBeforeTool``.
 """

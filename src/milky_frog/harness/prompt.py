@@ -5,16 +5,23 @@ from datetime import date
 from pathlib import Path
 from xml.sax.saxutils import escape
 
-from milky_frog.harness.prompt_context import AgentContext, ContextFile, load_agent_context
+from milky_frog.harness.prompt_context import (
+    AgentContext,
+    ContextFile,
+    ContextLoader,
+    load_agent_context,
+)
 
 __all__ = [
     "BuildSystemPromptOptions",
+    "ContextLoader",
     "agent_context_section",
     "build_system_prompt",
     "format_agent_context",
     "format_project_context",
     "format_skills_for_prompt",
     "load_agent_context",
+    "make_context_loader",
     "system_prompt",
 ]
 
@@ -52,8 +59,17 @@ def system_prompt(workspace: Path, extra_sections: tuple[str, ...] = ()) -> str:
 
 
 def agent_context_section(workspace: Path, home: Path) -> str | None:
-    """Format loaded agent-home context for ``RunBeforeStart`` injection."""
+    """Format loaded agent-home context as a single system-prompt section."""
     return format_agent_context(load_agent_context(workspace, home))
+
+
+def make_context_loader(home: Path) -> ContextLoader:
+    """Return a ``ContextLoader`` bound to the given agent home directory."""
+
+    def _load(workspace: Path) -> str | None:
+        return agent_context_section(workspace, home)
+
+    return _load
 
 
 def format_agent_context(context: AgentContext) -> str | None:

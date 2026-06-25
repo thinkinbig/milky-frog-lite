@@ -98,7 +98,7 @@ def prune_runs(
 ) -> PruneResult:
     store = SqliteCheckpointStore(settings.database_path)
     project_cfg = load_project_config(workspace)
-    retention = days if days is not None else project_cfg.checkpoint_retention_days
+    retention = days if days is not None else project_cfg.checkpoint.retention_days
     if retention < 1:
         raise ValueError("retention period must be at least 1 day")
     cutoff = datetime.now(UTC) - timedelta(days=retention)

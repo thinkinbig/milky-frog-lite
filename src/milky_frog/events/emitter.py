@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic import JsonValue
 
-from milky_frog.core.handlers import HandlerResult, SystemPromptSection
+from milky_frog.core.handlers import HandlerResult
 from milky_frog.domain import (
     ModelRequest,
     ModelResponse,
@@ -53,13 +53,10 @@ class RunEmitter:
     def __init__(self, broadcast: _BroadcastFn) -> None:
         self._broadcast = broadcast
 
-    async def run_before_start(
-        self, run_id: str, request: RunRequest, workspace: Path
-    ) -> tuple[str, ...]:
-        results = await self._broadcast(
+    async def run_before_start(self, run_id: str, request: RunRequest, workspace: Path) -> None:
+        await self._broadcast(
             RunBeforeStart(run_id=run_id, request=deepcopy(request), workspace=workspace)
         )
-        return tuple(r.content for r in results if isinstance(r, SystemPromptSection))
 
     async def run_started(
         self, run_id: str, request: RunRequest, state: RunState

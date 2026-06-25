@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from milky_frog.harness.skills import SkillCatalog
 from milky_frog.project import PROJECT_DIRNAME, project_root
+
+ContextLoader = Callable[[Path], str | None]
+"""Protocol for injecting extra system-prompt content given the Run workspace.
+
+``AgentHarness`` calls the loader once per ``run()`` before seeding the
+transcript.  Return ``None`` to inject nothing (e.g. empty home dir).
+"""
 
 _CONTEXT_FILENAMES = ("AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD")
 _APPEND_FILENAME = "APPEND_SYSTEM.md"

@@ -148,11 +148,12 @@ class BashTool:
         # PTY uses \r\n line endings; normalise to \n.
         text = raw.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
 
+        max_chars = sandbox.config.bash_output_max_chars
         if process.returncode != 0:
-            text = truncate_tool_output(text, max_chars=128000, tool_name="bash")
+            text = truncate_tool_output(text, max_chars=max_chars)
             stripped = text.strip() or "(no output)"
             return ToolResult(f"exit code {process.returncode}:\n{stripped}", is_error=True)
 
-        text = truncate_tool_output(text, max_chars=128000, tool_name="bash")
+        text = truncate_tool_output(text, max_chars=max_chars)
         result = text.rstrip("\n")
         return ToolResult(result if result else "(no output)")

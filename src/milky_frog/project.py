@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass
 from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from milky_frog.domain import DEFAULT_MAX_MODEL_CALLS
 
@@ -14,6 +15,9 @@ DEFAULT_OUTPUT_RESERVE = 8000
 DEFAULT_SAFETY_MARGIN = 32000
 DEFAULT_BASH_TIMEOUT_SECONDS = 60
 DEFAULT_RETENTION_DAYS = 30
+DEFAULT_BASH_OUTPUT_MAX_CHARS = 128000
+DEFAULT_READ_OUTPUT_MAX_CHARS = 64000
+DEFAULT_SEARCH_OUTPUT_MAX_CHARS = 32000
 
 CONFIG_TEMPLATE = (
     f"# Project-level Milky Frog configuration.\n"
@@ -22,6 +26,11 @@ CONFIG_TEMPLATE = (
     f"# context_window = {DEFAULT_CONTEXT_WINDOW}\n"
     f"# output_reserve = {DEFAULT_OUTPUT_RESERVE}\n"
     f"# safety_margin = {DEFAULT_SAFETY_MARGIN}\n"
+    f"\n"
+    f"# Tool output truncation limits (characters returned to the model).\n"
+    f"# bash_output_max_chars = {DEFAULT_BASH_OUTPUT_MAX_CHARS}\n"
+    f"# read_output_max_chars = {DEFAULT_READ_OUTPUT_MAX_CHARS}\n"
+    f"# search_output_max_chars = {DEFAULT_SEARCH_OUTPUT_MAX_CHARS}\n"
     f"\n"
     f"[checkpoint]\n"
     f"retention_days = 30\n"
@@ -32,18 +41,70 @@ CONFIG_TEMPLATE = (
 )
 
 
-@dataclass(frozen=True, slots=True)
-class ProjectConfig:
-    """Declarative per-workspace settings read from .milky-frog/config.toml."""
+class CheckpointConfig(BaseModel):
+    """Retention and pruning policy for checkpoint snapshots."""
 
-    max_model_calls: int = DEFAULT_MAX_MODEL_CALLS
-    context_window: int = DEFAULT_CONTEXT_WINDOW
-    output_reserve: int = DEFAULT_OUTPUT_RESERVE
-    safety_margin: int = DEFAULT_SAFETY_MARGIN
-    bash_timeout_seconds: int = DEFAULT_BASH_TIMEOUT_SECONDS
-    checkpoint_retention_days: int = DEFAULT_RETENTION_DAYS
+    model_config = ConfigDict(frozen=True)
+
+    retention_days: int = Field(default=DEFAULT_RETENTION_DAYS, ge=0)
     prune_on_start: bool = True
+
+
+class ProjectConfig(BaseModel):
+    """Per-workspace settings read from ``.milky-frog/config.toml``.
+
+    A missing or malformed file yields defaults rather than raising, so a
+    broken config never blocks a Run.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    max_model_calls: int = Field(default=DEFAULT_MAX_MODEL_CALLS, ge=1)
+    context_window: int = Field(default=DEFAULT_CONTEXT_WINDOW, ge=1000)
+    output_reserve: int = Field(default=DEFAULT_OUTPUT_RESERVE, ge=100)
+    safety_margin: int = Field(default=DEFAULT_SAFETY_MARGIN, ge=0)
+    bash_timeout_seconds: int = Field(default=DEFAULT_BASH_TIMEOUT_SECONDS, ge=1, le=600)
+    bash_output_max_chars: int = Field(default=DEFAULT_BASH_OUTPUT_MAX_CHARS, ge=1000)
+    read_output_max_chars: int = Field(default=DEFAULT_READ_OUTPUT_MAX_CHARS, ge=1000)
+    search_output_max_chars: int = Field(default=DEFAULT_SEARCH_OUTPUT_MAX_CHARS, ge=1000)
     env_allowlist_extra: tuple[str, ...] = ()
+    checkpoint: CheckpointConfig = CheckpointConfig()
+
+    # ── Validators ────────────────────────────────────────────────
+
+    @field_validator(
+        "max_model_calls",
+        "context_window",
+        "output_reserve",
+        "safety_margin",
+        "bash_timeout_seconds",
+        "bash_output_max_chars",
+        "read_output_max_chars",
+        "search_output_max_chars",
+        mode="before",
+    )
+    @classmethod
+    def _reject_bool_for_int_fields(cls, v: object) -> object:
+        """Reject boolean values masquerading as integers.
+
+        Python's ``bool`` is a subclass of ``int``, so pydantic would
+        happily coerce ``True`` → ``1`` without this check.
+        """
+        if isinstance(v, bool):
+            raise ValueError(
+                f"boolean value is not allowed for integer field; expected an integer, got {v!r}"
+            )
+        return v
+
+    @field_validator("env_allowlist_extra", mode="before")
+    @classmethod
+    def _validate_env_allowlist_extra(cls, v: object) -> tuple[str, ...]:
+        """Keep only entries that are valid uppercase Python identifiers."""
+        if not isinstance(v, (list, tuple)):
+            return ()
+        return tuple(
+            item for item in v if isinstance(item, str) and item.isidentifier() and item.isupper()
+        )
 
 
 def project_root(workspace: Path) -> Path:
@@ -61,77 +122,7 @@ def load_project_config(workspace: Path) -> ProjectConfig:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError):
         return ProjectConfig()
-
-    max_model_calls = data.get("max_model_calls", DEFAULT_MAX_MODEL_CALLS)
-    if (
-        isinstance(max_model_calls, bool)
-        or not isinstance(max_model_calls, int)
-        or max_model_calls < 1
-    ):
-        max_model_calls = DEFAULT_MAX_MODEL_CALLS
-
-    context_window = data.get("context_window", DEFAULT_CONTEXT_WINDOW)
-    if (
-        isinstance(context_window, bool)
-        or not isinstance(context_window, int)
-        or context_window < 1000
-    ):
-        context_window = DEFAULT_CONTEXT_WINDOW
-
-    output_reserve = data.get("output_reserve", DEFAULT_OUTPUT_RESERVE)
-    if (
-        isinstance(output_reserve, bool)
-        or not isinstance(output_reserve, int)
-        or output_reserve < 100
-    ):
-        output_reserve = DEFAULT_OUTPUT_RESERVE
-
-    safety_margin = data.get("safety_margin", DEFAULT_SAFETY_MARGIN)
-    if isinstance(safety_margin, bool) or not isinstance(safety_margin, int) or safety_margin < 0:
-        safety_margin = DEFAULT_SAFETY_MARGIN
-
-    bash_timeout_seconds = data.get("bash_timeout_seconds", DEFAULT_BASH_TIMEOUT_SECONDS)
-    if (
-        isinstance(bash_timeout_seconds, bool)
-        or not isinstance(bash_timeout_seconds, int)
-        or bash_timeout_seconds < 1
-        or bash_timeout_seconds > 600
-    ):
-        bash_timeout_seconds = DEFAULT_BASH_TIMEOUT_SECONDS
-
-    # ── [checkpoint] section ─────────────────────────────────────────
-    cp = data.get("checkpoint", {})
-    if not isinstance(cp, dict):
-        cp = {}
-
-    checkpoint_retention_days = cp.get("retention_days", DEFAULT_RETENTION_DAYS)
-    if (
-        isinstance(checkpoint_retention_days, bool)
-        or not isinstance(checkpoint_retention_days, int)
-        or checkpoint_retention_days < 0
-    ):
-        checkpoint_retention_days = DEFAULT_RETENTION_DAYS
-
-    prune_on_start = cp.get("prune_on_start", True)
-    if not isinstance(prune_on_start, bool):
-        prune_on_start = True
-
-    env_allowlist_extra_raw = data.get("env_allowlist_extra", ())
-    if not isinstance(env_allowlist_extra_raw, list):
-        env_allowlist_extra_raw = ()
-    env_allowlist_extra: tuple[str, ...] = tuple(
-        v
-        for v in env_allowlist_extra_raw
-        if isinstance(v, str) and v.isidentifier() and v.isupper()
-    )
-
-    return ProjectConfig(
-        max_model_calls=max_model_calls,
-        context_window=context_window,
-        output_reserve=output_reserve,
-        safety_margin=safety_margin,
-        bash_timeout_seconds=bash_timeout_seconds,
-        checkpoint_retention_days=checkpoint_retention_days,
-        prune_on_start=prune_on_start,
-        env_allowlist_extra=env_allowlist_extra,
-    )
+    try:
+        return ProjectConfig.model_validate(data)
+    except ValidationError:
+        return ProjectConfig()

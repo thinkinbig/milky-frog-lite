@@ -1,82 +1,132 @@
 from __future__ import annotations
 
-import json
-import os
-from collections.abc import Mapping
-from dataclasses import dataclass
 from pathlib import Path
 
-from dotenv import dotenv_values
+from pydantic import BaseModel, Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-_LANGFUSE_HOST_DEFAULT = "https://cloud.langfuse.com"
 
+class LangfuseSettings(BaseModel):
+    """Langfuse observability configuration."""
 
-@dataclass(frozen=True, slots=True)
-class LangfuseSettings:
-    enabled: bool
-    public_key: str | None
-    secret_key: str | None
-    host: str
+    enabled: bool = False
+    public_key: str | None = None
+    secret_key: str | None = None
+    host: str = "https://cloud.langfuse.com"
+    flush_timeout_seconds: float = Field(default=10.0, ge=1.0)
 
     @property
     def active(self) -> bool:
         return self.enabled and bool(self.public_key and self.secret_key)
 
 
-@dataclass(frozen=True, slots=True)
-class Settings:
-    home: Path
-    api_key: str | None
-    base_url: str | None
-    model: str | None
-    langfuse: LangfuseSettings
+class Settings(BaseSettings):
+    """Application settings sourced from environment variables and ``.env`` file.
+
+    ``MILKY_FROG_*`` variables are read automatically by pydantic via
+    ``validation_alias``.  Langfuse uses a separate ``LANGFUSE_*`` prefix
+    with its own aliases.
+    """
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        extra="forbid",
+        populate_by_name=True,
+    )
+
+    api_key: str | None = Field(
+        default=None,
+        validation_alias="MILKY_FROG_API_KEY",
+    )
+    model: str | None = Field(
+        default=None,
+        validation_alias="MILKY_FROG_MODEL",
+    )
+    base_url: str | None = Field(
+        default=None,
+        validation_alias="MILKY_FROG_BASE_URL",
+    )
+    home: Path = Field(
+        default=Path.home() / ".milky-frog",
+        validation_alias="MILKY_FROG_HOME",
+    )
+    max_retries: int = Field(
+        default=3,
+        validation_alias="MILKY_FROG_MAX_RETRIES",
+        ge=1,
+    )
+    retry_base_delay: float = Field(
+        default=1.0,
+        validation_alias="MILKY_FROG_RETRY_BASE_DELAY",
+        ge=0.0,
+    )
+
+    # ── Langfuse (separate LANGFUSE_* env namespace) ──────────────
+    langfuse_enabled: bool = Field(
+        default=False,
+        validation_alias="LANGFUSE_ENABLED",
+    )
+    langfuse_public_key: str | None = Field(
+        default=None,
+        validation_alias="LANGFUSE_PUBLIC_KEY",
+    )
+    langfuse_secret_key: str | None = Field(
+        default=None,
+        validation_alias="LANGFUSE_SECRET_KEY",
+    )
+    langfuse_host: str = Field(
+        default="https://cloud.langfuse.com",
+        validation_alias="LANGFUSE_BASE_URL",
+    )
+    langfuse_flush_timeout_seconds: float = Field(
+        default=10.0,
+        validation_alias="LANGFUSE_FLUSH_TIMEOUT",
+        ge=1.0,
+    )
+
+    # ── Validators ────────────────────────────────────────────────
+
+    @field_validator(
+        "api_key",
+        "model",
+        "base_url",
+        "langfuse_public_key",
+        "langfuse_secret_key",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_empty_to_none(cls, v: object) -> object:
+        """Convert empty-string env vars to ``None``.
+
+        Matching the legacy behaviour where ``MILKY_FROG_API_KEY=""`` is
+        treated as "not configured" rather than a valid empty value.
+        """
+        if v == "" or v is None:
+            return None
+        return v
+
+    # ── Derived properties ────────────────────────────────────────
 
     @property
     def database_path(self) -> Path:
         return self.home / "state.db"
 
-    @classmethod
-    def from_environment(cls) -> Settings:
-        values = dotenv_values(Path.cwd() / ".env")
-        toggles = _load_feature_toggles(Path.cwd() / "milky-frog.json")
-        home = Path(_get("MILKY_FROG_HOME", values) or (Path.home() / ".milky-frog"))
-        home = home.expanduser()
-        return cls(
-            home=home,
-            api_key=_get("MILKY_FROG_API_KEY", values),
-            base_url=_get("MILKY_FROG_BASE_URL", values),
-            model=_get("MILKY_FROG_MODEL", values),
-            langfuse=_load_langfuse_settings(values, toggles),
+    @property
+    def langfuse(self) -> LangfuseSettings:
+        return LangfuseSettings(
+            enabled=self.langfuse_enabled,
+            public_key=self.langfuse_public_key,
+            secret_key=self.langfuse_secret_key,
+            host=self.langfuse_host,
+            flush_timeout_seconds=self.langfuse_flush_timeout_seconds,
         )
 
+    # ── Factories ─────────────────────────────────────────────────
 
-def _load_feature_toggles(path: Path) -> dict[str, object]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError):
-        return {}
+    @classmethod
+    def from_environment(cls) -> Settings:
+        """Convenience factory — equivalent to ``Settings()``.
 
-
-def _load_langfuse_settings(
-    values: Mapping[str, str | None], toggles: dict[str, object]
-) -> LangfuseSettings:
-    section = toggles.get("langfuse")
-    enabled = bool(section.get("enabled", False)) if isinstance(section, dict) else False
-    return LangfuseSettings(
-        enabled=enabled,
-        public_key=_get("LANGFUSE_PUBLIC_KEY", values),
-        secret_key=_get("LANGFUSE_SECRET_KEY", values),
-        host=_get("LANGFUSE_BASE_URL", values) or _LANGFUSE_HOST_DEFAULT,
-    )
-
-
-def _get(key: str, dotenv: Mapping[str, str | None]) -> str | None:
-    """Resolve a setting, preferring the real environment over the .env file.
-
-    A variable present in the real environment wins even when set to an empty
-    string, so an explicit empty override falls back to defaults instead of
-    being silently replaced by a stale ``.env`` value.
-    """
-    value = os.environ[key] if key in os.environ else dotenv.get(key)
-    return value or None
+        Kept for backward compatibility with existing call sites.
+        """
+        return cls()

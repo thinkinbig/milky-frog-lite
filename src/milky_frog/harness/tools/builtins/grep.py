@@ -14,8 +14,6 @@ from milky_frog.harness.tools.truncate import truncate_tool_output
 
 # Cap a single matched line so one minified file can't dominate the output.
 _MAX_LINE_CHARS = 300
-# Stop scanning once collected output would exceed the truncation budget.
-_MAX_OUTPUT_CHARS = 32000
 
 
 class GrepInput(BaseModel):
@@ -67,6 +65,7 @@ class GrepTool:
         if not root.exists():
             return ToolResult(f"not found: {params.path}", is_error=True)
 
+        search_max = sandbox.config.search_output_max_chars
         lines: list[str] = []
         total = 0
         for file in _iter_allowed_files(sandbox, root):
@@ -81,16 +80,14 @@ class GrepTool:
                 rendered = f"{rel}:{line_no}:{line[:_MAX_LINE_CHARS]}"
                 lines.append(rendered)
                 total += len(rendered) + 1
-                if total > _MAX_OUTPUT_CHARS:
+                if total > search_max:
                     break
-            if total > _MAX_OUTPUT_CHARS:
+            if total > search_max:
                 break
 
         if not lines:
             return ToolResult("(no matches)")
-        output = truncate_tool_output(
-            "\n".join(lines), max_chars=_MAX_OUTPUT_CHARS, tool_name="grep"
-        )
+        output = truncate_tool_output("\n".join(lines), max_chars=search_max)
         return ToolResult(output)
 
 
