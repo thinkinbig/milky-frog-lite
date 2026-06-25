@@ -8,7 +8,8 @@ from milky_frog.domain import (
     ModelRequest,
     ToolCall,
 )
-from milky_frog.harness.tokens import ApproxCharCounter, BudgetConfig, TokenBudget
+from milky_frog.harness.budget import BudgetConfig, TokenBudget
+from milky_frog.tokens import ApproxCharCounter
 
 
 class FakeTokenCounter:

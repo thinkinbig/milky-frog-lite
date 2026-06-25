@@ -12,10 +12,9 @@ Harness and persisting a RunState Checkpoint snapshot so Runs can be resumed.
 
 Status: OpenAI-compatible foreground Runs, built-in Tools, snapshot-based
 resume (`milky-frog resume`), and a multi-turn interactive loop work today.
-Resume loads a persisted `RunState` and repairs an interrupted Tool
-(ADR-0009, ADR-0014); `resume(run_id, prompt)` continues a Run with a new
-user turn so the interactive loop keeps one growing transcript across prompts
-(ADR-0010).
+Resume loads a persisted `RunState` and repairs an interrupted Tool;
+`resume(run_id, prompt)` continues a Run with a new user turn so the
+interactive loop keeps one growing transcript across prompts.
 
 ## Commands
 
@@ -41,6 +40,8 @@ see `settings.py`):
 - `MILKY_FROG_API_KEY` (required)
 - `MILKY_FROG_MODEL` (required)
 - `MILKY_FROG_BASE_URL` (optional, for OpenAI-compatible providers)
+- `MILKY_FROG_PROVIDER` (optional; `openai`/`deepseek`/`compatible`, inferred from
+  the model name by default — selects the exact token counter, else approximate)
 - `MILKY_FROG_HOME` (optional, state dir; default `~/.milky-frog`)
 
 Per-workspace config lives in `.milky-frog/config.toml` (e.g. `max_model_calls`)
@@ -70,7 +71,7 @@ qualifier, and never merge them into one base type:
 | **Lifecycle signal** | `events/events.py`, hub in `events/hub.py` (`EventHub`) | Ephemeral (in-process) | UI streaming, Langfuse (`broadcast`) |
 | **Handler control return** | `HandlerResult` in `core/handlers/results.py` | Per-step | Future authorization seams (`BlockResult`, `ApprovalResult`) |
 
-RunState snapshots are serialized via Pydantic models in `checkpoint/snapshot.py` (ADR-0014).
+RunState snapshots are serialized via Pydantic models in `checkpoint/snapshot.py`.
 Lifecycle signals are frozen dataclass subclasses in `events/events.py`.
 Only `RunEmitter` publishes lifecycle signals; Handlers never publish. They
 subscribe via `observe` / `on` / `subscribe`; all return `None` (pure observation).
@@ -92,16 +93,16 @@ named class — so alternatives can be swapped without touching the Harness:
 - `models/` — `Model` protocol, `OpenAIModel` adapter.
 - `harness/tools/` — `Tool` protocol + `ToolRegistry` + built-in Tools
   (`read_file`, `write_file`, `edit_file`, `list_dir`, `grep`, `bash`).
-- `checkpoint/` — `CheckpointStore` protocol, `SqliteCheckpointStore`, `RunSnapshot` serialization (ADR-0014).
+- `checkpoint/` — `CheckpointStore` protocol, `SqliteCheckpointStore`, `RunSnapshot` serialization.
 - `harness/state.py` — transcript mutators and `repair_transcript` (interrupted-tool repair).
-- `events/` — lifecycle signals, `EventHub`, `AgentLoop` (ADR-0012); the Harness publishes.
+- `events/` — lifecycle signals, `EventHub`, `AgentLoop`; the Harness publishes.
 - `handlers/` — lifecycle Handler bundles (checkpoint, Langfuse).
 - `ui/protocols.py` — `RunAdvancer`, `RunCanceller` for the interactive loop.
 - `harness/skills/` — `SkillCatalog`, declarative `SKILL.md` bundles (never executable).
 - `harness/sandbox/` — `Sandbox` protocol + `LocalSandbox`
   (path deny patterns, subprocess env, `sandbox_factory` injection). Implements the
-  **Local Sandbox** policy from ADR-0003; a policy boundary, **not** host isolation.
-  Future `DockerSandbox` swaps this single seam (ADR-0016).
+  **Local Sandbox** policy; a policy boundary, **not** host isolation.
+  Future `DockerSandbox` swaps this single seam.
 
 `domain.py` holds the shared frozen dataclasses / enums (`RunStatus`, `Message`,
 `ToolCall`, `RunRequest`, `RunResult`, …) — the vocabulary every layer uses.
@@ -139,9 +140,3 @@ both):
 - Tests may use named stub classes in `tests/stubs.py` instead of lambdas.
 - Keep ADR decisions in mind before changing a seam; add a new ADR for
   significant architectural shifts.
-
-## Key ADRs
-
-- [ADR-0012](docs/adr/0012-shrink-handler-registry-to-a-read-only-lifecycle-bus.md) — Handler bus is notify-only.
-- [ADR-0014](docs/adr/0014-persist-checkpoints-as-runstate-snapshots.md) — RunState snapshot persistence.
-- [ADR-0016](docs/adr/0016-unify-command-env-into-sandbox.md) — `CommandEnvironment` merged into `Sandbox` seam.

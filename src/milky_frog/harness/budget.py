@@ -4,56 +4,11 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
-
-from pydantic import JsonValue
 
 from milky_frog.domain import Message, MessageRole, ModelRequest
-
-# Per-message overhead (~4 tokens for role/formatting).
-_PER_MESSAGE_OVERHEAD = 4
-# Rough characters-per-token ratio for the estimator.
-_CHARS_PER_TOKEN = 4
+from milky_frog.tokens import ApproxCharCounter, TokenCounter
 
 logger = logging.getLogger(__name__)
-
-
-class TokenCounter(Protocol):
-    """Protocol for counting tokens in model requests and responses."""
-
-    def count_text(self, text: str) -> int: ...
-
-    def count_messages(
-        self, messages: list[dict[str, str]] | tuple[dict[str, str], ...]
-    ) -> int: ...
-
-    def count_tool_schemas(self, schemas: tuple[dict[str, JsonValue], ...]) -> int: ...
-
-
-class ApproxCharCounter:
-    """Provider-agnostic token estimate (~4 chars per token).
-
-    Used for budget trimming across OpenAI-compatible providers where the
-    exact tokenizer is unknown. Workspace ``safety_margin`` (default 32k on a
-    128k window) absorbs provider-side counting drift without usage calibration.
-    """
-
-    def count_text(self, text: str) -> int:
-        if not text:
-            return 0
-        return max(1, len(text) // _CHARS_PER_TOKEN)
-
-    def count_messages(self, messages: list[dict[str, str]] | tuple[dict[str, str], ...]) -> int:
-        total = 0
-        for message in messages:
-            total += _PER_MESSAGE_OVERHEAD
-            for value in message.values():
-                if isinstance(value, str):
-                    total += self.count_text(value)
-        return total
-
-    def count_tool_schemas(self, schemas: tuple[dict[str, JsonValue], ...]) -> int:
-        return sum(self.count_text(json.dumps(schema)) for schema in schemas)
 
 
 @dataclass
@@ -68,21 +23,25 @@ class BudgetConfig:
 class TokenBudget:
     """Trim ``ModelRequest`` to a token budget before each model call.
 
-    ``init_for_workspace`` loads the workspace budget config (called by
-    ``AgentHarness`` at the start of each Run or resume). ``trim`` applies the
-    budget before sending the request using :class:`ApproxCharCounter`.
+    Budget::
+
+        input_budget   = context_window - output_reserve - safety_margin
+        request_tokens = count_messages(messages) + count_tool_schemas(tools)
+        trim  iff  request_tokens > input_budget
+
+    Counts come from the injected :class:`TokenCounter` (provider-specific when
+    available, else :class:`ApproxCharCounter`); ``init_for_workspace`` loads the
+    config, called by ``AgentHarness`` at the start of each Run or resume.
 
     Trimming keeps system messages and tool schemas (non-negotiable) plus the
-    most recent contiguous tail of the conversation that fits the budget. Tail
+    longest recent contiguous tail with ``request_tokens <= input_budget``. Tail
     contiguity preserves chronological order and keeps every assistant
     ``tool_calls`` message together with its ``tool`` results, so the provider
     never sees an orphaned tool result or reordered history.
-
-    Budget: ``input_budget = context_window - output_reserve - safety_margin``.
     """
 
-    def __init__(self) -> None:
-        self._counter: TokenCounter | None = None
+    def __init__(self, counter: TokenCounter | None = None) -> None:
+        self._counter: TokenCounter | None = counter
         self._config: BudgetConfig | None = None
         self._input_budget = 0
 
@@ -90,7 +49,8 @@ class TokenBudget:
         """Load budget configuration from the workspace project config."""
         from milky_frog.project import load_project_config
 
-        self._counter = ApproxCharCounter()
+        if self._counter is None:
+            self._counter = ApproxCharCounter()
         project_cfg = load_project_config(workspace)
         self._config = BudgetConfig(
             context_window=project_cfg.context_window,

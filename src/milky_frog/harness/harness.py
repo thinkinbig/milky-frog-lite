@@ -20,6 +20,7 @@ from milky_frog.domain import (
 from milky_frog.events import EventHub
 from milky_frog.events.loop import AgentLoop
 from milky_frog.events.tool_step import ToolStepExecutor
+from milky_frog.harness.budget import TokenBudget
 from milky_frog.harness.prompt_context import ContextLoader
 from milky_frog.harness.state import (
     append_tool_result,
@@ -28,7 +29,6 @@ from milky_frog.harness.state import (
     start_run,
     unmatched_tool_calls,
 )
-from milky_frog.harness.tokens import TokenBudget
 
 
 @dataclass(frozen=True, slots=True)

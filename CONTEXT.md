@@ -54,8 +54,12 @@ _Avoid_: Plugin, Tool
 
 **Local Sandbox**:
 A policy boundary that constrains structured file operations and requires approval for shell commands, but does not isolate untrusted code from the host.
-Implemented by the `Sandbox` protocol; default adapter is `LocalSandbox` (`harness/sandbox/`). See ADR-0003 and ADR-0016.
+Implemented by the `Sandbox` protocol; default adapter is `LocalSandbox` (`harness/sandbox/`).
 _Avoid_: Container, secure sandbox
+
+**Provider**:
+The model vendor whose tokenizer and wire conventions a Run uses (for example `openai`, `deepseek`). Inferred from the model name and base URL, overridable via `MILKY_FROG_PROVIDER`. Selects the exact token counter, falling back to an approximate one when the provider is unknown or its tokenizer package is absent.
+_Avoid_: Vendor, backend, integration
 
 **Terminal UI**:
 The consistent command-line presentation of Run state, results, errors, and empty states using styled terminal output. It is not a full-screen interactive application.
@@ -119,8 +123,12 @@ _避免使用_：插件、Tool
 
 **Local Sandbox（本地沙箱）**：
 一种策略边界，用于限制结构化文件操作并要求用户批准 shell 命令，但不将不可信代码与宿主机隔离。
-由 `Sandbox` 协议实现；默认适配器为 `LocalSandbox`（`harness/sandbox/`）。见 ADR-0003 与 ADR-0016。
+由 `Sandbox` 协议实现；默认适配器为 `LocalSandbox`（`harness/sandbox/`）。
 _避免使用_：容器、安全沙箱
+
+**Provider（提供方）**：
+一个 Run 所用模型供应商的 tokenizer 与传输约定（例如 `openai`、`deepseek`）。由 model 名与 base URL 推断，可用 `MILKY_FROG_PROVIDER` 覆盖。用于选择精确 token 计数器；当 provider 未知或其 tokenizer 包缺失时退回近似计数。
+_避免使用_：厂商、后端、集成
 
 **Terminal UI（终端界面）**：
 使用带样式的终端输出，一致地呈现 Run 状态、结果、错误和空状态；它不是全屏交互式应用。

@@ -4,10 +4,12 @@ import json
 from pathlib import Path
 
 from milky_frog.domain import Message, MessageRole, ModelRequest
+from milky_frog.harness.budget import TokenBudget
 from milky_frog.harness.prompt import BuildSystemPromptOptions, build_system_prompt, system_prompt
 from milky_frog.harness.prompt_context import AgentContext, ContextFile
-from milky_frog.harness.tokens import ApproxCharCounter, TokenBudget
 from milky_frog.harness.tools import ToolRegistry, default_tools
+from milky_frog.tokens import ApproxCharCounter
+from milky_frog.tokens.base import _PER_MESSAGE_OVERHEAD, _REQUEST_OVERHEAD
 
 
 def _message_dict(role: str, content: str) -> dict[str, str]:
@@ -27,7 +29,12 @@ def test_count_messages_adds_per_message_overhead() -> None:
     counter = ApproxCharCounter()
     messages = (_message_dict("user", "abcd"),)
 
-    expected = 4 + counter.count_text("user") + counter.count_text("abcd")
+    expected = (
+        _REQUEST_OVERHEAD
+        + _PER_MESSAGE_OVERHEAD
+        + counter.count_text("user")
+        + counter.count_text("abcd")
+    )
     assert counter.count_messages(messages) == expected
 
 
@@ -47,7 +54,8 @@ def test_system_prompt_estimate_matches_message_counter(tmp_path: Path) -> None:
     estimate = counter.count_messages((_message_dict("system", prompt),))
 
     assert estimate > 200
-    assert estimate == 4 + counter.count_text("system") + counter.count_text(prompt)
+    framing = _REQUEST_OVERHEAD + _PER_MESSAGE_OVERHEAD
+    assert estimate == framing + counter.count_text("system") + counter.count_text(prompt)
 
 
 def test_built_system_prompt_grows_with_injected_context(tmp_path: Path) -> None:

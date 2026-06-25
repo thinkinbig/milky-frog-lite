@@ -23,6 +23,7 @@ from milky_frog.harness.harness import AgentHarness
 from milky_frog.harness.prompt import make_context_loader
 from milky_frog.project import load_project_config
 from milky_frog.settings import Settings
+from milky_frog.tokens import make_token_counter
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +201,11 @@ class AgentSession:
             hub=self._hub,
             sandbox_factory=self._config.sandbox_factory,
             context_loader=make_context_loader(self._settings.home),
+            token_counter=make_token_counter(
+                self._settings.resolved_provider,
+                self._model_name,
+                cache_dir=self._settings.home / "tokenizers",
+            ),
             max_retries=self._settings.max_retries,
             retry_base_delay=self._settings.retry_base_delay,
         )

@@ -21,6 +21,12 @@ dependencies = [
   "typer>=0.15.0",
 ]
 
+[project.optional-dependencies]
+# Exact token counting per provider. Core never imports these; the adapter
+# loads them lazily and degrades to the approximate counter when absent.
+openai-tokenizer = ["tiktoken>=0.8"]
+deepseek-tokenizer = ["tokenizers>=0.20"]
+
 [project.scripts]
 milky-frog = "milky_frog.cli:app"
 mf = "milky_frog.cli:app"
@@ -54,6 +60,9 @@ omit = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Exploratory notebooks are not held to source lint/format rules (and contain
+# intentional CJK punctuation that RUF001 would otherwise flag).
+extend-exclude = ["notebooks"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
@@ -62,3 +71,8 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 python_version = "3.12"
 strict = true
 packages = ["milky_frog"]
+
+[[tool.mypy.overrides]]
+# Optional tokenizer packages ship no type stubs and may be uninstalled.
+module = ["tiktoken", "tokenizers"]
+ignore_missing_imports = true

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from milky_frog.harness.tokens import ApproxCharCounter
+from milky_frog.tokens import ApproxCharCounter
 
 _COUNTER = ApproxCharCounter()
 

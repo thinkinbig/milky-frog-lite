@@ -27,7 +27,7 @@ from milky_frog.harness.tools import ToolRegistry
 from milky_frog.models import Model
 
 if TYPE_CHECKING:
-    from milky_frog.harness.tokens import TokenBudget
+    from milky_frog.harness.budget import TokenBudget
 
 
 class AgentLoop:
