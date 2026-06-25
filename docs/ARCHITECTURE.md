@@ -267,7 +267,8 @@ harness. The defaults are wired in `make_agent_harness`.
 | **Checkpoint store** | `CheckpointStore` (`checkpoint/`) | `SqliteCheckpointStore` | Alternative durable backends. |
 | **Sandbox** | `Sandbox` (`core/sandbox.py`) | `LocalSandbox`, injected via `sandbox_factory` | A future `DockerSandbox` swaps this one seam for real isolation. |
 | **Context injection** | `ContextLoader` (`harness/prompt_context.py`) | `make_context_loader(home)` | Inject a system-prompt section at Run start. |
-| **Token budget** | `TokenBudget` (`harness/tokens.py`) | default | `trim`s each `ModelRequest` before the model call — the one live example of per-call request shaping. |
+| **Token budget** | `TokenBudget` (`harness/budget.py`) | injected `TokenCounter` | `trim`s each `ModelRequest` before the model call — the one live example of per-call request shaping. |
+| **Token counter** | `TokenCounter` (`tokens/base.py`) | `ApproxCharCounter` | `make_token_counter(provider)` picks `TiktokenCounter` (tiktoken) or `HFTokenizerCounter` (tokenizers) per Provider, degrading to approximate. Optional deps; core never imports them. |
 | **UI driver** | `RunAdvancer` / `RunCanceller` (`ui/protocols.py`) | Textual app | Drive the interactive loop differently. |
 
 > **Why protocols over inheritance.** Each seam has exactly one default and a

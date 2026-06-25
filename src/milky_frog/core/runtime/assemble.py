@@ -12,13 +12,14 @@ from milky_frog.events.loop import AgentLoop
 from milky_frog.events.tool_step import ToolStepExecutor
 from milky_frog.handlers.checkpoint import CheckpointHandler
 from milky_frog.handlers.langfuse import LangfuseHandler
+from milky_frog.harness.budget import TokenBudget
 from milky_frog.harness.harness import AgentHarness
 from milky_frog.harness.prompt_context import ContextLoader
-from milky_frog.harness.tokens import TokenBudget
 from milky_frog.harness.tools import ToolRegistry
 from milky_frog.harness.tools.builtins import default_tools
 from milky_frog.models import Model, RetryingModel
 from milky_frog.settings import Settings
+from milky_frog.tokens import TokenCounter
 
 
 def make_session_handlers(
@@ -53,6 +54,7 @@ def make_agent_harness(
     tools: ToolRegistry | None = None,
     sandbox_factory: SandboxFactory = LocalSandbox,
     context_loader: ContextLoader | None = None,
+    token_counter: TokenCounter | None = None,
     max_retries: int = 3,
     retry_base_delay: float = 1.0,
 ) -> AgentHarness:
@@ -77,6 +79,6 @@ def make_agent_harness(
         tool_step=tool_step,
         policy=policy,
         sandbox_factory=sandbox_factory,
-        budget=TokenBudget(),
+        budget=TokenBudget(counter=token_counter),
         context_loader=context_loader,
     )

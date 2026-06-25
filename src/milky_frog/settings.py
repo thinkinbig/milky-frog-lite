@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from milky_frog.domain.provider import Provider, infer_provider
+
+logger = logging.getLogger(__name__)
 
 
 class LangfuseSettings(BaseModel):
@@ -45,6 +50,10 @@ class Settings(BaseSettings):
     base_url: str | None = Field(
         default=None,
         validation_alias="MILKY_FROG_BASE_URL",
+    )
+    provider: str | None = Field(
+        default=None,
+        validation_alias="MILKY_FROG_PROVIDER",
     )
     home: Path = Field(
         default=Path.home() / ".milky-frog",
@@ -90,6 +99,7 @@ class Settings(BaseSettings):
         "api_key",
         "model",
         "base_url",
+        "provider",
         "langfuse_public_key",
         "langfuse_secret_key",
         mode="before",
@@ -110,6 +120,21 @@ class Settings(BaseSettings):
     @property
     def database_path(self) -> Path:
         return self.home / "state.db"
+
+    @property
+    def resolved_provider(self) -> Provider:
+        """Provider for token counting: explicit ``MILKY_FROG_PROVIDER`` wins,
+        otherwise inferred from the model name and base URL.
+        """
+        if self.provider:
+            try:
+                return Provider(self.provider.lower())
+            except ValueError:
+                logger.warning(
+                    "unknown MILKY_FROG_PROVIDER %r; inferring from model/base_url",
+                    self.provider,
+                )
+        return infer_provider(self.model, self.base_url)
 
     @property
     def langfuse(self) -> LangfuseSettings:

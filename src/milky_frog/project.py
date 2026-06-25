@@ -25,6 +25,8 @@ CONFIG_TEMPLATE = (
     f"# Context window budgeting (trim before each model call).\n"
     f"# context_window = {DEFAULT_CONTEXT_WINDOW}\n"
     f"# output_reserve = {DEFAULT_OUTPUT_RESERVE}\n"
+    f"# safety_margin absorbs token-counting drift; with an exact provider\n"
+    f"# tokenizer (MILKY_FROG_PROVIDER=openai/deepseek) you can lower it.\n"
     f"# safety_margin = {DEFAULT_SAFETY_MARGIN}\n"
     f"\n"
     f"# Tool output truncation limits (characters returned to the model).\n"

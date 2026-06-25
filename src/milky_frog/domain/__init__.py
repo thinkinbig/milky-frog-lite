@@ -8,6 +8,7 @@ from milky_frog.domain.model import (
     StreamDone,
     TextDelta,
 )
+from milky_frog.domain.provider import Provider, infer_provider
 from milky_frog.domain.run import (
     DEFAULT_MAX_MODEL_CALLS,
     RunCancellation,
@@ -30,6 +31,7 @@ __all__ = [
     "ModelChunk",
     "ModelRequest",
     "ModelResponse",
+    "Provider",
     "ReasoningDelta",
     "ResumeError",
     "RunCancellation",
@@ -45,5 +47,6 @@ __all__ = [
     "ToolDecision",
     "ToolResult",
     "ToolRunCancelled",
+    "infer_provider",
     "is_cancelled",
 ]
