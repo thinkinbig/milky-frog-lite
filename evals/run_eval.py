@@ -20,7 +20,7 @@ from typing import Any
 
 from evals._settings import without_observability
 from evals.tool_collector import ToolCallCollector, ToolCallRecord, summarize_tool_call
-from milky_frog.agent_session import AgentSession
+from milky_frog.app.session import AgentSession
 from milky_frog.events import EventHub
 from milky_frog.settings import Settings
 
