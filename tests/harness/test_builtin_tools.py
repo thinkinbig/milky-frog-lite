@@ -45,6 +45,63 @@ async def test_read_file_missing_is_error(tmp_path: Path) -> None:
     assert "not a file" in result.content
 
 
+async def test_read_file_offset_and_limit_returns_window(tmp_path: Path) -> None:
+    (tmp_path / "f.txt").write_text("one\ntwo\nthree\nfour\nfive\n", encoding="utf-8")
+
+    result = await ReadFileTool().execute(
+        _context(tmp_path), ReadFileTool.input_model(path="f.txt", offset=2, limit=2)
+    )
+
+    assert not result.is_error
+    assert result.content == "[lines 2-3 of 5]\ntwo\nthree\n"
+
+
+async def test_read_file_offset_to_end(tmp_path: Path) -> None:
+    (tmp_path / "f.txt").write_text("a\nb\nc\n", encoding="utf-8")
+
+    result = await ReadFileTool().execute(
+        _context(tmp_path), ReadFileTool.input_model(path="f.txt", offset=2)
+    )
+
+    assert not result.is_error
+    assert result.content == "[lines 2-3 of 3]\nb\nc\n"
+
+
+async def test_read_file_full_window_omits_header(tmp_path: Path) -> None:
+    (tmp_path / "f.txt").write_text("a\nb\n", encoding="utf-8")
+
+    result = await ReadFileTool().execute(
+        _context(tmp_path), ReadFileTool.input_model(path="f.txt", limit=10)
+    )
+
+    assert not result.is_error
+    assert result.content == "a\nb\n"
+
+
+async def test_read_file_offset_past_end_is_error(tmp_path: Path) -> None:
+    (tmp_path / "f.txt").write_text("a\nb\n", encoding="utf-8")
+
+    result = await ReadFileTool().execute(
+        _context(tmp_path), ReadFileTool.input_model(path="f.txt", offset=5)
+    )
+
+    assert result.is_error
+    assert "past the end" in result.content
+
+
+async def test_read_file_on_directory_returns_listing(tmp_path: Path) -> None:
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "a.py").write_text("", encoding="utf-8")
+    (tmp_path / "pkg" / "sub").mkdir()
+
+    result = await ReadFileTool().execute(_context(tmp_path), ReadFileTool.input_model(path="pkg"))
+
+    assert not result.is_error
+    assert "is a directory" in result.content
+    assert "sub/" in result.content
+    assert "a.py" in result.content
+
+
 async def test_read_file_rejects_sensitive_path(tmp_path: Path) -> None:
     (tmp_path / ".env").write_text("SECRET=1", encoding="utf-8")
 
@@ -166,6 +223,35 @@ async def test_grep_never_surfaces_denied_files(tmp_path: Path) -> None:
     assert result.content == "app.py:1:SECRET_KEY = load()"
     assert "topsecret" not in result.content
     assert "alsosecret" not in result.content
+
+
+async def test_grep_context_lines_show_surrounding(tmp_path: Path) -> None:
+    (tmp_path / "f.py").write_text(
+        "import os\ndef target():\n    return 1\nx = 2\n", encoding="utf-8"
+    )
+
+    result = await GrepTool().execute(
+        _context(tmp_path), GrepTool.input_model(pattern="def target", context=1)
+    )
+
+    assert not result.is_error
+    assert result.content == (
+        "f.py-1-import os\n"  # context line uses '-'
+        "f.py:2:def target():\n"  # match line uses ':'
+        "f.py-3-    return 1"  # context line uses '-'
+    )
+
+
+async def test_grep_context_merges_overlapping_windows(tmp_path: Path) -> None:
+    (tmp_path / "f.py").write_text("a\nhit\nb\nhit\nc\n", encoding="utf-8")
+
+    result = await GrepTool().execute(
+        _context(tmp_path), GrepTool.input_model(pattern="hit", context=1)
+    )
+
+    # Windows for lines 2 and 4 overlap at line 3 → one merged group, no '--'.
+    assert "--" not in result.content
+    assert result.content == ("f.py-1-a\nf.py:2:hit\nf.py-3-b\nf.py:4:hit\nf.py-5-c")
 
 
 async def test_grep_rejects_escaping_path(tmp_path: Path) -> None:
