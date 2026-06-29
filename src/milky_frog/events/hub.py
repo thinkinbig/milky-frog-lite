@@ -134,8 +134,10 @@ class EventHub:
     ) -> list[HandlerResult]:
         return await self._emitter.before_resume(run_id, prompt, status, workspace)
 
-    async def before_model(self, run_id: str, request: ModelRequest) -> None:
-        await self._emitter.before_model(run_id, request)
+    async def before_model(
+        self, run_id: str, request: ModelRequest, state: RunState
+    ) -> list[HandlerResult]:
+        return await self._emitter.before_model(run_id, request, state)
 
     async def on_model_chunk(
         self, run_id: str, request: ModelRequest, chunk: TextDelta

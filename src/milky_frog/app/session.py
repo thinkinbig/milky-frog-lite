@@ -19,6 +19,7 @@ from milky_frog.domain import (
     RunResult,
 )
 from milky_frog.events import BaseHandler, EventHub
+from milky_frog.harness.compaction import CompactionHandler
 from milky_frog.harness.harness import AgentHarness
 from milky_frog.harness.prompt import make_context_loader
 from milky_frog.project import load_project_config
@@ -180,20 +181,34 @@ class AgentSession:
                 )
 
         self._hub = self._hub_override or EventHub()
-        self._handlers = make_session_handlers(
-            self._settings,
-            store,
-            extra=self._extra_bundles,
-        )
-        for bundle in self._handlers:
-            bundle.register(self._hub)
 
+        # Model and token counter are built first: the (optional) CompactionHandler
+        # needs both at handler-registration time.
         self._model = OpenAIModel(
             api_key=self._api_key,
             model=self._model_name,
             base_url=self._base_url,
         )
         await self._model.__aenter__()
+        counter = make_token_counter(
+            self._settings.resolved_provider,
+            self._model_name,
+            cache_dir=self._settings.home / "tokenizers",
+        )
+
+        extra: list[BaseHandler] = list(self._extra_bundles)
+        if project_cfg.summarization_enabled:
+            extra.append(
+                CompactionHandler(
+                    self._model,
+                    counter,
+                    trigger_tokens=project_cfg.summarization_trigger_tokens,
+                    keep_recent_rounds=project_cfg.summarization_keep_recent_rounds,
+                )
+            )
+        self._handlers = make_session_handlers(self._settings, store, extra=extra)
+        for bundle in self._handlers:
+            bundle.register(self._hub)
 
         self._harness = make_agent_harness(
             model=self._model,
@@ -201,11 +216,7 @@ class AgentSession:
             hub=self._hub,
             sandbox_factory=self._config.sandbox_factory,
             context_loader=make_context_loader(self._settings.home),
-            token_counter=make_token_counter(
-                self._settings.resolved_provider,
-                self._model_name,
-                cache_dir=self._settings.home / "tokenizers",
-            ),
+            token_counter=counter,
             max_retries=self._settings.max_retries,
             retry_base_delay=self._settings.retry_base_delay,
         )

@@ -5,6 +5,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from milky_frog.domain import (
+    CompactionState,
     Message,
     MessageRole,
     RunState,
@@ -49,6 +50,13 @@ class RunUsageSnapshot(BaseModel):
     context_tokens: int = 0
 
 
+class CompactionSnapshot(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    summary: str
+    through_index: int
+
+
 class RunSnapshot(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -57,6 +65,7 @@ class RunSnapshot(BaseModel):
     completed_model_calls: int = 0
     reasoning_log: tuple[str, ...] = ()
     usage: RunUsageSnapshot = Field(default_factory=RunUsageSnapshot)
+    compaction: CompactionSnapshot | None = None
 
 
 def dump_run_state(state: RunState) -> str:
@@ -65,6 +74,7 @@ def dump_run_state(state: RunState) -> str:
         completed_model_calls=state.completed_model_calls,
         reasoning_log=state.reasoning_log,
         usage=_usage_to_snapshot(state.usage),
+        compaction=_compaction_to_snapshot(state.compaction),
     )
     return snapshot.model_dump_json()
 
@@ -74,11 +84,30 @@ def load_run_state(run_id: str, workspace: Path, raw: str) -> RunState:
     return RunState(
         run_id=run_id,
         workspace=workspace,
-        messages=tuple(_message_from_snapshot(message) for message in snapshot.messages),
+        # System prompts are no longer part of the transcript (ContextManager
+        # rebuilds them per call); drop any persisted by older snapshots.
+        messages=tuple(
+            _message_from_snapshot(message)
+            for message in snapshot.messages
+            if message.role != MessageRole.SYSTEM.value
+        ),
         completed_model_calls=snapshot.completed_model_calls,
         reasoning_log=snapshot.reasoning_log,
         usage=_usage_from_snapshot(snapshot.usage),
+        compaction=_compaction_from_snapshot(snapshot.compaction),
     )
+
+
+def _compaction_to_snapshot(compaction: CompactionState | None) -> CompactionSnapshot | None:
+    if compaction is None:
+        return None
+    return CompactionSnapshot(summary=compaction.summary, through_index=compaction.through_index)
+
+
+def _compaction_from_snapshot(snapshot: CompactionSnapshot | None) -> CompactionState | None:
+    if snapshot is None:
+        return None
+    return CompactionState(summary=snapshot.summary, through_index=snapshot.through_index)
 
 
 def _message_to_snapshot(message: Message) -> MessageSnapshot:

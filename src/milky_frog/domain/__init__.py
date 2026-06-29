@@ -11,6 +11,7 @@ from milky_frog.domain.model import (
 from milky_frog.domain.provider import Provider, infer_provider
 from milky_frog.domain.run import (
     DEFAULT_MAX_MODEL_CALLS,
+    CompactionState,
     RunCancellation,
     RunRequest,
     RunResult,
@@ -26,6 +27,7 @@ __all__ = [
     "DEFAULT_MAX_MODEL_CALLS",
     "ApprovalDecision",
     "ApprovalVerdict",
+    "CompactionState",
     "Message",
     "MessageRole",
     "ModelChunk",

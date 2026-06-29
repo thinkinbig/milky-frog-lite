@@ -54,7 +54,6 @@ async def test_fold_reconstructs_live_transcript(tmp_path: Path) -> None:
 
     folded = store.load_state(result.run_id)
     assert [message.role for message in folded.messages] == [
-        MessageRole.SYSTEM,
         MessageRole.USER,
         MessageRole.ASSISTANT,
         MessageRole.TOOL,

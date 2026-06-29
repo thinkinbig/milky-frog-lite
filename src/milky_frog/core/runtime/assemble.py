@@ -13,6 +13,7 @@ from milky_frog.events.tool_step import ToolStepExecutor
 from milky_frog.handlers.checkpoint import CheckpointHandler
 from milky_frog.handlers.langfuse import LangfuseHandler
 from milky_frog.harness.budget import TokenBudget
+from milky_frog.harness.context import ContextManager
 from milky_frog.harness.harness import AgentHarness
 from milky_frog.harness.prompt_context import ContextLoader
 from milky_frog.harness.tools import ToolRegistry
@@ -72,6 +73,7 @@ def make_agent_harness(
         registry,
         hub,
         tool_step,
+        ContextManager(context_loader),
     )
     return AgentHarness(
         checkpoints=checkpoints,
@@ -81,5 +83,4 @@ def make_agent_harness(
         policy=policy,
         sandbox_factory=sandbox_factory,
         budget=budget,
-        context_loader=context_loader,
     )

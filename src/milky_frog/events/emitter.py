@@ -72,8 +72,12 @@ class RunEmitter:
             RunBeforeResume(run_id=run_id, prompt=prompt, stored_status=status, workspace=workspace)
         )
 
-    async def before_model(self, run_id: str, request: ModelRequest) -> None:
-        await self._broadcast(RunBeforeModel(run_id=run_id, request=deepcopy(request)))
+    async def before_model(
+        self, run_id: str, request: ModelRequest, state: RunState
+    ) -> list[HandlerResult]:
+        return await self._broadcast(
+            RunBeforeModel(run_id=run_id, request=deepcopy(request), state=state)
+        )
 
     async def on_model_chunk(
         self, run_id: str, request: ModelRequest, chunk: TextDelta

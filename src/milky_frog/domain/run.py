@@ -50,6 +50,21 @@ class RunResult:
 
 
 @dataclass(frozen=True, slots=True)
+class CompactionState:
+    """A summary of the oldest part of the transcript, as a derived cache.
+
+    ``messages[:through_index]`` are summarized by ``summary``; those original
+    messages are **not** deleted from ``RunState.messages`` (the snapshot stays
+    the full truth). The summary only replaces them when assembling the request
+    sent to the model. Because the summarized prefix is immutable (the transcript
+    is append-only), ``through_index`` stays valid across resume.
+    """
+
+    summary: str
+    through_index: int
+
+
+@dataclass(frozen=True, slots=True)
 class RunState:
     """The live transcript and accounting of one Run, threaded through the loop.
 
@@ -64,3 +79,4 @@ class RunState:
     completed_model_calls: int = 0
     reasoning_log: tuple[str, ...] = ()
     usage: RunUsage = field(default_factory=RunUsage)
+    compaction: CompactionState | None = None

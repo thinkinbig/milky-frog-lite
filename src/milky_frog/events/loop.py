@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from copy import deepcopy
+from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
+from milky_frog.core.handlers import Compacted, HandlerResult
 from milky_frog.core.runtime.execute_tool import run_cancellable
 from milky_frog.core.sandbox import Sandbox
 from milky_frog.domain import (
@@ -22,12 +24,21 @@ from milky_frog.domain import (
 )
 from milky_frog.events.hub import EventHub
 from milky_frog.events.tool_step import ToolStepExecutor
+from milky_frog.harness.context import ContextManager
 from milky_frog.harness.state import append_model_response, append_tool_result
 from milky_frog.harness.tools import ToolRegistry
 from milky_frog.models import Model
 
 if TYPE_CHECKING:
     from milky_frog.harness.budget import TokenBudget
+
+
+def _apply_compaction(state: RunState, results: list[HandlerResult]) -> RunState:
+    """Fold any ``Compacted`` control return from ``before_model`` into the state."""
+    for result in results:
+        if isinstance(result, Compacted):
+            state = replace(state, compaction=result.compaction)
+    return state
 
 
 class AgentLoop:
@@ -43,12 +54,18 @@ class AgentLoop:
     """
 
     def __init__(
-        self, model: Model, tools: ToolRegistry, hub: EventHub, tool_step: ToolStepExecutor
+        self,
+        model: Model,
+        tools: ToolRegistry,
+        hub: EventHub,
+        tool_step: ToolStepExecutor,
+        context: ContextManager,
     ) -> None:
         self._model = model
         self._tools = tools
         self._hub = hub
         self._tool_step = tool_step
+        self._context = context
 
     async def advance(
         self,
@@ -71,10 +88,18 @@ class AgentLoop:
                 if is_cancelled(cancellation):
                     return await self._hub.finish_cancelled(state)
 
-                request = ModelRequest(state.messages, self._tools.schemas(), run_id=run_id)
+                request = ModelRequest(
+                    self._context.assemble(state), self._tools.schemas(), run_id=run_id
+                )
                 model_call = state.completed_model_calls + 1
                 await self._hub.turn_started(run_id, model_call=model_call)
-                await self._hub.before_model(run_id, request)
+                shaping = await self._hub.before_model(run_id, request, state)
+                shaped_state = _apply_compaction(state, shaping)
+                if shaped_state is not state:
+                    state = shaped_state
+                    request = ModelRequest(
+                        self._context.assemble(state), self._tools.schemas(), run_id=run_id
+                    )
                 if budget is not None:
                     request = budget.trim(request)
 

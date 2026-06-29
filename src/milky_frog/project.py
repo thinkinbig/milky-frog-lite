@@ -18,6 +18,7 @@ DEFAULT_RETENTION_DAYS = 30
 DEFAULT_BASH_OUTPUT_MAX_CHARS = 128000
 DEFAULT_READ_OUTPUT_MAX_CHARS = 64000
 DEFAULT_SEARCH_OUTPUT_MAX_CHARS = 32000
+DEFAULT_SUMMARIZATION_TRIGGER_TOKENS = 96000
 
 CONFIG_TEMPLATE = (
     f"# Project-level Milky Frog configuration.\n"
@@ -33,6 +34,13 @@ CONFIG_TEMPLATE = (
     f"# bash_output_max_chars = {DEFAULT_BASH_OUTPUT_MAX_CHARS}\n"
     f"# read_output_max_chars = {DEFAULT_READ_OUTPUT_MAX_CHARS}\n"
     f"# search_output_max_chars = {DEFAULT_SEARCH_OUTPUT_MAX_CHARS}\n"
+    f"\n"
+    f"# Conversation summarization (compaction): when the transcript exceeds the\n"
+    f"# trigger, older rounds are summarized away from the model request (the full\n"
+    f"# transcript is still kept in the snapshot).\n"
+    f"# summarization_enabled = false\n"
+    f"# summarization_trigger_tokens = {DEFAULT_SUMMARIZATION_TRIGGER_TOKENS}\n"
+    f"# summarization_keep_recent_rounds = 3\n"
     f"\n"
     f"[checkpoint]\n"
     f"retention_days = 30\n"
@@ -69,6 +77,9 @@ class ProjectConfig(BaseModel):
     bash_output_max_chars: int = Field(default=DEFAULT_BASH_OUTPUT_MAX_CHARS, ge=1000)
     read_output_max_chars: int = Field(default=DEFAULT_READ_OUTPUT_MAX_CHARS, ge=1000)
     search_output_max_chars: int = Field(default=DEFAULT_SEARCH_OUTPUT_MAX_CHARS, ge=1000)
+    summarization_enabled: bool = False
+    summarization_trigger_tokens: int = Field(default=DEFAULT_SUMMARIZATION_TRIGGER_TOKENS, ge=1000)
+    summarization_keep_recent_rounds: int = Field(default=3, ge=1)
     env_allowlist_extra: tuple[str, ...] = ()
     checkpoint: CheckpointConfig = CheckpointConfig()
 
@@ -83,6 +94,8 @@ class ProjectConfig(BaseModel):
         "bash_output_max_chars",
         "read_output_max_chars",
         "search_output_max_chars",
+        "summarization_trigger_tokens",
+        "summarization_keep_recent_rounds",
         mode="before",
     )
     @classmethod

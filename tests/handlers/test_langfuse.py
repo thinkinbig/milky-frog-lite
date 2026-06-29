@@ -321,7 +321,7 @@ async def test_langfuse_model_chunk_updates_generation_incrementally(
     handler.register(registry)
     await registry.broadcast(RunStarted(run_id="run-1", request=_run_request(), state=_run_state()))
     request = ModelRequest(messages=(), tools=())
-    await registry.broadcast(RunBeforeModel(run_id="run-1", request=request))
+    await registry.broadcast(RunBeforeModel(run_id="run-1", request=request, state=_run_state()))
 
     await registry.broadcast(
         RunModelChunk(run_id="run-1", request=request, chunk=TextDelta(content="hel"))
@@ -344,7 +344,7 @@ async def test_langfuse_model_reasoning_updates_generation_metadata(
     handler.register(registry)
     await registry.broadcast(RunStarted(run_id="run-1", request=_run_request(), state=_run_state()))
     request = ModelRequest(messages=(), tools=())
-    await registry.broadcast(RunBeforeModel(run_id="run-1", request=request))
+    await registry.broadcast(RunBeforeModel(run_id="run-1", request=request, state=_run_state()))
 
     await registry.broadcast(
         RunModelReasoning(run_id="run-1", request=request, chunk=ReasoningDelta(content="think"))

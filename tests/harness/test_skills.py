@@ -6,7 +6,15 @@ from pathlib import Path
 import pytest
 
 from milky_frog.checkpoint import SqliteCheckpointStore
-from milky_frog.domain import ModelChunk, ModelRequest, ModelResponse, RunRequest, StreamDone
+from milky_frog.domain import (
+    MessageRole,
+    ModelChunk,
+    ModelRequest,
+    ModelResponse,
+    RunRequest,
+    StreamDone,
+)
+from milky_frog.harness.context import ContextManager
 from milky_frog.harness.prompt import make_context_loader
 from milky_frog.harness.skills import SkillCatalog
 from milky_frog.harness.tools import ToolRegistry
@@ -100,8 +108,9 @@ def test_context_loader_skips_malformed_skill(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_skill_catalog_appears_in_system_message(tmp_path: Path) -> None:
-    """Skill metadata injected via ContextLoader must be visible in the first
-    system message of the persisted transcript — the one the model actually sees."""
+    """Skill metadata injected via ContextLoader must be visible in the system
+    message ContextManager rebuilds — the one the model actually sees. The system
+    prompt is no longer persisted in the transcript, so assemble it here."""
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     home = tmp_path / "home"
@@ -122,6 +131,7 @@ async def test_skill_catalog_appears_in_system_message(tmp_path: Path) -> None:
     result = await harness.run(RunRequest("hello", workspace))
 
     state = store.load_state(result.run_id)
-    system_message = state.messages[0]
+    system_message = ContextManager(make_context_loader(home)).assemble(state)[0]
+    assert system_message.role is MessageRole.SYSTEM
     assert "<name>style</name>" in system_message.content
     assert "Style guide" in system_message.content
