@@ -13,6 +13,7 @@ from milky_frog.harness.tools.builtins import (
     WriteFileTool,
     default_tools,
 )
+from milky_frog.project import ProjectConfig
 
 
 def _context(workspace: Path) -> ToolContext:
@@ -43,6 +44,77 @@ async def test_read_file_missing_is_error(tmp_path: Path) -> None:
 
     assert result.is_error
     assert "not a file" in result.content
+
+
+async def test_read_file_offset_and_limit_returns_window(tmp_path: Path) -> None:
+    (tmp_path / "f.txt").write_text("one\ntwo\nthree\nfour\nfive\n", encoding="utf-8")
+
+    result = await ReadFileTool().execute(
+        _context(tmp_path), ReadFileTool.input_model(path="f.txt", offset=2, limit=2)
+    )
+
+    assert not result.is_error
+    assert result.content == "[lines 2-3 of 5]\ntwo\nthree\n"
+
+
+async def test_read_file_offset_to_end(tmp_path: Path) -> None:
+    (tmp_path / "f.txt").write_text("a\nb\nc\n", encoding="utf-8")
+
+    result = await ReadFileTool().execute(
+        _context(tmp_path), ReadFileTool.input_model(path="f.txt", offset=2)
+    )
+
+    assert not result.is_error
+    assert result.content == "[lines 2-3 of 3]\nb\nc\n"
+
+
+async def test_read_file_full_window_omits_header(tmp_path: Path) -> None:
+    (tmp_path / "f.txt").write_text("a\nb\n", encoding="utf-8")
+
+    result = await ReadFileTool().execute(
+        _context(tmp_path), ReadFileTool.input_model(path="f.txt", limit=10)
+    )
+
+    assert not result.is_error
+    assert result.content == "a\nb\n"
+
+
+async def test_read_file_offset_past_end_is_error(tmp_path: Path) -> None:
+    (tmp_path / "f.txt").write_text("a\nb\n", encoding="utf-8")
+
+    result = await ReadFileTool().execute(
+        _context(tmp_path), ReadFileTool.input_model(path="f.txt", offset=5)
+    )
+
+    assert result.is_error
+    assert "past the end" in result.content
+
+
+async def test_read_file_empty_file_with_offset_is_error_not_reversed_header(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "empty.txt").write_text("", encoding="utf-8")
+
+    result = await ReadFileTool().execute(
+        _context(tmp_path), ReadFileTool.input_model(path="empty.txt", offset=5)
+    )
+
+    assert result.is_error
+    assert "past the end" in result.content
+    assert "lines 5-0" not in result.content
+
+
+async def test_read_file_on_directory_returns_listing(tmp_path: Path) -> None:
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "a.py").write_text("", encoding="utf-8")
+    (tmp_path / "pkg" / "sub").mkdir()
+
+    result = await ReadFileTool().execute(_context(tmp_path), ReadFileTool.input_model(path="pkg"))
+
+    assert not result.is_error
+    assert "is a directory" in result.content
+    assert "sub/" in result.content
+    assert "a.py" in result.content
 
 
 async def test_read_file_rejects_sensitive_path(tmp_path: Path) -> None:
@@ -166,6 +238,83 @@ async def test_grep_never_surfaces_denied_files(tmp_path: Path) -> None:
     assert result.content == "app.py:1:SECRET_KEY = load()"
     assert "topsecret" not in result.content
     assert "alsosecret" not in result.content
+
+
+async def test_grep_context_lines_show_surrounding(tmp_path: Path) -> None:
+    (tmp_path / "f.py").write_text(
+        "import os\ndef target():\n    return 1\nx = 2\n", encoding="utf-8"
+    )
+
+    result = await GrepTool().execute(
+        _context(tmp_path), GrepTool.input_model(pattern="def target", context=1)
+    )
+
+    assert not result.is_error
+    assert result.content == (
+        "f.py-1-import os\n"  # context line uses '-'
+        "f.py:2:def target():\n"  # match line uses ':'
+        "f.py-3-    return 1"  # context line uses '-'
+    )
+
+
+async def test_grep_context_merges_overlapping_windows(tmp_path: Path) -> None:
+    (tmp_path / "f.py").write_text("a\nhit\nb\nhit\nc\n", encoding="utf-8")
+
+    result = await GrepTool().execute(
+        _context(tmp_path), GrepTool.input_model(pattern="hit", context=1)
+    )
+
+    # Windows for lines 2 and 4 overlap at line 3 → one merged group, no '--'.
+    assert "--" not in result.content
+    assert result.content == ("f.py-1-a\nf.py:2:hit\nf.py-3-b\nf.py:4:hit\nf.py-5-c")
+
+
+async def test_grep_spill_contains_full_results_not_collection_prefix(tmp_path: Path) -> None:
+    # Collect-all-then-truncate must spill the complete search result, not an
+    # early collection prefix that stopped once output grew past search_output_max_chars.
+    sandbox = LocalSandbox(tmp_path, config=ProjectConfig(search_output_max_chars=1000))
+    context = ToolContext("run-1", tmp_path, sandbox=sandbox)
+    for index in range(50):
+        (tmp_path / f"f{index:02d}.txt").write_text(f"needle line {index:02d}\n", encoding="utf-8")
+
+    result = await GrepTool().execute(context, GrepTool.input_model(pattern="needle"))
+
+    assert not result.is_error
+    assert "saved to .milky-frog/tool-output/" in result.content
+    spilled = list((tmp_path / ".milky-frog" / "tool-output").glob("*grep*.txt"))
+    assert len(spilled) == 1
+    spilled_text = spilled[0].read_text(encoding="utf-8")
+    assert spilled_text.count("needle") == 50
+    assert "f49.txt" in spilled_text
+
+
+async def test_grep_spill_preserves_full_long_match_line(tmp_path: Path) -> None:
+    long_tail = "z" * 1500
+    (tmp_path / "min.js").write_text(f"needle{long_tail}\n", encoding="utf-8")
+    sandbox = LocalSandbox(tmp_path, config=ProjectConfig(search_output_max_chars=1000))
+    context = ToolContext("run-1", tmp_path, sandbox=sandbox)
+
+    result = await GrepTool().execute(context, GrepTool.input_model(pattern="needle"))
+
+    assert not result.is_error
+    assert "saved to .milky-frog/tool-output/" in result.content
+    spilled = list((tmp_path / ".milky-frog" / "tool-output").glob("*grep*.txt"))
+    assert len(spilled) == 1
+    assert long_tail in spilled[0].read_text(encoding="utf-8")
+
+
+async def test_grep_skips_spill_directory(tmp_path: Path) -> None:
+    # A prior truncated tool result spilled here; grep must not surface it as a match.
+    spill_dir = tmp_path / ".milky-frog" / "tool-output"
+    spill_dir.mkdir(parents=True)
+    (spill_dir / "20260101_grep_abcd1234.txt").write_text("needle in spill\n", encoding="utf-8")
+    (tmp_path / "real.txt").write_text("needle in source\n", encoding="utf-8")
+
+    result = await GrepTool().execute(_context(tmp_path), GrepTool.input_model(pattern="needle"))
+
+    assert not result.is_error
+    assert "real.txt" in result.content
+    assert "tool-output" not in result.content
 
 
 async def test_grep_rejects_escaping_path(tmp_path: Path) -> None:
@@ -335,6 +484,10 @@ async def test_bash_truncated_output(tmp_path: Path) -> None:
 
     assert not result.is_error
     assert "Truncated" in result.content
+    assert "saved to .milky-frog/tool-output/" in result.content
+    spilled = list((tmp_path / ".milky-frog" / "tool-output").glob("*bash*.txt"))
+    assert len(spilled) == 1
+    assert spilled[0].read_text(encoding="utf-8").count("x") == 200_000
 
 
 def _init_git_repo(path: Path) -> None:

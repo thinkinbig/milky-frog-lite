@@ -10,9 +10,8 @@ from pydantic import BaseModel, Field
 from milky_frog.domain import ToolResult
 from milky_frog.harness.tools.base import ToolContext
 from milky_frog.harness.tools.truncate import truncate_tool_output
-from milky_frog.project import DEFAULT_BASH_TIMEOUT_SECONDS
+from milky_frog.project import DEFAULT_BASH_OUTPUT_MAX_CHARS, DEFAULT_BASH_TIMEOUT_SECONDS
 
-_MAX_OUTPUT_BYTES = 128 * 1024
 # Grace period to drain PTY output after the process exits.
 _PTY_DRAIN_SECONDS = 2.0
 
@@ -48,9 +47,7 @@ async def _read_pty(loop: asyncio.AbstractEventLoop, master_fd: int) -> bytes:
         if not data:
             _done()
             return
-        # Cap memory at 10MB to avoid OOM
-        if sum(len(c) for c in chunks) < 10 * 1024 * 1024:
-            chunks.append(data)
+        chunks.append(data)
 
     loop.add_reader(master_fd, _on_readable)
     try:
@@ -66,16 +63,18 @@ class BashTool:
     The command runs inside a PTY so programs that check isatty() (git, grep,
     ls …) emit colour and formatting naturally.  Stdin is closed and the
     environment disables pagers and interactive prompts so git log and similar
-    commands cannot hang waiting for a human.  Output is truncated at 128 KB.
-    Timeout is configurable via ``bash_timeout_seconds`` in
-    ``.milky-frog/config.toml``.
+    commands cannot hang waiting for a human.  Oversized output is passed to
+    ``truncate_tool_output`` (``bash_output_max_chars`` in ``.milky-frog/config.toml``).
+    Timeout is configurable via ``bash_timeout_seconds`` in the same file.
     """
 
     name = "bash"
     requires_approval = True
     description = (
         "Run a shell command in the workspace and capture its stdout and stderr. "
-        "Large output is truncated at 128 KB (head/tail plus a spill file path). "
+        "Large output is truncated via head/tail with the full text spilled to disk "
+        f"(default inline cap {DEFAULT_BASH_OUTPUT_MAX_CHARS} chars; "
+        "override bash_output_max_chars in .milky-frog/config.toml). "
         "Commands run non-interactively (no pagers or terminal prompts; stdin closed). "
         "Host env is limited to HOME, PATH, SHELL, TERM, LANG, LC_ALL, TMPDIR. "
         f"Default timeout is {DEFAULT_BASH_TIMEOUT_SECONDS} seconds; "
@@ -150,10 +149,22 @@ class BashTool:
 
         max_chars = sandbox.config.bash_output_max_chars
         if process.returncode != 0:
-            text = truncate_tool_output(text, max_chars=max_chars)
+            text = truncate_tool_output(
+                text,
+                max_chars=max_chars,
+                workspace=sandbox.workspace,
+                label="bash",
+                counter=context.token_counter,
+            )
             stripped = text.strip() or "(no output)"
             return ToolResult(f"exit code {process.returncode}:\n{stripped}", is_error=True)
 
-        text = truncate_tool_output(text, max_chars=max_chars)
+        text = truncate_tool_output(
+            text,
+            max_chars=max_chars,
+            workspace=sandbox.workspace,
+            label="bash",
+            counter=context.token_counter,
+        )
         result = text.rstrip("\n")
         return ToolResult(result if result else "(no output)")

@@ -112,6 +112,11 @@ you inspected, changed, or executed something unless the available Tools allowed
   smallest scope that can answer the question — one file or directory, summary flags
   (--stat, --numstat), or head/tail/wc pipes — before running repo-wide diffs, greps, or
   listings.</rule>
+  <rule>Locate before reading. Use grep (with a few context lines) or list_dir to find the
+  relevant file and line, then read a narrow window with read_file's offset/limit rather
+  than whole files. A casual or exploratory question does not justify a repo-wide scan.</rule>
+  <rule>Do not re-read a file already shown earlier in the conversation, and do not call
+  read_file on a path you have not confirmed is a file — use list_dir first when unsure.</rule>
   <rule>Tool output may be truncated. If you see a truncation notice, refine the command
   instead of repeating it at the same scope.</rule>
   <rule>Simple tasks do not need to be split across many steps.</rule>

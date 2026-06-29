@@ -61,7 +61,8 @@ def make_agent_harness(
     """Wire the Harness runtime stack — shared by ``AgentSession`` and tests."""
     registry = tools if tools is not None else ToolRegistry(default_tools())
     policy = SessionToolPolicy(registry)
-    tool_step = ToolStepExecutor(registry, hub.emitter, policy)
+    budget = TokenBudget(counter=token_counter)
+    tool_step = ToolStepExecutor(registry, hub.emitter, policy, budget=budget)
 
     async def on_model_retry(run_id: str, message: str) -> None:
         await hub.run_notice(run_id, message, level="warning")
@@ -79,6 +80,6 @@ def make_agent_harness(
         tool_step=tool_step,
         policy=policy,
         sandbox_factory=sandbox_factory,
-        budget=TokenBudget(counter=token_counter),
+        budget=budget,
         context_loader=context_loader,
     )

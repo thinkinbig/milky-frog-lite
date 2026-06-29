@@ -17,7 +17,9 @@ from milky_frog.domain import (
     is_cancelled,
 )
 from milky_frog.events.emitter import RunEmitter
+from milky_frog.harness.budget import TokenBudget
 from milky_frog.harness.tools import ToolRegistry
+from milky_frog.tokens import TokenCounter
 
 
 class ToolStepExecutor:
@@ -32,10 +34,12 @@ class ToolStepExecutor:
         tools: ToolRegistry,
         emitter: RunEmitter,
         policy: ToolPolicy,
+        budget: TokenBudget | None = None,
     ) -> None:
         self._tools = tools
         self._emitter = emitter
         self._policy = policy
+        self._budget = budget
 
     async def run_with_policy(
         self,
@@ -64,6 +68,7 @@ class ToolStepExecutor:
             sandbox,
             call,
             cancellation,
+            token_counter=self._token_counter(),
         )
 
     async def resolve_pending(
@@ -92,6 +97,7 @@ class ToolStepExecutor:
                 sandbox,
                 call,
                 cancellation,
+                token_counter=self._token_counter(),
             )
         if require_verdict:
             return await self._emitter.finish_approval_needed(state, call)
@@ -102,3 +108,8 @@ class ToolStepExecutor:
             call,
             cancellation,
         )
+
+    def _token_counter(self) -> TokenCounter | None:
+        if self._budget is None:
+            return None
+        return self._budget.counter

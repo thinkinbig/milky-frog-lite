@@ -45,6 +45,10 @@ class TokenBudget:
         self._config: BudgetConfig | None = None
         self._input_budget = 0
 
+    @property
+    def counter(self) -> TokenCounter | None:
+        return self._counter
+
     def init_for_workspace(self, workspace: Path) -> None:
         """Load budget configuration from the workspace project config."""
         from milky_frog.project import load_project_config
