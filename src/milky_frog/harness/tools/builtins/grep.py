@@ -13,9 +13,6 @@ from milky_frog.harness.tools.base import ToolContext
 from milky_frog.harness.tools.spill import SPILL_DIR
 from milky_frog.harness.tools.truncate import truncate_tool_output
 
-# Cap a single matched line so one minified file can't dominate the output.
-_MAX_LINE_CHARS = 300
-
 
 class GrepInput(BaseModel):
     pattern: str = Field(description="Regex to search for, e.g. 'def _execute' or 'class Tool'.")
@@ -129,7 +126,7 @@ def _render_matches(
             out.append("--")
         for ln in range(lo, hi + 1):
             sep = ":" if ln in match_set else "-"
-            out.append(f"{rel}{sep}{ln}{sep}{file_lines[ln - 1][:_MAX_LINE_CHARS]}")
+            out.append(f"{rel}{sep}{ln}{sep}{file_lines[ln - 1]}")
     return out
 
 

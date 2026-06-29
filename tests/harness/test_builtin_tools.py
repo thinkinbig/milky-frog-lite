@@ -288,6 +288,21 @@ async def test_grep_spill_contains_full_results_not_collection_prefix(tmp_path: 
     assert "f49.txt" in spilled_text
 
 
+async def test_grep_spill_preserves_full_long_match_line(tmp_path: Path) -> None:
+    long_tail = "z" * 1500
+    (tmp_path / "min.js").write_text(f"needle{long_tail}\n", encoding="utf-8")
+    sandbox = LocalSandbox(tmp_path, config=ProjectConfig(search_output_max_chars=1000))
+    context = ToolContext("run-1", tmp_path, sandbox=sandbox)
+
+    result = await GrepTool().execute(context, GrepTool.input_model(pattern="needle"))
+
+    assert not result.is_error
+    assert "saved to .milky-frog/tool-output/" in result.content
+    spilled = list((tmp_path / ".milky-frog" / "tool-output").glob("*grep*.txt"))
+    assert len(spilled) == 1
+    assert long_tail in spilled[0].read_text(encoding="utf-8")
+
+
 async def test_grep_skips_spill_directory(tmp_path: Path) -> None:
     # A prior truncated tool result spilled here; grep must not surface it as a match.
     spill_dir = tmp_path / ".milky-frog" / "tool-output"
@@ -469,6 +484,10 @@ async def test_bash_truncated_output(tmp_path: Path) -> None:
 
     assert not result.is_error
     assert "Truncated" in result.content
+    assert "saved to .milky-frog/tool-output/" in result.content
+    spilled = list((tmp_path / ".milky-frog" / "tool-output").glob("*bash*.txt"))
+    assert len(spilled) == 1
+    assert spilled[0].read_text(encoding="utf-8").count("x") == 200_000
 
 
 def _init_git_repo(path: Path) -> None:

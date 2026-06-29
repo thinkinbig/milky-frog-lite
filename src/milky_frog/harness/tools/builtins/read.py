@@ -11,8 +11,6 @@ from milky_frog.harness.tools.builtins.list_dir import render_directory
 from milky_frog.harness.tools.truncate import truncate_tool_output
 from milky_frog.tokens import TokenCounter
 
-_MAX_BYTES = 256 * 1024
-
 
 class ReadFileInput(BaseModel):
     path: str = Field(description="Workspace-relative path to the file to read.")
