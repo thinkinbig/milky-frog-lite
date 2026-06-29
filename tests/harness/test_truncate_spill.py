@@ -15,15 +15,42 @@ def test_truncate_without_workspace_keeps_old_behavior() -> None:
     assert "saved to" not in out
 
 
+def test_truncate_splits_on_line_boundaries_not_mid_line() -> None:
+    lines = [f"row-{index:03d}-" + ("x" * 20) + "\n" for index in range(50)]
+    full = "".join(lines)
+
+    out = truncate_tool_output(full, max_chars=500)
+
+    assert "Truncated" in out
+    head, _, tail = out.partition("\n\n... (Truncated")
+    assert head.endswith("\n")
+    assert not head.endswith("x\nrow")
+    assert tail.endswith("\n") or tail.split("\n", 1)[-1].endswith("\n")
+
+
+def test_truncate_first_omitted_line_matches_head_line_count(tmp_path: Path) -> None:
+    full = "".join(f"line {index}\n" for index in range(100))
+
+    out = truncate_tool_output(full, max_chars=200, workspace=tmp_path, label="read")
+
+    head_part = out.split("\n\n... (Truncated")[0]
+    head_lines = head_part.count("\n")
+    offset = int(out.split("offset=")[1].split(".")[0])
+    assert offset == head_lines + 1
+
+
 def test_truncate_with_workspace_spills_full_text(tmp_path: Path) -> None:
     full = "".join(f"line {i}\n" for i in range(500))
 
     out = truncate_tool_output(full, max_chars=100, workspace=tmp_path, label="grep")
 
     assert "saved to .milky-frog/tool-output/" in out
+    assert "offset=" in out  # actionable line to start paging the omitted middle
     spilled = list((tmp_path / ".milky-frog" / "tool-output").glob("*grep*.txt"))
     assert len(spilled) == 1
     assert spilled[0].read_text(encoding="utf-8") == full
+    # Spilled output (may carry secrets) is kept out of version control.
+    assert (tmp_path / ".milky-frog" / "tool-output" / ".gitignore").read_text() == "*\n"
 
 
 def test_spill_returns_workspace_relative_path(tmp_path: Path) -> None:

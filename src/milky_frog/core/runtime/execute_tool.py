@@ -9,6 +9,7 @@ from typing import Any
 from milky_frog.core.sandbox import Sandbox
 from milky_frog.domain import RunCancellation, ToolCall, ToolResult, ToolRunCancelled
 from milky_frog.harness.tools import ToolContext, ToolRegistry
+from milky_frog.tokens import TokenCounter
 
 
 async def execute_tool(
@@ -18,10 +19,18 @@ async def execute_tool(
     sandbox: Sandbox,
     call: ToolCall,
     cancellation: RunCancellation | None,
+    *,
+    token_counter: TokenCounter | None = None,
 ) -> ToolResult:
     """Execute one tool call with cancellation polling."""
     tool = tools.get(call.name)
-    context = ToolContext(run_id, workspace, cancellation, sandbox=sandbox)
+    context = ToolContext(
+        run_id,
+        workspace,
+        cancellation,
+        sandbox=sandbox,
+        token_counter=token_counter,
+    )
     try:
         input_model = tool.input_model.model_validate(call.arguments)
         result: ToolResult = await run_cancellable(tool.execute(context, input_model), cancellation)

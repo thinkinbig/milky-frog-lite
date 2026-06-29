@@ -13,6 +13,7 @@ from milky_frog.harness.tools.builtins import (
     WriteFileTool,
     default_tools,
 )
+from milky_frog.project import ProjectConfig
 
 
 def _context(workspace: Path) -> ToolContext:
@@ -87,6 +88,20 @@ async def test_read_file_offset_past_end_is_error(tmp_path: Path) -> None:
 
     assert result.is_error
     assert "past the end" in result.content
+
+
+async def test_read_file_empty_file_with_offset_is_error_not_reversed_header(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "empty.txt").write_text("", encoding="utf-8")
+
+    result = await ReadFileTool().execute(
+        _context(tmp_path), ReadFileTool.input_model(path="empty.txt", offset=5)
+    )
+
+    assert result.is_error
+    assert "past the end" in result.content
+    assert "lines 5-0" not in result.content
 
 
 async def test_read_file_on_directory_returns_listing(tmp_path: Path) -> None:
@@ -252,6 +267,39 @@ async def test_grep_context_merges_overlapping_windows(tmp_path: Path) -> None:
     # Windows for lines 2 and 4 overlap at line 3 → one merged group, no '--'.
     assert "--" not in result.content
     assert result.content == ("f.py-1-a\nf.py:2:hit\nf.py-3-b\nf.py:4:hit\nf.py-5-c")
+
+
+async def test_grep_spill_contains_full_results_not_collection_prefix(tmp_path: Path) -> None:
+    # Collect-all-then-truncate must spill the complete search result, not an
+    # early collection prefix that stopped once output grew past search_output_max_chars.
+    sandbox = LocalSandbox(tmp_path, config=ProjectConfig(search_output_max_chars=1000))
+    context = ToolContext("run-1", tmp_path, sandbox=sandbox)
+    for index in range(50):
+        (tmp_path / f"f{index:02d}.txt").write_text(f"needle line {index:02d}\n", encoding="utf-8")
+
+    result = await GrepTool().execute(context, GrepTool.input_model(pattern="needle"))
+
+    assert not result.is_error
+    assert "saved to .milky-frog/tool-output/" in result.content
+    spilled = list((tmp_path / ".milky-frog" / "tool-output").glob("*grep*.txt"))
+    assert len(spilled) == 1
+    spilled_text = spilled[0].read_text(encoding="utf-8")
+    assert spilled_text.count("needle") == 50
+    assert "f49.txt" in spilled_text
+
+
+async def test_grep_skips_spill_directory(tmp_path: Path) -> None:
+    # A prior truncated tool result spilled here; grep must not surface it as a match.
+    spill_dir = tmp_path / ".milky-frog" / "tool-output"
+    spill_dir.mkdir(parents=True)
+    (spill_dir / "20260101_grep_abcd1234.txt").write_text("needle in spill\n", encoding="utf-8")
+    (tmp_path / "real.txt").write_text("needle in source\n", encoding="utf-8")
+
+    result = await GrepTool().execute(_context(tmp_path), GrepTool.input_model(pattern="needle"))
+
+    assert not result.is_error
+    assert "real.txt" in result.content
+    assert "tool-output" not in result.content
 
 
 async def test_grep_rejects_escaping_path(tmp_path: Path) -> None:

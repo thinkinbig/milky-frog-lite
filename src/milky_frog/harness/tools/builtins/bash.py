@@ -151,13 +151,21 @@ class BashTool:
         max_chars = sandbox.config.bash_output_max_chars
         if process.returncode != 0:
             text = truncate_tool_output(
-                text, max_chars=max_chars, workspace=sandbox.workspace, label="bash"
+                text,
+                max_chars=max_chars,
+                workspace=sandbox.workspace,
+                label="bash",
+                counter=context.token_counter,
             )
             stripped = text.strip() or "(no output)"
             return ToolResult(f"exit code {process.returncode}:\n{stripped}", is_error=True)
 
         text = truncate_tool_output(
-            text, max_chars=max_chars, workspace=sandbox.workspace, label="bash"
+            text,
+            max_chars=max_chars,
+            workspace=sandbox.workspace,
+            label="bash",
+            counter=context.token_counter,
         )
         result = text.rstrip("\n")
         return ToolResult(result if result else "(no output)")

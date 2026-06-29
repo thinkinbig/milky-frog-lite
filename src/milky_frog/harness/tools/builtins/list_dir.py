@@ -10,18 +10,13 @@ from milky_frog.harness.tools.base import ToolContext
 from milky_frog.harness.tools.truncate import truncate_tool_output
 
 
-class _DirectoryEntryOrder:
-    def __call__(self, path: Path) -> tuple[bool, str]:
-        return (not path.is_dir(), path.name)
-
-
 def render_directory(resolved: Path) -> str:
     """Render a directory's entries one per line, with a trailing slash on subdirectories.
 
     Shared by ``ListDirTool`` and ``read_file``'s directory-degrade path so both
     produce identical listings. May raise ``OSError`` — callers handle it.
     """
-    entries = sorted(resolved.iterdir(), key=_DirectoryEntryOrder())
+    entries = sorted(resolved.iterdir(), key=lambda path: (not path.is_dir(), path.name))
     if not entries:
         return "(empty directory)"
     return "\n".join(f"{entry.name}/" if entry.is_dir() else entry.name for entry in entries)
@@ -62,6 +57,7 @@ class ListDirTool:
             max_chars=sandbox.config.search_output_max_chars,
             workspace=sandbox.workspace,
             label="list_dir",
+            counter=context.token_counter,
         )
 
         return ToolResult(text)

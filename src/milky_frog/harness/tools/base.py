@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from milky_frog.adapters.local.sandbox import LocalSandbox
 from milky_frog.core.sandbox import Sandbox
 from milky_frog.domain import RunCancellation, ToolResult
+from milky_frog.tokens import TokenCounter
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,6 +18,7 @@ class ToolContext:
     workspace: Path
     cancellation: RunCancellation | None = None
     sandbox: Sandbox | None = None
+    token_counter: TokenCounter | None = None
 
     def is_cancelled(self) -> bool:
         return self.cancellation is not None and self.cancellation.is_cancelled

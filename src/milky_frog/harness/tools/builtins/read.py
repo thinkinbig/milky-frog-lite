@@ -9,6 +9,7 @@ from milky_frog.domain import ToolResult
 from milky_frog.harness.tools.base import ToolContext
 from milky_frog.harness.tools.builtins.list_dir import render_directory
 from milky_frog.harness.tools.truncate import truncate_tool_output
+from milky_frog.tokens import TokenCounter
 
 _MAX_BYTES = 256 * 1024
 
@@ -49,7 +50,9 @@ class ReadFileTool:
             return ToolResult(str(error), is_error=True)
         if not resolved.is_file():
             if resolved.is_dir():
-                return self._directory_listing(params.path, resolved, sandbox)
+                return self._directory_listing(
+                    params.path, resolved, sandbox, counter=context.token_counter
+                )
             return ToolResult(f"not a file: {params.path}", is_error=True)
         try:
             data = resolved.read_bytes()
@@ -64,14 +67,26 @@ class ReadFileTool:
         if params.offset is None and params.limit is None:
             return ToolResult(
                 truncate_tool_output(
-                    text, max_chars=max_chars, workspace=sandbox.workspace, label="read"
+                    text,
+                    max_chars=max_chars,
+                    workspace=sandbox.workspace,
+                    label="read",
+                    counter=context.token_counter,
                 )
             )
 
-        return self._read_window(params, text, max_chars, sandbox.workspace)
+        return self._read_window(
+            params, text, max_chars, sandbox.workspace, counter=context.token_counter
+        )
 
     @staticmethod
-    def _directory_listing(path: str, resolved: Path, sandbox: Sandbox) -> ToolResult:
+    def _directory_listing(
+        path: str,
+        resolved: Path,
+        sandbox: Sandbox,
+        *,
+        counter: TokenCounter | None = None,
+    ) -> ToolResult:
         """Degrade a read of a directory to its listing instead of an error."""
         try:
             listing = render_directory(resolved)
@@ -82,18 +97,24 @@ class ReadFileTool:
             max_chars=sandbox.config.search_output_max_chars,
             workspace=sandbox.workspace,
             label="read_dir",
+            counter=counter,
         )
         return ToolResult(f"{path} is a directory, not a file. Its entries:\n{listing}")
 
     @staticmethod
     def _read_window(
-        params: ReadFileInput, text: str, max_chars: int, workspace: Path
+        params: ReadFileInput,
+        text: str,
+        max_chars: int,
+        workspace: Path,
+        *,
+        counter: TokenCounter | None = None,
     ) -> ToolResult:
         """Return only the requested line window, with a header when partial."""
         lines = text.splitlines(keepends=True)
         total = len(lines)
         start = (params.offset or 1) - 1
-        if total and start >= total:
+        if start >= total and start > 0:
             return ToolResult(
                 f"offset {params.offset} is past the end of the file "
                 f"({total} lines): {params.path}",
@@ -101,7 +122,11 @@ class ReadFileTool:
             )
         end = total if params.limit is None else min(total, start + params.limit)
         window = truncate_tool_output(
-            "".join(lines[start:end]), max_chars=max_chars, workspace=workspace, label="read"
+            "".join(lines[start:end]),
+            max_chars=max_chars,
+            workspace=workspace,
+            label="read",
+            counter=counter,
         )
         if start > 0 or end < total:
             window = f"[lines {start + 1}-{end} of {total}]\n{window}"

@@ -10,6 +10,10 @@ from milky_frog.project import PROJECT_DIRNAME
 _OUTPUT_SUBDIR = "tool-output"
 _MAX_SPILL_FILES = 100
 
+# Workspace-relative spill directory. Tools that walk the Workspace (``grep``)
+# skip it so the model's own spilled outputs never become search hits.
+SPILL_DIR = (Path(PROJECT_DIRNAME) / _OUTPUT_SUBDIR).as_posix()
+
 
 def spill_full_output(workspace: Path, label: str, text: str) -> str | None:
     """Persist the full *text* under the Workspace and return its relative path.
@@ -23,6 +27,11 @@ def spill_full_output(workspace: Path, label: str, text: str) -> str | None:
     out_dir = workspace / PROJECT_DIRNAME / _OUTPUT_SUBDIR
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
+        # Spilled output can contain secrets a command printed; keep it out of
+        # version control regardless of how the Workspace ignores .milky-frog.
+        gitignore = out_dir / ".gitignore"
+        if not gitignore.exists():
+            gitignore.write_text("*\n", encoding="utf-8")
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         name = f"{stamp}_{label}_{uuid4().hex[:8]}.txt"
         (out_dir / name).write_text(text, encoding="utf-8")

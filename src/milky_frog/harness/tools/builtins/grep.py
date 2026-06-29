@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from milky_frog.core.sandbox import Sandbox, SandboxViolation
 from milky_frog.domain import ToolResult
 from milky_frog.harness.tools.base import ToolContext
+from milky_frog.harness.tools.spill import SPILL_DIR
 from milky_frog.harness.tools.truncate import truncate_tool_output
 
 # Cap a single matched line so one minified file can't dominate the output.
@@ -76,7 +77,6 @@ class GrepTool:
 
         search_max = sandbox.config.search_output_max_chars
         out: list[str] = []
-        total = 0
         for file in _iter_allowed_files(sandbox, root):
             rel = file.relative_to(sandbox.workspace).as_posix()
             try:
@@ -89,19 +89,16 @@ class GrepTool:
                 continue
             if out and params.context > 0:
                 out.append("--")  # separate files when context lines are shown
-                total += 3
-            for rendered in _render_matches(rel, file_lines, match_nums, params.context):
-                out.append(rendered)
-                total += len(rendered) + 1
-                if total > search_max:
-                    break
-            if total > search_max:
-                break
+            out.extend(_render_matches(rel, file_lines, match_nums, params.context))
 
         if not out:
             return ToolResult("(no matches)")
         output = truncate_tool_output(
-            "\n".join(out), max_chars=search_max, workspace=sandbox.workspace, label="grep"
+            "\n".join(out),
+            max_chars=search_max,
+            workspace=sandbox.workspace,
+            label="grep",
+            counter=context.token_counter,
         )
         return ToolResult(output)
 
@@ -140,13 +137,20 @@ def _iter_allowed_files(sandbox: Sandbox, root: Path) -> Iterator[Path]:
     """Yield text-file candidates under *root* that pass the sandbox policy.
 
     Reuses ``sandbox.resolve`` as the single allow/deny predicate, pruning denied
-    directories (``.git`` …) during the walk so we never descend into them.
+    directories (``.git`` …) during the walk so we never descend into them. The
+    spill directory is pruned too: it is readable by ``read_file`` (for recovery)
+    but searching it would surface the tool's own truncated outputs as matches.
     """
     if root.is_file():
         yield root
         return
+    spill_dir = sandbox.workspace / SPILL_DIR
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(d for d in dirnames if _is_allowed(sandbox, Path(dirpath, d)))
+        dirnames[:] = sorted(
+            d
+            for d in dirnames
+            if _is_allowed(sandbox, Path(dirpath, d)) and Path(dirpath, d) != spill_dir
+        )
         for name in sorted(filenames):
             candidate = Path(dirpath, name)
             if _is_allowed(sandbox, candidate):
