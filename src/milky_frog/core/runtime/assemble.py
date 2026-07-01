@@ -7,7 +7,7 @@ from milky_frog.checkpoint import CheckpointStore
 from milky_frog.core.sandbox import SandboxFactory
 from milky_frog.core.session_tool_policy import SessionToolPolicy
 from milky_frog.events import EventHub
-from milky_frog.events.hub import BaseHandler
+from milky_frog.events.hub import Handler
 from milky_frog.events.loop import AgentLoop
 from milky_frog.events.tool_step import ToolStepExecutor
 from milky_frog.handlers.checkpoint import CheckpointHandler
@@ -27,8 +27,8 @@ def make_session_handlers(
     settings: Settings,
     checkpoints: CheckpointStore,
     *,
-    extra: Sequence[BaseHandler] = (),
-) -> list[BaseHandler]:
+    extra: Sequence[Handler] = (),
+) -> list[Handler]:
     """Assemble every lifecycle handler for a session, in one place.
 
     Returns handlers in registration order. ``CheckpointHandler`` declares
@@ -37,7 +37,7 @@ def make_session_handlers(
     hub and owns their lifetime — every returned handler is entered on
     session open and released when the runtime closes the session.
     """
-    handlers: list[BaseHandler] = [
+    handlers: list[Handler] = [
         CheckpointHandler(checkpoints),
     ]
     handlers.extend(extra)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, override
 
 from milky_frog.domain.provider import Provider
 from milky_frog.tokens.base import ApproxCharCounter, BaseTokenCounter, TokenCounter
@@ -27,6 +27,7 @@ class TiktokenCounter(BaseTokenCounter):
             # Unmapped / newer model names fall back to the current base encoding.
             self._encoding = tiktoken.get_encoding("o200k_base")
 
+    @override
     def count_text(self, text: str) -> int:  # pragma: no cover - needs tiktoken
         if not text:
             return 0
@@ -39,6 +40,7 @@ class HFTokenizerCounter(BaseTokenCounter):
     def __init__(self, tokenizer: Any) -> None:
         self._tokenizer = tokenizer
 
+    @override
     def count_text(self, text: str) -> int:
         if not text:
             return 0

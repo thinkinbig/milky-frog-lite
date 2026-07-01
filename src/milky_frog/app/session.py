@@ -18,7 +18,7 @@ from milky_frog.domain import (
     ApprovalVerdict,
     RunResult,
 )
-from milky_frog.events import BaseHandler, EventHub
+from milky_frog.events import EventHub, Handler
 from milky_frog.harness.compaction import CompactionHandler
 from milky_frog.harness.harness import AgentHarness
 from milky_frog.harness.prompt import make_context_loader
@@ -62,7 +62,7 @@ class AgentSession:
         *,
         config: AgentSessionConfig | None = None,
         hub: EventHub | None = None,
-        bundles: list[BaseHandler] | None = None,
+        bundles: list[Handler] | None = None,
         interactive: bool = False,
     ) -> None:
         api_key, model = self.require_model_configuration(settings)
@@ -72,12 +72,12 @@ class AgentSession:
         self._model_name = model
         self._base_url = settings.base_url
         self._hub_override = hub
-        self._extra_bundles = list(bundles or ())
+        self._extra_bundles: list[Handler] = list(bundles or ())
         self._interactive = interactive
 
         self._checkpoints: RunCheckpointFacade | None = None
         self._hub: EventHub | None = None
-        self._handlers: list[BaseHandler] = []
+        self._handlers: list[Handler] = []
         self._model: OpenAIModel | None = None
         self._harness: AgentHarness | None = None
         self._foreground: ForegroundRun | None = None
@@ -154,7 +154,7 @@ class AgentSession:
         *,
         config: AgentSessionConfig | None = None,
         hub: EventHub | None = None,
-        bundles: list[BaseHandler] | None = None,
+        bundles: list[Handler] | None = None,
     ) -> AgentSession:
         return cls(settings, config=config, hub=hub, bundles=bundles)
 
@@ -196,14 +196,14 @@ class AgentSession:
             cache_dir=self._settings.home / "tokenizers",
         )
 
-        extra: list[BaseHandler] = list(self._extra_bundles)
+        extra: list[Handler] = list(self._extra_bundles)
         if project_cfg.summarization_enabled:
             extra.append(
                 CompactionHandler(
                     self._model,
                     counter,
                     trigger_tokens=project_cfg.summarization_trigger_tokens,
-                    keep_recent_rounds=project_cfg.summarization_keep_recent_rounds,
+                    keep_recent_tokens=project_cfg.summarization_keep_recent_tokens,
                 )
             )
         self._handlers = make_session_handlers(self._settings, store, extra=extra)

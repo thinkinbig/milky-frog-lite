@@ -6,11 +6,12 @@ from copy import deepcopy
 from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
-from milky_frog.core.handlers import Compacted, HandlerResult
 from milky_frog.core.runtime.execute_tool import run_cancellable
 from milky_frog.core.sandbox import Sandbox
 from milky_frog.domain import (
     DEFAULT_MAX_MODEL_CALLS,
+    Compacted,
+    HandlerResult,
     ModelRequest,
     ModelResponse,
     ReasoningDelta,
@@ -33,11 +34,16 @@ if TYPE_CHECKING:
     from milky_frog.harness.budget import TokenBudget
 
 
-def _apply_compaction(state: RunState, results: list[HandlerResult]) -> RunState:
-    """Fold any ``Compacted`` control return from ``before_model`` into the state."""
+def _apply_control(state: RunState, results: list[HandlerResult]) -> RunState:
+    """Apply Handler control proposals from ``before_model`` to the ``RunState``.
+
+    The loop owns RunState evolution; Handlers only propose. Today the sole
+    proposal is ``Compacted``; add a ``case`` here when a new control point lands.
+    """
     for result in results:
-        if isinstance(result, Compacted):
-            state = replace(state, compaction=result.compaction)
+        match result:
+            case Compacted(compaction):
+                state = replace(state, compaction=compaction)
     return state
 
 
@@ -94,9 +100,9 @@ class AgentLoop:
                 model_call = state.completed_model_calls + 1
                 await self._hub.turn_started(run_id, model_call=model_call)
                 shaping = await self._hub.before_model(run_id, request, state)
-                shaped_state = _apply_compaction(state, shaping)
-                if shaped_state is not state:
-                    state = shaped_state
+                shaped = _apply_control(state, shaping)
+                if shaped is not state:
+                    state = shaped
                     request = ModelRequest(
                         self._context.assemble(state), self._tools.schemas(), run_id=run_id
                     )

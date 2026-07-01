@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, override
 
 from rich.console import RenderableType
 from rich.markdown import Markdown
@@ -302,6 +302,7 @@ class ApprovalPrompt(Vertical):
         self._tool_name = tool_name
         self._reason = reason
 
+    @override
     def compose(self) -> ComposeResult:
         header = f"Run {self._tool_name}?" if self._tool_name else "Tool approval required"
         yield Static(Text.assemble(("  ⚠ ", "bold yellow"), (header, "bold")), id="approval-header")
@@ -473,6 +474,7 @@ class MilkyFrogApp(App[None]):
             raise RuntimeError("RunController is not ready; session has not started")
         return self._run_controller
 
+    @override
     def run(self, *args: Any, **kwargs: Any) -> Any:
         """Run the TUI with a managed ``AgentSession`` lifecycle.
 
@@ -489,6 +491,7 @@ class MilkyFrogApp(App[None]):
 
         return asyncio.run(_run_with_session())
 
+    @override
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield Vertical(

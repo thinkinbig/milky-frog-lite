@@ -18,7 +18,7 @@ to the workspace safety_margin (v2: fit a, b, w from usage).
 from __future__ import annotations
 
 import json
-from typing import Protocol
+from typing import Protocol, override
 
 from pydantic import JsonValue
 
@@ -66,9 +66,11 @@ class BaseTokenCounter(TokenCounter):
     formula; subclasses provide only ``count_text``.
     """
 
+    @override
     def count_text(self, text: str) -> int:
         raise NotImplementedError
 
+    @override
     def count_messages(self, messages: list[dict[str, str]] | tuple[dict[str, str], ...]) -> int:
         total = _REQUEST_OVERHEAD
         for message in messages:
@@ -78,6 +80,7 @@ class BaseTokenCounter(TokenCounter):
                     total += self.count_text(value)
         return total
 
+    @override
     def count_tool_schemas(self, schemas: tuple[dict[str, JsonValue], ...]) -> int:
         return sum(self.count_text(json.dumps(schema)) for schema in schemas)
 
@@ -88,6 +91,7 @@ class ApproxCharCounter(BaseTokenCounter):
     ``count_text(t) = max(1, round(w_cjk·n_cjk + w_other·n_other))``.
     """
 
+    @override
     def count_text(self, text: str) -> int:
         if not text:
             return 0

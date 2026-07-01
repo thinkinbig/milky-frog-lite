@@ -21,6 +21,9 @@ dependencies = [
   "typer>=0.15.0",
 ]
 
+[tool.pyrefly.errors]
+redundant-cast = "warn"
+
 [project.optional-dependencies]
 # Exact token counting per provider. Core never imports these; the adapter
 # loads them lazily and degrades to the approximate counter when absent.
@@ -33,7 +36,7 @@ mf = "milky_frog.cli:app"
 
 [dependency-groups]
 dev = [
-  "mypy>=1.15.0",
+  "pyrefly>=1.1.1",
   "pytest>=8.3.0",
   "pytest-asyncio>=0.25.0",
   "pytest-cov>=7.1.0",
@@ -67,12 +70,12 @@ extend-exclude = ["notebooks"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
-[tool.mypy]
-python_version = "3.12"
-strict = true
-packages = ["milky_frog"]
-
-[[tool.mypy.overrides]]
-# Optional tokenizer packages ship no type stubs and may be uninstalled.
-module = ["tiktoken", "tokenizers"]
-ignore_missing_imports = true
+[tool.pyrefly]
+project-includes = ["src/milky_frog/**/*.py*"]
+search-path = ["src"]
+python-version = "3.12.0"
+preset = "strict"
+ignore-missing-imports = [
+    "tiktoken",
+    "tokenizers",
+]

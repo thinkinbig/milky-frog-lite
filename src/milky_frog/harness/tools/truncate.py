@@ -30,6 +30,8 @@ def truncate_tool_output(
     lines = text.splitlines(keepends=True)
     first_omitted_line: int | None = None
     line_split = len(lines) > 1
+    head_text = ""
+    tail_text = ""
 
     if line_split:
         head_budget = int(max_chars * 0.2)

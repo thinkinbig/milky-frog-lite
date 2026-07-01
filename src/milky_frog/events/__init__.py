@@ -22,15 +22,18 @@ from milky_frog.events.events import (
     RunTurnStart,
     TerminalRunEvent,
 )
-from milky_frog.events.hub import BaseHandler, EventHub
+from milky_frog.events.hub import (
+    EventHub,
+    Handler,
+)
 from milky_frog.events.loop import AgentLoop
 
 __all__ = [
     "LIFECYCLE_EVENT_TYPES",
     "AgentLoop",
     "BaseEvent",
-    "BaseHandler",
     "EventHub",
+    "Handler",
     "NoticeLevel",
     "RunAfterModel",
     "RunAfterTool",

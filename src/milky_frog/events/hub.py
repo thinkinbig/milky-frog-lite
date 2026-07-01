@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -9,8 +8,9 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any, Self, TypeVar, cast
 
-from milky_frog.core.handlers import HandlerContext, HandlerResult
+from milky_frog.core.handlers import HandlerDeps
 from milky_frog.domain import (
+    HandlerResult,
     ModelRequest,
     ModelResponse,
     ReasoningDelta,
@@ -30,8 +30,8 @@ from milky_frog.events.events import (
 )
 
 EventT = TypeVar("EventT", bound=BaseEvent)
-BroadcastHandler = Callable[[EventT, HandlerContext], Awaitable[HandlerResult | None]]
-Handler = Callable[[Any, HandlerContext], Awaitable[HandlerResult | None]]
+BroadcastHandler = Callable[[EventT, HandlerDeps], Awaitable[HandlerResult | None]]
+HandlerCallback = Callable[[Any, HandlerDeps], Awaitable[HandlerResult | None]]
 
 _logger = logging.getLogger(__name__)
 
@@ -40,28 +40,28 @@ _logger = logging.getLogger(__name__)
 class _Registration:
     priority: int
     order: int
-    handler: Handler
+    handler: HandlerCallback
 
 
 class EventHub:
     """Harness lifecycle hub: Handlers subscribe; the Harness broadcasts.
 
-    Handlers subscribe via ``observe``, ``on``, or ``subscribe``; most return
-    ``None`` (pure observation). A few events accept control returns — see
-    ``RunBeforeTool`` and ``RunBeforeStart``.  ``AgentLoop`` and
+    Handlers subscribe via ``observe``, ``on``, or ``subscribe``. A callback
+    returns ``None`` to observe, or a ``HandlerResult`` to propose a change the
+    loop applies at the relevant control point. ``AgentLoop`` and
     ``AgentHarness`` publish through the typed emit methods below.
     """
 
     def __init__(self) -> None:
         self._observe: dict[type[object], list[_Registration]] = defaultdict(list)
         self._next_order = 0
-        self._context: HandlerContext = HandlerContext()
+        self._deps: HandlerDeps = HandlerDeps()
         self._emitter = RunEmitter(self.broadcast)
 
     def observe(
         self, event_type: type[EventT], *, priority: int = 0
     ) -> Callable[[BroadcastHandler[EventT]], BroadcastHandler[EventT]]:
-        """Register a Handler for one lifecycle signal type."""
+        """Register an Observer callback for one lifecycle signal type."""
 
         def register(handler: BroadcastHandler[EventT]) -> BroadcastHandler[EventT]:
             self._observe[event_type].append(self._registration(priority, handler))
@@ -84,29 +84,30 @@ class EventHub:
             self._observe[event_type].append(registration)
         return handler
 
-    def set_context(self, ctx: HandlerContext) -> None:
-        """Set the shared HandlerContext for every subsequent ``broadcast``."""
-        self._context = ctx
+    def set_deps(self, deps: HandlerDeps) -> None:
+        """Set stable Handler dependencies for every subsequent ``broadcast``."""
+        self._deps = deps
 
     async def broadcast(self, event: BaseEvent) -> list[HandlerResult]:
-        """Deliver a lifecycle signal to every matching observe Handler.
+        """Deliver a lifecycle signal to every matching Handler callback.
 
-        Each handler receives the event together with the shared
-        ``HandlerContext`` set via ``set_context``.  Non-``None`` return
-        values are collected and returned — the caller (typically the Harness)
-        decides whether to act on them.
+        Each callback receives the event together with the shared
+        ``HandlerDeps`` set via ``set_deps``. Per-Run facts belong on the
+        lifecycle signal itself. Non-``None`` returns are ``HandlerResult``
+        proposals, collected and returned in delivery order — the caller
+        (the loop) decides how to apply them.
         """
         registrations = list(self._observe[type(event)])
-        ctx = self._context
+        deps = self._deps
         results: list[HandlerResult] = []
         for registration in self._sorted(registrations):
-            result = await registration.handler(event, ctx)
+            result = await registration.handler(event, deps)
             if result is not None:
                 results.append(result)
         return results
 
     def _registration(self, priority: int, handler: Callable[..., Any]) -> _Registration:
-        registration = _Registration(priority, self._next_order, cast(Handler, handler))
+        registration = _Registration(priority, self._next_order, cast(HandlerCallback, handler))
         self._next_order += 1
         return registration
 
@@ -201,19 +202,20 @@ class EventHub:
         return await self._emitter.finish_approval_needed(state, call)
 
 
-class BaseHandler(ABC):
-    """A cross-cutting bundle of Handlers with an optional resource lifetime.
+class Handler:
+    """A lifecycle Handler: wires callbacks onto the hub, with optional lifetime.
 
-    A bundle wires several callbacks onto an ``EventHub`` in one place (its
-    own file) via ``register``. Bundles that hold session resources override
-    ``__aenter__`` to acquire them and ``aclose`` to release; the rest inherit
-    no-op defaults. ``AgentSession`` enters every bundle when the session opens
-    and exits them on close.
+    Subclasses implement ``register`` to attach callbacks (via ``observe`` /
+    ``on``). A callback returns ``None`` to observe, or a ``HandlerResult`` to
+    propose a change the loop applies — the observe-vs-control distinction is the
+    callback's *return*, not a separate type. ``aclose`` releases any resources
+    held for the Handler's lifetime (default no-op); the runtime enters each
+    Handler with ``async with`` and closes it when the session ends.
     """
 
-    @abstractmethod
     def register(self, hub: EventHub) -> None:
-        """Wire this bundle's callbacks onto the hub."""
+        """Wire this Handler's callbacks onto the hub."""
+        raise NotImplementedError
 
     async def __aenter__(self) -> Self:
         return self
@@ -229,5 +231,5 @@ class BaseHandler(ABC):
         except Exception:
             _logger.exception("Cleanup failed: %s", type(self).__qualname__)
 
-    async def aclose(self) -> None:  # noqa: B027 - intentional no-op default; resource-holding bundles override
-        """Release resources held for the bundle's lifetime. Default: no-op."""
+    async def aclose(self) -> None:
+        """Release resources held for the Handler's lifetime. Default: no-op."""

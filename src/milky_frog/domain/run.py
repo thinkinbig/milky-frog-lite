@@ -65,6 +65,24 @@ class CompactionState:
 
 
 @dataclass(frozen=True, slots=True)
+class Compacted:
+    """A ``RunBeforeModel`` Handler's proposal to compact the transcript prefix.
+
+    A Handler returns this from its callback; the loop applies it by folding
+    ``compaction`` into ``RunState`` before assembling the next model request.
+    The original messages are never deleted — the snapshot stays the full truth.
+    """
+
+    compaction: CompactionState
+
+
+type HandlerResult = Compacted
+"""A control proposal a Handler returns from a lifecycle callback for the loop to
+apply. Today the only variant is ``Compacted`` (from ``RunBeforeModel``); add a
+union member when a second control point (e.g. tool authorization) lands."""
+
+
+@dataclass(frozen=True, slots=True)
 class RunState:
     """The live transcript and accounting of one Run, threaded through the loop.
 

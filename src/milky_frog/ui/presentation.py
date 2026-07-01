@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import override
 
 from textual.message import Message
 
-from milky_frog.core.handlers import HandlerContext
+from milky_frog.core.handlers import HandlerDeps
 from milky_frog.domain import RunResult, RunStatus, RunUsage
 from milky_frog.events.events import (
     RunAfterModel,
@@ -20,7 +21,7 @@ from milky_frog.events.events import (
     RunPaused,
     RunStarted,
 )
-from milky_frog.events.hub import BaseHandler, EventHub
+from milky_frog.events.hub import EventHub, Handler
 from milky_frog.ui.messages import (
     AddText,
     AddThinking,
@@ -35,7 +36,7 @@ from milky_frog.ui.messages import (
 Emit = Callable[[Message], object]
 
 
-class TuiPresentationHandler(BaseHandler):
+class TuiPresentationHandler(Handler):
     """Lifecycle Handler bundle: maps Harness signals to Textual messages.
 
     Registered on the shared ``EventHub`` beside checkpointing,
@@ -47,6 +48,7 @@ class TuiPresentationHandler(BaseHandler):
         self._emit = emit
         self._running = RunUsage()
 
+    @override
     def register(self, hub: EventHub) -> None:
         hub.on(RunStarted)(self._on_started)
         hub.on(RunBeforeModel)(self._on_before_model)
@@ -61,47 +63,41 @@ class TuiPresentationHandler(BaseHandler):
         hub.on(RunFailed)(self._on_terminal)
         hub.on(RunCancelled)(self._on_terminal)
 
-    async def _on_started(self, event: RunStarted, ctx: HandlerContext | None = None) -> None:
+    async def _on_started(self, event: RunStarted, deps: HandlerDeps | None = None) -> None:
         self._running = RunUsage()
 
     async def _on_before_model(
-        self, event: RunBeforeModel, ctx: HandlerContext | None = None
+        self, event: RunBeforeModel, deps: HandlerDeps | None = None
     ) -> None:
         self._emit(AddThinking(""))
 
-    async def _on_model_chunk(
-        self, event: RunModelChunk, ctx: HandlerContext | None = None
-    ) -> None:
+    async def _on_model_chunk(self, event: RunModelChunk, deps: HandlerDeps | None = None) -> None:
         self._emit(AddText(event.chunk.content))
 
     async def _on_model_reasoning(
-        self, event: RunModelReasoning, ctx: HandlerContext | None = None
+        self, event: RunModelReasoning, deps: HandlerDeps | None = None
     ) -> None:
         self._emit(AddThinking(event.chunk.content))
 
-    async def _on_after_model(
-        self, event: RunAfterModel, ctx: HandlerContext | None = None
-    ) -> None:
+    async def _on_after_model(self, event: RunAfterModel, deps: HandlerDeps | None = None) -> None:
         self._running = self._running.record(event.response.usage)
         self._emit(UpdateUsage(self._running))
 
-    async def _on_before_tool(
-        self, event: RunBeforeTool, ctx: HandlerContext | None = None
-    ) -> None:
+    async def _on_before_tool(self, event: RunBeforeTool, deps: HandlerDeps | None = None) -> None:
         call = event.call
         self._emit(ToolCallMsg(call.name, call.arguments))
 
-    async def _on_after_tool(self, event: RunAfterTool, ctx: HandlerContext | None = None) -> None:
+    async def _on_after_tool(self, event: RunAfterTool, deps: HandlerDeps | None = None) -> None:
         if event.call.name == "bash":
             return  # BashRenderHandler handles bash results
         call = event.call
         result = event.result
         self._emit(ToolResultMsg(call.name, content=result.content, is_error=result.is_error))
 
-    async def _on_notice(self, event: RunNotice, ctx: HandlerContext | None = None) -> None:
+    async def _on_notice(self, event: RunNotice, deps: HandlerDeps | None = None) -> None:
         self._emit(RunNoticeMsg(event.message, level=event.level))
 
-    async def _on_paused(self, event: RunPaused, ctx: HandlerContext | None = None) -> None:
+    async def _on_paused(self, event: RunPaused, deps: HandlerDeps | None = None) -> None:
         result = event.result
         if result.status is RunStatus.WAITING_FOR_APPROVAL:
             # Extract tool name from the pending assistant message.
@@ -117,7 +113,7 @@ class TuiPresentationHandler(BaseHandler):
     async def _on_terminal(
         self,
         event: RunCompleted | RunFailed | RunCancelled,
-        ctx: HandlerContext | None = None,
+        deps: HandlerDeps | None = None,
     ) -> None:
         self._emit(_run_finished(event.result))
 

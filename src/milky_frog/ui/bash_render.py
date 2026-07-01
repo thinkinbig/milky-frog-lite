@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from typing import override
 
 from textual.message import Message
 
-from milky_frog.core.handlers import HandlerContext
+from milky_frog.core.handlers import HandlerDeps
 from milky_frog.events.events import RunAfterTool
-from milky_frog.events.hub import BaseHandler, EventHub
+from milky_frog.events.hub import EventHub, Handler
 from milky_frog.ui.messages import BashOutputMsg, GitOutputMsg, GrepOutputMsg
 
 Emit = Callable[[Message], object]
@@ -16,7 +17,7 @@ _GIT_RE = re.compile(r"^\s*git(\s|$)")
 _GREP_RE = re.compile(r"^\s*(grep|rg|ripgrep)(\s|$)")
 
 
-class BashRenderHandler(BaseHandler):
+class BashRenderHandler(Handler):
     """Routes bash RunAfterTool results to command-specific Textual messages.
 
     Observes RunAfterTool alongside TuiPresentationHandler; only fires for
@@ -27,10 +28,11 @@ class BashRenderHandler(BaseHandler):
     def __init__(self, emit: Emit) -> None:
         self._emit = emit
 
+    @override
     def register(self, hub: EventHub) -> None:
         hub.on(RunAfterTool)(self._on_after_tool)
 
-    async def _on_after_tool(self, event: RunAfterTool, ctx: HandlerContext | None = None) -> None:
+    async def _on_after_tool(self, event: RunAfterTool, deps: HandlerDeps | None = None) -> None:
         if event.call.name != "bash":
             return
         command = str(event.call.arguments.get("command", ""))

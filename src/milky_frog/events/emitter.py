@@ -6,8 +6,8 @@ from pathlib import Path
 
 from pydantic import JsonValue
 
-from milky_frog.core.handlers import HandlerResult
 from milky_frog.domain import (
+    HandlerResult,
     ModelRequest,
     ModelResponse,
     ReasoningDelta,

@@ -10,8 +10,8 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
 
-from milky_frog.core.handlers import HandlerContext
-from milky_frog.events import BaseHandler, EventHub, RunAfterTool
+from milky_frog.core.handlers import HandlerDeps
+from milky_frog.events import EventHub, ObserverHandler, RunAfterTool
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,7 +39,7 @@ def summarize_tool_call(record: ToolCallRecord) -> str:
     return f"{record.name}: {record.arguments}"
 
 
-class ToolCallCollector(BaseHandler):
+class ToolCallCollector(ObserverHandler):
     """Records every tool call per ``run_id`` for later scoring or review."""
 
     def __init__(self) -> None:
@@ -48,7 +48,7 @@ class ToolCallCollector(BaseHandler):
     def register(self, hub: EventHub) -> None:
         hub.on(RunAfterTool)(self._record)
 
-    async def _record(self, event: RunAfterTool, ctx: HandlerContext | None = None) -> None:
+    async def _record(self, event: RunAfterTool, deps: HandlerDeps | None = None) -> None:
         self.calls[event.run_id].append(
             ToolCallRecord(
                 name=event.call.name,

@@ -2,8 +2,8 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 from milky_frog.checkpoint.snapshot import dump_run_state, load_run_state
-from milky_frog.core.handlers import Compacted
 from milky_frog.domain import (
+    Compacted,
     CompactionState,
     Message,
     MessageRole,
@@ -15,6 +15,7 @@ from milky_frog.domain import (
 )
 from milky_frog.events.events import RunBeforeModel
 from milky_frog.events.hub import EventHub
+from milky_frog.events.loop import _apply_control
 from milky_frog.harness.compaction import CompactionHandler
 from milky_frog.harness.context import ContextManager
 
@@ -24,17 +25,25 @@ class _StubSummaryModel:
         yield StreamDone(ModelResponse(content="SUMMARY"))
 
 
-class _Counter:
-    """Token counter stub returning a fixed total, to drive the trigger."""
+class _RecordingModel:
+    """Captures the last request streamed, to inspect the summarizer prompt."""
 
-    def __init__(self, total: int) -> None:
-        self._total = total
+    def __init__(self) -> None:
+        self.seen: ModelRequest | None = None
+
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        self.seen = request
+        yield StreamDone(ModelResponse(content="SUMMARY"))
+
+
+class _CharCounter:
+    """Token counter stub: one token per character of content, no framing."""
 
     def count_text(self, text: str) -> int:
-        return self._total
+        return len(text)
 
     def count_messages(self, messages: list[dict[str, str]]) -> int:
-        return self._total
+        return sum(len(m["content"]) for m in messages)
 
     def count_tool_schemas(self, tools: object) -> int:
         return 0
@@ -103,61 +112,96 @@ def test_assemble_without_compaction_keeps_full_history() -> None:
     assert assembled[1:] == messages
 
 
-def _handler(total_tokens: int, keep: int = 2) -> CompactionHandler:
+def test_apply_control_folds_compacted_into_state() -> None:
+    state = _state((Message(MessageRole.USER, "hi"),))
+    compaction = CompactionState(summary="earlier", through_index=1)
+
+    updated = _apply_control(state, [Compacted(compaction)])
+
+    assert updated.compaction == compaction
+    assert state.compaction is None  # the original state is untouched
+
+
+def test_apply_control_returns_same_state_when_no_results() -> None:
+    state = _state((Message(MessageRole.USER, "hi"),))
+
+    assert _apply_control(state, []) is state
+
+
+def _handler(*, trigger_tokens: int, keep_recent_tokens: int) -> CompactionHandler:
     return CompactionHandler(
-        _StubSummaryModel(), _Counter(total_tokens), trigger_tokens=1000, keep_recent_rounds=keep
+        _StubSummaryModel(),
+        _CharCounter(),
+        trigger_tokens=trigger_tokens,
+        keep_recent_tokens=keep_recent_tokens,
     )
+
+
+async def _broadcast(handler: CompactionHandler, state: RunState) -> list[Compacted]:
+    hub = EventHub()
+    handler.register(hub)
+    # The handler measures the assembled request; a request over the state's raw
+    # transcript is a faithful stand-in (the handler does not care how it is built).
+    request = ModelRequest(state.messages, ())
+    results = await hub.broadcast(RunBeforeModel(run_id="run-1", request=request, state=state))
+    return [r for r in results if isinstance(r, Compacted)]
 
 
 async def test_handler_compacts_when_over_budget() -> None:
-    state = _state(_rounds(5))  # 10 messages, user-starts at 0,2,4,6,8
-    hub = EventHub()
-    _handler(total_tokens=2000, keep=2).register(hub)
+    # 10 messages, each content length 2 → request ≈ 20 tokens > trigger.
+    state = _state(_rounds(5))
 
-    results = await hub.broadcast(
-        RunBeforeModel(run_id="run-1", request=ModelRequest((), ()), state=state)
-    )
+    results = await _broadcast(_handler(trigger_tokens=5, keep_recent_tokens=5), state)
 
     assert len(results) == 1
     compacted = results[0]
     assert isinstance(compacted, Compacted)
-    # keep_recent_rounds=2 keeps the last 2 rounds (indices 6-9); summarize through 6.
-    assert compacted.compaction.through_index == 6
+    # keep_recent_tokens=5 keeps the last ~5 tokens (indices 7-9); summarize through 7.
+    assert compacted.compaction.through_index == 7
     assert compacted.compaction.summary == "SUMMARY"
 
 
 async def test_handler_skips_when_under_budget() -> None:
-    state = _state(_rounds(5))
-    hub = EventHub()
-    _handler(total_tokens=10).register(hub)  # below trigger_tokens=1000
+    state = _state(_rounds(5))  # ≈ 20 tokens, below trigger
 
-    results = await hub.broadcast(
-        RunBeforeModel(run_id="run-1", request=ModelRequest((), ()), state=state)
-    )
+    results = await _broadcast(_handler(trigger_tokens=1000, keep_recent_tokens=5), state)
 
     assert results == []
 
 
-async def test_handler_skips_when_too_few_rounds() -> None:
-    state = _state(_rounds(2))  # only 2 rounds, keep_recent_rounds=2 → nothing old enough
-    hub = EventHub()
-    _handler(total_tokens=2000, keep=2).register(hub)
+async def test_handler_skips_when_whole_tail_fits() -> None:
+    # Over the trigger, but the whole transcript fits the keep window → nothing to cut.
+    state = _state(_rounds(5))
 
-    results = await hub.broadcast(
-        RunBeforeModel(run_id="run-1", request=ModelRequest((), ()), state=state)
-    )
+    results = await _broadcast(_handler(trigger_tokens=5, keep_recent_tokens=1000), state)
 
     assert results == []
 
 
 async def test_handler_does_not_resummarize_same_range() -> None:
-    # Already summarized through index 6; the cutoff would also be 6 → no new work.
-    state = _state(_rounds(5), compaction=CompactionState(summary="old", through_index=6))
-    hub = EventHub()
-    _handler(total_tokens=2000, keep=2).register(hub)
+    # Already summarized through index 7; the cutoff would also be 7 → no new work.
+    state = _state(_rounds(5), compaction=CompactionState(summary="old", through_index=7))
 
-    results = await hub.broadcast(
-        RunBeforeModel(run_id="run-1", request=ModelRequest((), ()), state=state)
-    )
+    results = await _broadcast(_handler(trigger_tokens=5, keep_recent_tokens=5), state)
 
     assert results == []
+
+
+async def test_summarize_is_incremental_and_excludes_prior_prefix() -> None:
+    # Prior summary covers messages[:4]; a new compaction must feed the summarizer
+    # only the newly dropped slice messages[4:cutoff], not the whole prefix again.
+    model = _RecordingModel()
+    handler = CompactionHandler(model, _CharCounter(), trigger_tokens=5, keep_recent_tokens=5)
+    state = _state(_rounds(5), compaction=CompactionState(summary="PRIOR", through_index=4))
+    hub = EventHub()
+    handler.register(hub)
+
+    await hub.broadcast(
+        RunBeforeModel(run_id="run-1", request=ModelRequest(state.messages, ()), state=state)
+    )
+
+    assert model.seen is not None
+    prompt = model.seen.messages[-1].content
+    assert "PRIOR" in prompt  # prior summary is carried forward
+    assert "u2" in prompt  # a newly dropped message (index 4)
+    assert "u0" not in prompt  # already covered by PRIOR — never re-fed
