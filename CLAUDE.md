@@ -27,7 +27,7 @@ uv run pytest                   # tests (asyncio_mode=auto, no marker needed)
 uv run pytest tests/test_harness.py::test_name   # single test
 uv run ruff check .             # lint
 uv run ruff format --check .    # format check
-uv run mypy                     # type-check (strict)
+uv run pyrefly check            # type-check (strict)
 ```
 
 Run all four checks before considering work done; CI mirrors them.
@@ -69,21 +69,31 @@ qualifier, and never merge them into one base type:
 |------|-------|----------|---------|
 | **Checkpoint snapshot** | `checkpoint/snapshot.py`, `runs.state_json` | Durable (SQLite) | Resume source of truth |
 | **Lifecycle signal** | `events/events.py`, hub in `events/hub.py` (`EventHub`) | Ephemeral (in-process) | UI streaming, Langfuse (`broadcast`) |
-| **Handler control return** | `HandlerResult` in `core/handlers/results.py` | Per-step | Future authorization seams (`BlockResult`, `ApprovalResult`) |
+| **Handler control return** | `HandlerResult` in `domain/run.py` | Per-step | Request shaping (`Compacted`, today); authorization seams later (`BlockResult`, `ApprovalResult`) |
 
 RunState snapshots are serialized via Pydantic models in `checkpoint/snapshot.py`.
 Lifecycle signals are frozen dataclass subclasses in `events/events.py`.
-Only `RunEmitter` publishes lifecycle signals; Handlers never publish. They
-subscribe via `observe` / `on` / `subscribe`; all return `None` (pure observation).
+Only `RunEmitter` publishes lifecycle signals; Handlers never publish. There is
+one `Handler` base (`events/hub.py`): subclasses implement `register` and wire
+callbacks via `observe` / `on` / `subscribe`. Observe-vs-control is the
+callback's **return**, not a separate type — a callback returns `None` to
+observe, or a `HandlerResult` to propose a change. Today the only proposal is
+`Compacted` (from `RunBeforeModel`, see `CompactionHandler`); the loop's
+`_apply_control` applies it to `RunState.compaction`. The loop — never a
+Handler — owns `RunState` evolution.
 
 `RunBeforeStart` is **pure observation** — handlers cannot inject content into the system
 prompt via this event. Context injection uses the `ContextLoader` protocol
 (`harness/prompt_context.py`) injected directly into `AgentHarness` and wired via
 `make_context_loader(settings.home)` in `make_agent_harness`.
 
-Future control-return seams (currently undefined):
-- `RunBeforeModel` → per-call request shaping such as token budgeting (needs its own result variant).
-- `RunBeforeTool` → `BlockResult` / `ApprovalResult` (authorization; `PolicyHandler`).
+Control-return seams:
+- `RunBeforeModel` → per-call request shaping. **Defined:** returns `Compacted`
+  (transcript compaction via `CompactionHandler`); the loop's `_apply_control`
+  folds it into `RunState.compaction` before assembling the request. A second
+  proposal type adds a union member to `HandlerResult` and a `case` to
+  `_apply_control` — no per-Handler fold machinery.
+- `RunBeforeTool` → `BlockResult` / `ApprovalResult` (authorization; `PolicyHandler`) — still undefined.
 
 ### Seams
 
@@ -129,7 +139,7 @@ both):
   and avoid the listed synonyms (session, workflow, plugin, middleware, …) in
   code, names, and docs.
 - Python 3.12+, `from __future__ import annotations` at the top of modules.
-- mypy is **strict** and ruff line length is 100; selected rules: E, F, I, UP,
+- pyrefly uses the **strict** preset and ruff line length is 100; selected rules: E, F, I, UP,
   B, SIM, RUF.
 - Prefer frozen `@dataclass(frozen=True, slots=True)` for domain value types;
   Pydantic `BaseModel` for Checkpoint bodies and lifecycle signals; seams are

@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import replace
 
 from milky_frog.domain import Message, MessageRole, ModelResponse, RunState, ToolCall, ToolResult
-from milky_frog.harness.prompt import system_prompt
 
 # Appended as the result of a tool call that was interrupted before completion.
 # The model sees the interruption and re-decides; the Tool is never blindly
@@ -23,17 +22,10 @@ __all__ = [
 ]
 
 
-def start_run(state: RunState, prompt: str, extra_sections: tuple[str, ...] = ()) -> RunState:
-    return replace(
-        state,
-        messages=(
-            Message(
-                MessageRole.SYSTEM,
-                system_prompt(state.workspace, extra_sections),
-            ),
-            Message(MessageRole.USER, prompt),
-        ),
-    )
+def start_run(state: RunState, prompt: str) -> RunState:
+    # The system prompt is not part of the durable transcript; ContextManager
+    # rebuilds it from the Workspace on every model call (see harness/context.py).
+    return replace(state, messages=(Message(MessageRole.USER, prompt),))
 
 
 def append_user_message(state: RunState, content: str) -> RunState:

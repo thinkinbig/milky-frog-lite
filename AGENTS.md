@@ -28,7 +28,7 @@ uv run pytest                   # tests (asyncio_mode=auto, no marker needed)
 uv run pytest tests/test_harness.py::test_name   # single test
 uv run ruff check .             # lint
 uv run ruff format --check .    # format check
-uv run mypy                     # type-check (strict)
+uv run pyrefly check            # type-check (strict)
 ```
 
 Run all four checks before considering work done; CI mirrors them.
@@ -120,7 +120,7 @@ both):
   and avoid the listed synonyms (session, workflow, plugin, middleware, …) in
   code, names, and docs.
 - Python 3.12+, `from __future__ import annotations` at the top of modules.
-- mypy is **strict** and ruff line length is 100; selected rules: E, F, I, UP,
+- pyrefly uses the **strict** preset and ruff line length is 100; selected rules: E, F, I, UP,
   B, SIM, RUF.
 - Prefer frozen `@dataclass(frozen=True, slots=True)` for domain value types;
   Pydantic `BaseModel` for Checkpoint bodies and lifecycle signals; seams are

@@ -53,7 +53,6 @@ def test_sqlite_store_persists_state_and_projects_status(tmp_path: Path) -> None
 
     loaded = store.load_state("run-1")
     assert [message.role for message in loaded.messages] == [
-        MessageRole.SYSTEM,
         MessageRole.USER,
     ]
     assert loaded.messages[-1].content == "hello"

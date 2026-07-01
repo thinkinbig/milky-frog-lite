@@ -68,6 +68,7 @@ class RunStarted(BaseEvent):
 @dataclass(frozen=True)
 class RunBeforeModel(BaseEvent):
     request: ModelRequest
+    state: RunState
 
 
 @dataclass(frozen=True)

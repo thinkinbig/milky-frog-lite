@@ -20,7 +20,7 @@ from milky_frog.domain import (
     TextDelta,
     ToolCall,
 )
-from milky_frog.events import BaseHandler, EventHub, RunCancelled
+from milky_frog.events import EventHub, Handler, RunCancelled
 from milky_frog.harness.harness import AgentHarness
 from milky_frog.models import OpenAIModel
 from milky_frog.settings import Settings
@@ -100,7 +100,7 @@ async def _async_cancel(agent_session: AgentSession, delay: float) -> None:
 
 @pytest.mark.asyncio
 async def test_session_context_manager_closes_its_bundles(tmp_path: Path) -> None:
-    class SpyHandler(BaseHandler):
+    class SpyHandler(Handler):
         def __init__(self) -> None:
             self.closed = 0
 
@@ -121,14 +121,14 @@ async def test_session_context_manager_closes_its_bundles(tmp_path: Path) -> Non
 
 @pytest.mark.asyncio
 async def test_session_close_isolates_failing_bundle(tmp_path: Path) -> None:
-    class FailingHandler(BaseHandler):
+    class FailingHandler(Handler):
         def register(self, hub: EventHub) -> None:
             del hub
 
         async def aclose(self) -> None:
             raise RuntimeError("boom")
 
-    class SpyHandler(BaseHandler):
+    class SpyHandler(Handler):
         def __init__(self) -> None:
             self.closed = 0
 

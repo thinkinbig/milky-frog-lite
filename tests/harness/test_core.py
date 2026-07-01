@@ -41,7 +41,6 @@ async def test_runs_tool_loop_and_persists_events(tmp_path: Path) -> None:
     assert result.model_calls == 2
     loaded = store.load_state(result.run_id)
     assert [message.role for message in loaded.messages] == [
-        MessageRole.SYSTEM,
         MessageRole.USER,
         MessageRole.ASSISTANT,
         MessageRole.TOOL,

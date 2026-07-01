@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from milky_frog.domain import Message, MessageRole, ModelRequest
-from milky_frog.tokens import ApproxCharCounter, TokenCounter
+from milky_frog.domain import MessageRole, ModelRequest
+from milky_frog.tokens import ApproxCharCounter, TokenCounter, count_request_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -77,20 +76,7 @@ class TokenBudget:
         """Provider-agnostic token estimate used for every budget decision."""
         if self._counter is None:
             return 0
-        message_dicts = [self._message_count_dict(m) for m in request.messages]
-        return self._counter.count_messages(message_dicts) + self._counter.count_tool_schemas(
-            request.tools
-        )
-
-    @staticmethod
-    def _message_count_dict(message: Message) -> dict[str, str]:
-        """Render a message for counting, folding tool-call args into the content."""
-        content = message.content
-        if message.tool_calls:
-            content += json.dumps(
-                [{"name": c.name, "arguments": c.arguments} for c in message.tool_calls]
-            )
-        return {"role": message.role.value, "content": content}
+        return count_request_tokens(self._counter, request)
 
     def _trim_request(self, request: ModelRequest) -> ModelRequest:
         """Drop oldest messages so the request fits, preserving order and pairing.

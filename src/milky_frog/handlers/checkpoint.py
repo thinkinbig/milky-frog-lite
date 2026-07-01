@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from typing import override
+
 from milky_frog.checkpoint import CheckpointStore
-from milky_frog.core.handlers import HandlerContext
+from milky_frog.core.handlers import HandlerDeps
 from milky_frog.domain import RunStatus
 from milky_frog.events.events import (
     RunAfterModel,
@@ -13,12 +15,12 @@ from milky_frog.events.events import (
     RunStarted,
     TerminalRunEvent,
 )
-from milky_frog.events.hub import BaseHandler, EventHub
+from milky_frog.events.hub import EventHub, Handler
 
 _PRIORITY = 100
 
 
-class CheckpointHandler(BaseHandler):
+class CheckpointHandler(Handler):
     """Persists RunState snapshots at each durable lifecycle boundary.
 
     Registered at priority 100 so checkpointing always precedes other observers —
@@ -28,6 +30,7 @@ class CheckpointHandler(BaseHandler):
     def __init__(self, store: CheckpointStore) -> None:
         self._store = store
 
+    @override
     def register(self, hub: EventHub) -> None:
         hub.on(RunStarted, priority=_PRIORITY)(self._on_run_started)
         hub.on(RunAfterModel, priority=_PRIORITY)(self._on_after_model)
@@ -37,16 +40,16 @@ class CheckpointHandler(BaseHandler):
         hub.on(RunCancelled, priority=_PRIORITY)(self._on_terminal)
         hub.on(RunFailed, priority=_PRIORITY)(self._on_terminal)
 
-    async def _on_run_started(self, event: RunStarted, ctx: HandlerContext) -> None:
+    async def _on_run_started(self, event: RunStarted, deps: HandlerDeps) -> None:
         self._store.save_state(event.run_id, event.state, status=RunStatus.RUNNING)
 
-    async def _on_after_model(self, event: RunAfterModel, ctx: HandlerContext) -> None:
+    async def _on_after_model(self, event: RunAfterModel, deps: HandlerDeps) -> None:
         self._store.save_state(event.run_id, event.state)
 
-    async def _on_after_tool(self, event: RunAfterTool, ctx: HandlerContext) -> None:
+    async def _on_after_tool(self, event: RunAfterTool, deps: HandlerDeps) -> None:
         self._store.save_state(event.run_id, event.state)
 
-    async def _on_terminal(self, event: TerminalRunEvent, ctx: HandlerContext) -> None:
+    async def _on_terminal(self, event: TerminalRunEvent, deps: HandlerDeps) -> None:
         self._store.save_state(
             event.run_id,
             event.state,

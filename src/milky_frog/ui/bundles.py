@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from milky_frog.events.hub import BaseHandler
+from milky_frog.events.hub import Handler
 from milky_frog.ui.bash_render import BashRenderHandler
 from milky_frog.ui.presentation import Emit, TuiPresentationHandler
 
 
-def make_tui_presentation_handlers(emit: Emit) -> list[BaseHandler]:
+def make_tui_presentation_handlers(emit: Emit) -> list[Handler]:
     """Build the TUI lifecycle handlers for ``AgentSession(..., bundles=[...])``.
 
     Returns two handlers registered on the shared hub alongside

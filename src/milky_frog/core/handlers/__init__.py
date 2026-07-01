@@ -1,9 +1,12 @@
-"""Handler bus types — control returns and notify-time dependencies."""
+"""Handler bus types — notify-time dependencies.
 
-from milky_frog.core.handlers.context import HandlerContext
-from milky_frog.core.handlers.results import HandlerResult
+Control-return types (``Compacted``, ``HandlerResult``) live in ``domain``: the
+loop applies them, and Handlers that produce them import from ``domain`` without
+depending on ``core``.
+"""
+
+from milky_frog.core.handlers.deps import HandlerDeps
 
 __all__ = [
-    "HandlerContext",
-    "HandlerResult",
+    "HandlerDeps",
 ]

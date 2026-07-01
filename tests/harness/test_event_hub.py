@@ -195,7 +195,9 @@ async def test_before_resume_notifies_handlers(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_before_model_notifies_handlers() -> None:
-    from milky_frog.domain import Message, MessageRole, ModelRequest
+    from pathlib import Path
+
+    from milky_frog.domain import Message, MessageRole, ModelRequest, RunState
     from milky_frog.events.events import RunBeforeModel
 
     registry = EventHub()
@@ -210,7 +212,8 @@ async def test_before_model_notifies_handlers() -> None:
         messages=(Message(role=MessageRole.USER, content="hi"),),
         tools=(),
     )
-    await dispatcher.before_model("run-1", request)
+    state = RunState(run_id="run-1", workspace=Path("/tmp"))
+    await dispatcher.before_model("run-1", request, state)
 
     assert len(seen) == 1
     assert seen[0].run_id == "run-1"

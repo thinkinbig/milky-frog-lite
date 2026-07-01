@@ -16,8 +16,8 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 
-from milky_frog.core.handlers import HandlerContext
-from milky_frog.events import BaseHandler, EventHub, RunAfterTool
+from milky_frog.core.handlers import HandlerDeps
+from milky_frog.events import EventHub, ObserverHandler, RunAfterTool
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,7 +26,7 @@ class ReadRecord:
     is_error: bool
 
 
-class ReadCollector(BaseHandler):
+class ReadCollector(ObserverHandler):
     """Records read_file / edit_file paths per ``run_id`` for later scoring."""
 
     READ_TOOL = "read_file"
@@ -39,7 +39,7 @@ class ReadCollector(BaseHandler):
     def register(self, hub: EventHub) -> None:
         hub.on(RunAfterTool)(self._record)
 
-    async def _record(self, event: RunAfterTool, ctx: HandlerContext | None = None) -> None:
+    async def _record(self, event: RunAfterTool, deps: HandlerDeps | None = None) -> None:
         path = event.call.arguments.get("path")
         if not isinstance(path, str):
             return

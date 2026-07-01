@@ -50,6 +50,39 @@ class RunResult:
 
 
 @dataclass(frozen=True, slots=True)
+class CompactionState:
+    """A summary of the oldest part of the transcript, as a derived cache.
+
+    ``messages[:through_index]`` are summarized by ``summary``; those original
+    messages are **not** deleted from ``RunState.messages`` (the snapshot stays
+    the full truth). The summary only replaces them when assembling the request
+    sent to the model. Because the summarized prefix is immutable (the transcript
+    is append-only), ``through_index`` stays valid across resume.
+    """
+
+    summary: str
+    through_index: int
+
+
+@dataclass(frozen=True, slots=True)
+class Compacted:
+    """A ``RunBeforeModel`` Handler's proposal to compact the transcript prefix.
+
+    A Handler returns this from its callback; the loop applies it by folding
+    ``compaction`` into ``RunState`` before assembling the next model request.
+    The original messages are never deleted — the snapshot stays the full truth.
+    """
+
+    compaction: CompactionState
+
+
+type HandlerResult = Compacted
+"""A control proposal a Handler returns from a lifecycle callback for the loop to
+apply. Today the only variant is ``Compacted`` (from ``RunBeforeModel``); add a
+union member when a second control point (e.g. tool authorization) lands."""
+
+
+@dataclass(frozen=True, slots=True)
 class RunState:
     """The live transcript and accounting of one Run, threaded through the loop.
 
@@ -64,3 +97,4 @@ class RunState:
     completed_model_calls: int = 0
     reasoning_log: tuple[str, ...] = ()
     usage: RunUsage = field(default_factory=RunUsage)
+    compaction: CompactionState | None = None

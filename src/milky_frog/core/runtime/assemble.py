@@ -7,12 +7,13 @@ from milky_frog.checkpoint import CheckpointStore
 from milky_frog.core.sandbox import SandboxFactory
 from milky_frog.core.session_tool_policy import SessionToolPolicy
 from milky_frog.events import EventHub
-from milky_frog.events.hub import BaseHandler
+from milky_frog.events.hub import Handler
 from milky_frog.events.loop import AgentLoop
 from milky_frog.events.tool_step import ToolStepExecutor
 from milky_frog.handlers.checkpoint import CheckpointHandler
 from milky_frog.handlers.langfuse import LangfuseHandler
 from milky_frog.harness.budget import TokenBudget
+from milky_frog.harness.context import ContextManager
 from milky_frog.harness.harness import AgentHarness
 from milky_frog.harness.prompt_context import ContextLoader
 from milky_frog.harness.tools import ToolRegistry
@@ -26,8 +27,8 @@ def make_session_handlers(
     settings: Settings,
     checkpoints: CheckpointStore,
     *,
-    extra: Sequence[BaseHandler] = (),
-) -> list[BaseHandler]:
+    extra: Sequence[Handler] = (),
+) -> list[Handler]:
     """Assemble every lifecycle handler for a session, in one place.
 
     Returns handlers in registration order. ``CheckpointHandler`` declares
@@ -36,7 +37,7 @@ def make_session_handlers(
     hub and owns their lifetime — every returned handler is entered on
     session open and released when the runtime closes the session.
     """
-    handlers: list[BaseHandler] = [
+    handlers: list[Handler] = [
         CheckpointHandler(checkpoints),
     ]
     handlers.extend(extra)
@@ -72,6 +73,7 @@ def make_agent_harness(
         registry,
         hub,
         tool_step,
+        ContextManager(context_loader),
     )
     return AgentHarness(
         checkpoints=checkpoints,
@@ -81,5 +83,4 @@ def make_agent_harness(
         policy=policy,
         sandbox_factory=sandbox_factory,
         budget=budget,
-        context_loader=context_loader,
     )
