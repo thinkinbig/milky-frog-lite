@@ -3,7 +3,12 @@ from pathlib import Path
 import pytest
 
 from milky_frog.adapters.local import LocalSandbox
-from milky_frog.core.sandbox import SandboxViolation
+from milky_frog.core.sandbox import (
+    CommandPresentation,
+    CommandResult,
+    CommandTimeout,
+    SandboxViolation,
+)
 from milky_frog.project import ProjectConfig
 
 
@@ -70,3 +75,43 @@ def test_sandbox_loads_config_from_workspace_when_omitted(tmp_path: Path) -> Non
     sandbox = LocalSandbox(tmp_path)
 
     assert sandbox.config.env_allowlist_extra == ("MY_BUILD_VAR",)
+
+
+async def test_sandbox_run_command_uses_workspace_as_cwd(tmp_path: Path) -> None:
+    (tmp_path / "note.txt").write_text("workspace file", encoding="utf-8")
+    sandbox = LocalSandbox(tmp_path)
+
+    outcome = await sandbox.run_command("cat note.txt", timeout_seconds=5)
+
+    assert isinstance(outcome, CommandResult)
+    assert outcome.exit_code == 0
+    assert outcome.output == "workspace file"
+
+
+async def test_sandbox_run_command_terminal_presentation_keeps_display_output(
+    tmp_path: Path,
+) -> None:
+    sandbox = LocalSandbox(tmp_path)
+
+    outcome = await sandbox.run_command(
+        "printf '\\033[31mred\\033[0m\\n'",
+        timeout_seconds=5,
+        presentation=CommandPresentation.TERMINAL,
+    )
+
+    assert isinstance(outcome, CommandResult)
+    assert outcome.output == "red\n"
+    assert outcome.display_output is not None
+    assert "\x1b[31mred" in outcome.display_output
+
+
+async def test_sandbox_run_command_timeout(tmp_path: Path) -> None:
+    sandbox = LocalSandbox(tmp_path)
+
+    outcome = await sandbox.run_command(
+        "python3 -c 'import time; time.sleep(5)'",
+        timeout_seconds=1,
+    )
+
+    assert isinstance(outcome, CommandTimeout)
+    assert outcome.seconds == 1

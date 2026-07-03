@@ -287,7 +287,8 @@ The `Sandbox` seam (`core/sandbox.py`; default `LocalSandbox` in
 - denies reads/writes to sensitive paths (e.g. `.env`, credential files),
   surfacing them as approval-required rather than silently failing;
 - gates shell commands behind user approval;
-- owns the subprocess environment for `bash`.
+- owns command execution for `bash`, including the subprocess environment,
+  timeout behavior, and display-only terminal presentation.
 
 It does **not** contain untrusted code — a determined process running inside it
 still runs on the host. The boundary exists to stop a cooperating model from
