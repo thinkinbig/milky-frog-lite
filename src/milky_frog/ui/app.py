@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar, override
+from typing import ClassVar, override
 
 from rich.console import RenderableType
 from rich.markdown import Markdown
@@ -24,8 +24,6 @@ from milky_frog.app.session import AgentSession
 from milky_frog.core.controller import RunController
 from milky_frog.domain import ApprovalDecision, ApprovalVerdict, ResumeError, RunStatus, RunUsage
 from milky_frog.project import load_project_config
-from milky_frog.settings import Settings
-from milky_frog.ui.bundles import make_tui_presentation_handlers
 from milky_frog.ui.cli import runs_table
 from milky_frog.ui.logo import welcome_banner
 from milky_frog.ui.messages import (
@@ -54,7 +52,6 @@ from milky_frog.ui.rendering import (
     summarize_tool_result,
     tool_result_renderable,
 )
-from milky_frog.ui.textual_patch import patch_textual_utf8_decode
 from milky_frog.ui.usage import context_fraction, format_context_meter, format_run_usage
 
 
@@ -429,16 +426,17 @@ class MilkyFrogApp(App[None]):
         Binding("escape", "cancel_run", "Interrupt", priority=True),
     ]
 
-    def __init__(self, settings: Settings, *, launch: TuiLaunch | None = None) -> None:
+    def __init__(
+        self,
+        session: AgentSession,
+        run_controller: RunController,
+        *,
+        launch: TuiLaunch | None = None,
+    ) -> None:
         super().__init__()
         self._launch = launch
-        # Create the async AgentSession now (without entering it — entering happens
-        # in ``run()`` so Textual's sync outer loop can bracket the lifecycle).
-        self._session = AgentSession(
-            settings,
-            bundles=make_tui_presentation_handlers(self.post_message),
-            interactive=True,
-        )
+        self._session = session
+        self._run_controller = run_controller
         self._worker: Worker[None] | None = None
         self._pending_approval: ApprovalRequired | None = None
         self._approval_widget: ApprovalPrompt | None = None
@@ -461,7 +459,6 @@ class MilkyFrogApp(App[None]):
 
         self._thinking_spinner_timer: Timer | None = None
         self._thinking_frame_idx: int = 0
-        self._run_controller: RunController | None = None
 
     @property
     def session(self) -> AgentSession:
@@ -470,26 +467,7 @@ class MilkyFrogApp(App[None]):
 
     @property
     def run_controller(self) -> RunController:
-        if self._run_controller is None:
-            raise RuntimeError("RunController is not ready; session has not started")
         return self._run_controller
-
-    @override
-    def run(self, *args: Any, **kwargs: Any) -> Any:
-        """Run the TUI with a managed ``AgentSession`` lifecycle.
-
-        ``AgentSession.__aenter__`` opens async resources (model connection, handler
-        sessions); ``__aexit__`` releases them.  A single ``asyncio.run()`` brackets
-        the session and Textual's ``run_async()`` so we never nest event loops.
-        """
-        patch_textual_utf8_decode()
-
-        async def _run_with_session() -> Any:
-            async with self._session:
-                self._run_controller = RunController(self._session.checkpoints)
-                return await self.run_async(*args, **kwargs)
-
-        return asyncio.run(_run_with_session())
 
     @override
     def compose(self) -> ComposeResult:
@@ -752,6 +730,7 @@ class MilkyFrogApp(App[None]):
     def on_run_finished(self, event: RunFinished) -> None:
         """Run finished: commit any buffered content and show the footer."""
         self._worker = None
+        self.session.attach_worker(None)
         self._close_phase()
 
         if self._tool_spinner_timer is not None:
@@ -776,6 +755,7 @@ class MilkyFrogApp(App[None]):
 
     def on_run_error(self, event: RunError) -> None:
         self._worker = None
+        self.session.attach_worker(None)
         self._close_phase()
         self._render_error(event.error)
         self.query_one(RunStatusBar).set_ready()
@@ -1078,6 +1058,7 @@ class MilkyFrogApp(App[None]):
         self.query_one("#prompt-input", PromptInput).disabled = True
 
         self._worker = self._do_run(task, run_id)
+        self.session.attach_worker(self._worker.cancel)
 
     def _start_continue_pending(self, run_id: str) -> None:
         """Advance a Run with pending work and no new user turn."""
@@ -1094,6 +1075,7 @@ class MilkyFrogApp(App[None]):
         self.query_one("#prompt-input", PromptInput).disabled = True
 
         self._worker = self._do_continue(run_id)
+        self.session.attach_worker(self._worker.cancel)
 
     @work(thread=False, exit_on_error=False)
     async def _do_continue(self, run_id: str) -> None:
@@ -1151,6 +1133,7 @@ class MilkyFrogApp(App[None]):
         self.query_one("#prompt-input", PromptInput).disabled = True
 
         self._worker = self._do_approve(run_id, verdict)
+        self.session.attach_worker(self._worker.cancel)
 
     @work(thread=False, exit_on_error=False)
     async def _do_approve(self, run_id: str, verdict: ApprovalVerdict) -> None:
@@ -1173,14 +1156,20 @@ class MilkyFrogApp(App[None]):
     # ── Key bindings ──────────────────────────────────────────────────
 
     def action_request_exit(self) -> None:
+        self._request_exit()
+
+    def _request_exit(self) -> None:
+        """Route exit actions through cooperative shutdown."""
         self._prepare_shutdown()
         self.exit()
 
     def _prepare_shutdown(self) -> None:
-        """Cooperatively stop an in-flight Run before the TUI closes."""
-        self.session.shutdown_foreground_run()
-        if self._worker is not None:
-            self._worker.cancel()
+        """Cooperatively stop an in-flight Run before the TUI closes.
+
+        Idempotent: ``ShutdownManager`` guards against double-cancel when
+        overlapping callers converge on the same shutdown path.
+        """
+        self.session.request_shutdown()
 
     def action_cancel_run(self) -> None:
         """Interrupt the in-flight Run, if any (Esc).

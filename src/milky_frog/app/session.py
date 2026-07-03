@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -13,6 +14,7 @@ from milky_frog.core.runtime.checkpoint import RunCheckpointFacade
 from milky_frog.core.runtime.foreground import ForegroundRun
 from milky_frog.core.sandbox import SandboxFactory
 from milky_frog.core.session_tool_policy import SessionToolPolicy
+from milky_frog.core.shutdown import ShutdownManager
 from milky_frog.domain import (
     DEFAULT_MAX_MODEL_CALLS,
     ApprovalVerdict,
@@ -81,6 +83,7 @@ class AgentSession:
         self._model: OpenAIModel | None = None
         self._harness: AgentHarness | None = None
         self._foreground: ForegroundRun | None = None
+        self._shutdown: ShutdownManager = ShutdownManager()
 
     @property
     def config(self) -> AgentSessionConfig:
@@ -227,6 +230,8 @@ class AgentSession:
             interactive=self._interactive,
         )
 
+        self._shutdown.wire(self._foreground, self._handlers, self._model)
+
         for handler in self._handlers:
             await handler.__aenter__()
 
@@ -238,20 +243,7 @@ class AgentSession:
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        self.shutdown_foreground_run()
-        if self._model is None:
-            return
-
-        for handler in reversed(self._handlers):
-            try:
-                await handler.__aexit__(exc_type, exc, traceback)
-            except Exception:
-                logger.exception("Cleanup failed: %s", type(handler).__qualname__)
-
-        try:
-            await self._model.__aexit__(exc_type, exc, traceback)
-        except Exception:
-            logger.exception("Cleanup failed: model")
+        await self._shutdown.cleanup(exc_type, exc, traceback)
 
         self._foreground = None
         self._harness = None
@@ -266,9 +258,22 @@ class AgentSession:
             fg.cancel()
 
     def shutdown_foreground_run(self) -> None:
-        fg = self._foreground
-        if fg is not None:
-            fg.shutdown()
+        self._shutdown.shutdown_run()
+
+    def request_shutdown(self) -> None:
+        self._shutdown.request_shutdown()
+
+    @property
+    def shutdown_requested(self) -> bool:
+        return self._shutdown.requested
+
+    def attach_worker(self, cancel: Callable[[], None] | None) -> None:
+        """Register a callable that cancels the foreground asyncio Task.
+
+        Called by ``MilkyFrogApp`` each time a new Textual worker is created
+        so the ``ShutdownManager`` can cancel it during shutdown.
+        """
+        self._shutdown.attach_worker(cancel)
 
     async def start_new(self, task: str, workspace: Path | None = None) -> RunResult:
         return await _active(self._foreground).start_new(task, workspace)
