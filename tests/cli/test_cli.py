@@ -90,16 +90,12 @@ def test_resume_without_task_opens_tui_with_pending_advance(
     store = SqliteCheckpointStore(tmp_path / "state.db")
     seed_run(store, "run-abc", workspace, status=RunStatus.PAUSED_LIMIT)
 
-    class FakeApp:
-        def __init__(self, settings: object, *, launch: TuiLaunch | None = None) -> None:
-            del settings
-            if launch is not None:
-                launches.append(launch)
+    def fake_run_tui(settings: object, *, launch: TuiLaunch | None = None) -> None:
+        del settings
+        if launch is not None:
+            launches.append(launch)
 
-        def run(self) -> None:
-            return None
-
-    monkeypatch.setattr(launch_module, "MilkyFrogApp", FakeApp)  # type: ignore[attr-defined]
+    monkeypatch.setattr(launch_module, "run_tui", fake_run_tui)
     result = runner.invoke(
         app,
         ["resume", "run-abc"],
@@ -127,16 +123,12 @@ def test_resume_with_task_opens_tui_with_prompt(
     store = SqliteCheckpointStore(tmp_path / "state.db")
     seed_run(store, "run-abc", workspace, status=RunStatus.COMPLETED, final_message="done")
 
-    class FakeApp:
-        def __init__(self, settings: object, *, launch: TuiLaunch | None = None) -> None:
-            del settings
-            if launch is not None:
-                launches.append(launch)
+    def fake_run_tui(settings: object, *, launch: TuiLaunch | None = None) -> None:
+        del settings
+        if launch is not None:
+            launches.append(launch)
 
-        def run(self) -> None:
-            return None
-
-    monkeypatch.setattr(launch_module, "MilkyFrogApp", FakeApp)  # type: ignore[attr-defined]
+    monkeypatch.setattr(launch_module, "run_tui", fake_run_tui)
     result = runner.invoke(
         app,
         ["resume", "run-abc", "follow up"],
@@ -158,16 +150,12 @@ def test_run_opens_tui_with_initial_task(monkeypatch: pytest.MonkeyPatch, tmp_pa
     launch_module = import_module("milky_frog.cli.launch")
     launches: list[TuiLaunch] = []
 
-    class FakeApp:
-        def __init__(self, settings: object, *, launch: TuiLaunch | None = None) -> None:
-            del settings
-            if launch is not None:
-                launches.append(launch)
+    def fake_run_tui(settings: object, *, launch: TuiLaunch | None = None) -> None:
+        del settings
+        if launch is not None:
+            launches.append(launch)
 
-        def run(self) -> None:
-            return None
-
-    monkeypatch.setattr(launch_module, "MilkyFrogApp", FakeApp)  # type: ignore[attr-defined]
+    monkeypatch.setattr(launch_module, "run_tui", fake_run_tui)
     result = runner.invoke(
         app,
         ["run", "build feature x"],
