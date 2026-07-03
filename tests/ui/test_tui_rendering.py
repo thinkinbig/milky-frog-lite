@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
+from milky_frog.domain import RunState, ToolCall, ToolResult
+from milky_frog.events import EventHub
+from milky_frog.ui.bash_render import BashRenderHandler
+from milky_frog.ui.messages import BashOutputMsg
 from milky_frog.ui.rendering import (
     build_diff_lines,
     complete_command,
@@ -93,3 +101,20 @@ def test_file_change_diff_for_write_file_is_all_additions() -> None:
 def test_file_change_diff_returns_none_for_other_tools() -> None:
     assert file_change_diff("read_file", {"path": "x.py"}) is None
     assert file_change_diff("edit_file", {"path": "x.py"}) is None  # missing old/new
+
+
+@pytest.mark.asyncio
+async def test_bash_render_handler_prefers_display_content(tmp_path: Path) -> None:
+    messages: list[BashOutputMsg] = []
+    hub = EventHub()
+    BashRenderHandler(messages.append).register(hub)
+
+    await hub.after_tool(
+        "run-1",
+        ToolCall("call-1", "bash", {"command": "printf color"}),
+        ToolResult("plain", display_content="\x1b[31mcolor\x1b[0m"),
+        RunState(run_id="run-1", workspace=tmp_path),
+    )
+
+    assert len(messages) == 1
+    assert messages[0].content == "\x1b[31mcolor\x1b[0m"

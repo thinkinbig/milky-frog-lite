@@ -36,7 +36,7 @@ class BashRenderHandler(Handler):
         if event.call.name != "bash":
             return
         command = str(event.call.arguments.get("command", ""))
-        content = event.result.content
+        content = event.result.display_content or event.result.content
         is_error = event.result.is_error
 
         if _GIT_RE.match(command):

@@ -39,25 +39,25 @@ def test_sandbox_rejects_symlink_escape(tmp_path: Path) -> None:
         sandbox.resolve("link/secret.txt")
 
 
-def test_sandbox_build_env_disables_pagers(tmp_path: Path) -> None:
+def test_sandbox_build_env_disables_git_prompts_without_cat_fallback(tmp_path: Path) -> None:
     sandbox = LocalSandbox(tmp_path)
     env = sandbox.build_env()
 
-    assert env["PAGER"] == "cat"
-    assert env["GIT_PAGER"] == "cat"
     assert env["GIT_TERMINAL_PROMPT"] == "0"
-    assert env["GIT_CONFIG_VALUE_0"] == "cat"
+    assert "PAGER" not in env
+    assert "GIT_PAGER" not in env
+    assert "MANPAGER" not in env
+    assert "BROWSER" not in env
+    assert "GIT_CONFIG_KEY_0" not in env
 
 
 def test_noninteractive_defaults_win_over_allowlisted_extra(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # A forwarded GIT_PAGER must not re-enable a pager: the non-interactive
-    # defaults are applied last and override host/allowlist values.
-    monkeypatch.setenv("GIT_PAGER", "less")
-    sandbox = LocalSandbox(tmp_path, ProjectConfig(env_allowlist_extra=("GIT_PAGER",)))
+    monkeypatch.setenv("GIT_TERMINAL_PROMPT", "1")
+    sandbox = LocalSandbox(tmp_path, ProjectConfig(env_allowlist_extra=("GIT_TERMINAL_PROMPT",)))
 
-    assert sandbox.build_env()["GIT_PAGER"] == "cat"
+    assert sandbox.build_env()["GIT_TERMINAL_PROMPT"] == "0"
 
 
 def test_sandbox_loads_config_from_workspace_when_omitted(tmp_path: Path) -> None:

@@ -11,19 +11,12 @@ _COMMAND_ENV_ALLOWLIST = ("HOME", "LANG", "LC_ALL", "PATH", "SHELL", "TERM", "TM
 
 _NONINTERACTIVE_ENV: dict[str, str] = {
     "CI": "true",
-    "PAGER": "cat",
-    "GIT_PAGER": "cat",
-    "MANPAGER": "cat",
     "GIT_TERMINAL_PROMPT": "0",
-    "BROWSER": "cat",
-    "GIT_CONFIG_COUNT": "1",
-    "GIT_CONFIG_KEY_0": "core.pager",
-    "GIT_CONFIG_VALUE_0": "cat",
 }
 
 
 class LocalSandbox:
-    """Default Sandbox adapter: local filesystem + host env + PTY subprocess."""
+    """Default Sandbox adapter: local filesystem + host subprocess policy."""
 
     __slots__ = ("_allowlist", "_deny_patterns", "config", "workspace")
 

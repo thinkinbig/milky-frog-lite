@@ -60,6 +60,49 @@ def test_missing_dotenv_is_not_an_error(monkeypatch: pytest.MonkeyPatch, tmp_pat
     assert settings.api_key is None
 
 
+def test_plain_home_environment_does_not_override_settings_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    plain_home = tmp_path / "plain-home"
+    monkeypatch.setenv("HOME", str(plain_home))
+    monkeypatch.delenv("MILKY_FROG_HOME", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    settings = Settings.from_environment()
+
+    assert settings.home != plain_home
+
+
+def test_dotenv_home_and_milky_frog_home_do_not_conflict(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    state_home = tmp_path / "state-home"
+    plain_home = tmp_path / "plain-home"
+    (tmp_path / ".env").write_text(
+        f"HOME={plain_home}\nMILKY_FROG_HOME={state_home}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(plain_home))
+    monkeypatch.delenv("MILKY_FROG_HOME", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    settings = Settings.from_environment()
+
+    assert settings.home == state_home
+
+
+def test_home_expands_user_from_dotenv(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    plain_home = tmp_path / "plain-home"
+    (tmp_path / ".env").write_text("MILKY_FROG_HOME=~/.milky-frog\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(plain_home))
+    monkeypatch.delenv("MILKY_FROG_HOME", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    settings = Settings.from_environment()
+
+    assert settings.home == plain_home / ".milky-frog"
+
+
 def test_empty_environment_values_are_treated_as_missing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

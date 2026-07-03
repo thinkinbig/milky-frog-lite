@@ -35,7 +35,8 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_file=".env",
-        extra="forbid",
+        env_prefix="MILKY_FROG_",
+        extra="ignore",
         populate_by_name=True,
     )
 
@@ -114,6 +115,11 @@ class Settings(BaseSettings):
         if v == "" or v is None:
             return None
         return v
+
+    @field_validator("home", mode="after")
+    @classmethod
+    def _expand_home(cls, v: Path) -> Path:
+        return v.expanduser()
 
     # ── Derived properties ────────────────────────────────────────
 
