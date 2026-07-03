@@ -441,7 +441,6 @@ class MilkyFrogApp(App[None]):
             interactive=True,
         )
         self._worker: Worker[None] | None = None
-        self._shutting_down: bool = False
         self._pending_approval: ApprovalRequired | None = None
         self._approval_widget: ApprovalPrompt | None = None
         self._approval_deny_reason_mode: bool = False
@@ -1091,6 +1090,7 @@ class MilkyFrogApp(App[None]):
         self.query_one("#prompt-input", PromptInput).disabled = True
 
         self._worker = self._do_run(task, run_id)
+        self.session.attach_worker(self._worker.cancel)
 
     def _start_continue_pending(self, run_id: str) -> None:
         """Advance a Run with pending work and no new user turn."""
@@ -1107,6 +1107,7 @@ class MilkyFrogApp(App[None]):
         self.query_one("#prompt-input", PromptInput).disabled = True
 
         self._worker = self._do_continue(run_id)
+        self.session.attach_worker(self._worker.cancel)
 
     @work(thread=False, exit_on_error=False)
     async def _do_continue(self, run_id: str) -> None:
@@ -1164,6 +1165,7 @@ class MilkyFrogApp(App[None]):
         self.query_one("#prompt-input", PromptInput).disabled = True
 
         self._worker = self._do_approve(run_id, verdict)
+        self.session.attach_worker(self._worker.cancel)
 
     @work(thread=False, exit_on_error=False)
     async def _do_approve(self, run_id: str, verdict: ApprovalVerdict) -> None:
@@ -1192,16 +1194,10 @@ class MilkyFrogApp(App[None]):
     def _prepare_shutdown(self) -> None:
         """Cooperatively stop an in-flight Run before the TUI closes.
 
-        This method is deliberately idempotent — both the SIGINT signal handler and
-        the Ctrl+C key event binding can call ``action_request_exit`` in quick
-        succession on some terminal configurations.
+        Idempotent: ``ShutdownManager`` guards against double-cancel when
+        both the SIGINT signal handler and the Ctrl+C key binding fire.
         """
-        if self._shutting_down:
-            return
-        self._shutting_down = True
         self.session.shutdown_foreground_run()
-        if self._worker is not None:
-            self._worker.cancel()
 
     def action_cancel_run(self) -> None:
         """Interrupt the in-flight Run, if any (Esc).
