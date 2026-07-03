@@ -25,3 +25,4 @@ class ToolCall:
 class ToolResult:
     content: str
     is_error: bool = False
+    display_content: str | None = None

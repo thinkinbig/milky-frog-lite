@@ -148,6 +148,8 @@ def bash_output_renderable(content: str, *, is_error: bool) -> Text | None:
         body = f"{shown}\n({extra} more line{'s' if extra != 1 else ''})"
 
     if is_error:
+        if "\x1b" in body:
+            return Text.from_ansi(body)
         return Text(body, style="red")
     return Text.from_ansi(body)
 

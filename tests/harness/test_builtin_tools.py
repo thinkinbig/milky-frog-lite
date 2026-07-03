@@ -16,8 +16,8 @@ from milky_frog.harness.tools.builtins import (
 from milky_frog.project import ProjectConfig
 
 
-def _context(workspace: Path) -> ToolContext:
-    return ToolContext("run-1", workspace, sandbox=LocalSandbox(workspace))
+def _context(workspace: Path, config: ProjectConfig | None = None) -> ToolContext:
+    return ToolContext("run-1", workspace, sandbox=LocalSandbox(workspace, config=config))
 
 
 def test_default_tools_exposes_all_builtin_tools() -> None:
@@ -448,6 +448,33 @@ async def test_bash_stderr_with_stdout(tmp_path: Path) -> None:
     assert "err msg" in result.content
 
 
+async def test_bash_strips_ansi_from_model_content_but_keeps_display_content(
+    tmp_path: Path,
+) -> None:
+    result = await BashTool().execute(
+        _context(tmp_path),
+        BashTool.input_model(command="printf '\\033[31mred\\033[0m\\n'"),
+    )
+
+    assert not result.is_error
+    assert result.content == "red"
+    assert result.display_content is not None
+    assert "\x1b[31mred" in result.display_content
+
+
+async def test_bash_large_stderr_does_not_deadlock(tmp_path: Path) -> None:
+    result = await BashTool().execute(
+        _context(tmp_path),
+        BashTool.input_model(command="python3 -c 'import sys; sys.stderr.write(\"e\" * 200000)'"),
+    )
+
+    assert not result.is_error
+    assert "Truncated" in result.content
+    spilled = list((tmp_path / ".milky-frog" / "tool-output").glob("*bash*.txt"))
+    assert len(spilled) == 1
+    assert spilled[0].read_text(encoding="utf-8").count("e") == 200_000
+
+
 async def test_bash_no_output(tmp_path: Path) -> None:
     result = await BashTool().execute(_context(tmp_path), BashTool.input_model(command="true"))
 
@@ -455,23 +482,11 @@ async def test_bash_no_output(tmp_path: Path) -> None:
     assert result.content == "(no output)"
 
 
-async def test_bash_timeout_returns_error(tmp_path: Path, monkeypatch) -> None:
-    class FakeProcess:
-        def communicate(self): ...
-        def kill(self): ...
-        async def wait(self): ...
-
-    async def fake_shell(*args, **kwargs):
-        return FakeProcess()
-
-    monkeypatch.setattr(asyncio, "create_subprocess_shell", fake_shell)
-
-    async def raise_timeout(*args, **kwargs):
-        raise TimeoutError()
-
-    monkeypatch.setattr(asyncio, "wait_for", raise_timeout)
-
-    result = await BashTool().execute(_context(tmp_path), BashTool.input_model(command="sleep 100"))
+async def test_bash_timeout_returns_error(tmp_path: Path) -> None:
+    result = await BashTool().execute(
+        _context(tmp_path, ProjectConfig(bash_timeout_seconds=1)),
+        BashTool.input_model(command="python3 -c 'import time; time.sleep(5)'"),
+    )
 
     assert result.is_error
     assert "timed out" in result.content
