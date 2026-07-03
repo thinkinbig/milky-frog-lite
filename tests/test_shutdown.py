@@ -56,6 +56,35 @@ async def test_shutdown_run_is_idempotent() -> None:
 
 
 @pytest.mark.asyncio
+async def test_shutdown_request_before_wire_is_applied_when_wired() -> None:
+    fg = _FakeForeground()
+    mgr = ShutdownManager()
+
+    mgr.request_shutdown()
+    mgr.wire(fg, [], _FakeModel())  # type: ignore[arg-type]
+    mgr.shutdown_run()
+
+    assert mgr.requested is True
+    assert fg.shutdown_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_shutdown_request_cancels_worker_attached_late() -> None:
+    cancel_calls = 0
+    mgr = ShutdownManager()
+
+    def cancel() -> None:
+        nonlocal cancel_calls
+        cancel_calls += 1
+
+    mgr.request_shutdown()
+    mgr.attach_worker(cancel)
+    mgr.wire(_FakeForeground(), [], _FakeModel())  # type: ignore[arg-type]
+
+    assert cancel_calls == 1
+
+
+@pytest.mark.asyncio
 async def test_cleanup_is_idempotent() -> None:
     model = _FakeModel()
     mgr = ShutdownManager()

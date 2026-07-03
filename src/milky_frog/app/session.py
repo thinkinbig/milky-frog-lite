@@ -260,6 +260,13 @@ class AgentSession:
     def shutdown_foreground_run(self) -> None:
         self._shutdown.shutdown_run()
 
+    def request_shutdown(self) -> None:
+        self._shutdown.request_shutdown()
+
+    @property
+    def shutdown_requested(self) -> bool:
+        return self._shutdown.requested
+
     def attach_worker(self, cancel: Callable[[], None] | None) -> None:
         """Register a callable that cancels the foreground asyncio Task.
 

@@ -483,23 +483,24 @@ class MilkyFrogApp(App[None]):
         sessions); ``__aexit__`` releases them.  A single ``asyncio.run()`` brackets
         the session and Textual's ``run_async()`` so we never nest event loops.
 
-        Registers a ``SIGINT`` handler so the signal routes through the normal
-        ``action_request_exit`` path instead of letting ``asyncio.run()`` cancel the
-        main coroutine — Textual keeps ``ISIG`` on (for Ctrl+Z/SIGTSTP), which means
-        Ctrl+C generates both SIGINT and the 0x03 key event.  Without this handler
-        the two paths race on resource cleanup.
+        Registers a ``SIGINT`` handler before ``AgentSession`` enters so Ctrl+C
+        during startup (token counter, handler wiring) still routes through the
+        cooperative shutdown path instead of letting ``asyncio.run()`` abort
+        abruptly — which otherwise races with ``uv run``'s child-process tracking.
         """
         patch_textual_utf8_decode()
 
         async def _run_with_session() -> Any:
-            async with self._session:
-                self._run_controller = RunController(self._session.checkpoints)
-                loop = asyncio.get_running_loop()
-                loop.add_signal_handler(signal.SIGINT, self.action_request_exit)
-                try:
+            loop = asyncio.get_running_loop()
+            loop.add_signal_handler(signal.SIGINT, self._handle_sigint)
+            try:
+                async with self._session:
+                    self._run_controller = RunController(self._session.checkpoints)
+                    if self._session.shutdown_requested:
+                        return None
                     return await self.run_async(*args, **kwargs)
-                finally:
-                    loop.remove_signal_handler(signal.SIGINT)
+            finally:
+                loop.remove_signal_handler(signal.SIGINT)
 
         return asyncio.run(_run_with_session())
 
@@ -764,6 +765,7 @@ class MilkyFrogApp(App[None]):
     def on_run_finished(self, event: RunFinished) -> None:
         """Run finished: commit any buffered content and show the footer."""
         self._worker = None
+        self.session.attach_worker(None)
         self._close_phase()
 
         if self._tool_spinner_timer is not None:
@@ -788,6 +790,7 @@ class MilkyFrogApp(App[None]):
 
     def on_run_error(self, event: RunError) -> None:
         self._worker = None
+        self.session.attach_worker(None)
         self._close_phase()
         self._render_error(event.error)
         self.query_one(RunStatusBar).set_ready()
@@ -1188,7 +1191,13 @@ class MilkyFrogApp(App[None]):
     # ── Key bindings ──────────────────────────────────────────────────
 
     def action_request_exit(self) -> None:
+        self._handle_sigint()
+
+    def _handle_sigint(self) -> None:
+        """Route SIGINT through cooperative shutdown (signal handler + Ctrl+C binding)."""
         self._prepare_shutdown()
+        if self._run_controller is None:
+            return
         self.exit()
 
     def _prepare_shutdown(self) -> None:
@@ -1197,7 +1206,7 @@ class MilkyFrogApp(App[None]):
         Idempotent: ``ShutdownManager`` guards against double-cancel when
         both the SIGINT signal handler and the Ctrl+C key binding fire.
         """
-        self.session.shutdown_foreground_run()
+        self.session.request_shutdown()
 
     def action_cancel_run(self) -> None:
         """Interrupt the in-flight Run, if any (Esc).

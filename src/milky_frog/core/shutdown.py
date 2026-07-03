@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class ShutdownManager:
     """Orchestrates graceful teardown in two ordered, idempotent phases.
 
-    Phase 1 — ``shutdown_run()``:
+    Phase 1 — ``request_shutdown()`` / ``shutdown_run()``:
         Cooperatively cancels the foreground Run (RunCancellation token +
         seal_interrupt checkpoint), then cancels the optional attached
         asyncio Task (e.g. a Textual worker).  Called from SIGINT handlers
@@ -32,6 +32,7 @@ class ShutdownManager:
     """
 
     def __init__(self) -> None:
+        self._shutdown_requested = False
         self._shutdown_done = False
         self._cleanup_done = False
 
@@ -59,6 +60,8 @@ class ShutdownManager:
         self._foreground = foreground
         self._handlers = handlers
         self._model = model
+        if self._shutdown_requested:
+            self.shutdown_run()
 
     def attach_worker(self, cancel: Callable[[], None] | None) -> None:
         """Register a callable that cancels the foreground asyncio Task.
@@ -66,23 +69,40 @@ class ShutdownManager:
         Called by ``MilkyFrogApp`` when a new worker is created so the
         manager can cancel it during ``shutdown_run()``.
         """
+        if self._shutdown_requested and cancel is not None:
+            cancel()
+            return
         self._cancel_worker = cancel
 
     # ── Phase 1: cancel the Run ──────────────────────────────────────
+
+    @property
+    def requested(self) -> bool:
+        """Whether shutdown has been requested, even before runtime wiring exists."""
+        return self._shutdown_requested
+
+    def request_shutdown(self) -> None:
+        """Record a shutdown request and cancel any currently wired Run resources."""
+        self._shutdown_requested = True
+        self.shutdown_run()
 
     def shutdown_run(self) -> None:
         """Cancel the foreground Run and attached worker, at most once."""
         if self._shutdown_done:
             return
-        self._shutdown_done = True
 
         fg = self._foreground
+        if fg is None and self._cancel_worker is None:
+            return
+
+        self._shutdown_done = True
         if fg is not None:
             fg.shutdown()
 
         cancel = self._cancel_worker
         if cancel is not None:
             cancel()
+            self._cancel_worker = None
 
     # ── Phase 2: release session resources ───────────────────────────
 

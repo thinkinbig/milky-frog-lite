@@ -62,7 +62,7 @@ def test_require_model_config_validates_before_construction(tmp_path: Path) -> N
     from milky_frog.app.session import AgentSession, MissingModelConfiguration
     from milky_frog.settings import Settings
 
-    settings = Settings(home=tmp_path, api_key=None, model=None, base_url=None)
+    settings = Settings(home=tmp_path, api_key=None, model=None, base_url=None, _env_file=None)
     with pytest.raises(MissingModelConfiguration):
         AgentSession.require_model_configuration(settings)
 
