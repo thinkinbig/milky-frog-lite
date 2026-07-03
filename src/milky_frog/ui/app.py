@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import signal
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, override
@@ -440,6 +441,7 @@ class MilkyFrogApp(App[None]):
             interactive=True,
         )
         self._worker: Worker[None] | None = None
+        self._shutting_down: bool = False
         self._pending_approval: ApprovalRequired | None = None
         self._approval_widget: ApprovalPrompt | None = None
         self._approval_deny_reason_mode: bool = False
@@ -481,13 +483,24 @@ class MilkyFrogApp(App[None]):
         ``AgentSession.__aenter__`` opens async resources (model connection, handler
         sessions); ``__aexit__`` releases them.  A single ``asyncio.run()`` brackets
         the session and Textual's ``run_async()`` so we never nest event loops.
+
+        Registers a ``SIGINT`` handler so the signal routes through the normal
+        ``action_request_exit`` path instead of letting ``asyncio.run()`` cancel the
+        main coroutine — Textual keeps ``ISIG`` on (for Ctrl+Z/SIGTSTP), which means
+        Ctrl+C generates both SIGINT and the 0x03 key event.  Without this handler
+        the two paths race on resource cleanup.
         """
         patch_textual_utf8_decode()
 
         async def _run_with_session() -> Any:
             async with self._session:
                 self._run_controller = RunController(self._session.checkpoints)
-                return await self.run_async(*args, **kwargs)
+                loop = asyncio.get_running_loop()
+                loop.add_signal_handler(signal.SIGINT, self.action_request_exit)
+                try:
+                    return await self.run_async(*args, **kwargs)
+                finally:
+                    loop.remove_signal_handler(signal.SIGINT)
 
         return asyncio.run(_run_with_session())
 
@@ -1177,7 +1190,15 @@ class MilkyFrogApp(App[None]):
         self.exit()
 
     def _prepare_shutdown(self) -> None:
-        """Cooperatively stop an in-flight Run before the TUI closes."""
+        """Cooperatively stop an in-flight Run before the TUI closes.
+
+        This method is deliberately idempotent — both the SIGINT signal handler and
+        the Ctrl+C key event binding can call ``action_request_exit`` in quick
+        succession on some terminal configurations.
+        """
+        if self._shutting_down:
+            return
+        self._shutting_down = True
         self.session.shutdown_foreground_run()
         if self._worker is not None:
             self._worker.cancel()

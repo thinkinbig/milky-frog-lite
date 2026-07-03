@@ -67,9 +67,9 @@ async def run_cancellable(
     finally:
         if poll is not None and not poll.done():
             poll.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+            with contextlib.suppress(asyncio.CancelledError, RuntimeError):
                 await poll
         if not task.done():
             task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+            with contextlib.suppress(asyncio.CancelledError, RuntimeError):
                 await task
