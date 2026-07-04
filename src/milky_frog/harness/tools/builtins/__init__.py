@@ -3,6 +3,7 @@ from __future__ import annotations
 from milky_frog.harness.tools.base import Tool
 from milky_frog.harness.tools.builtins.bash import BashTool
 from milky_frog.harness.tools.builtins.edit import EditFileTool
+from milky_frog.harness.tools.builtins.fetch import FetchTool
 from milky_frog.harness.tools.builtins.grep import GrepTool
 from milky_frog.harness.tools.builtins.list_dir import ListDirTool
 from milky_frog.harness.tools.builtins.read import ReadFileTool
@@ -18,6 +19,7 @@ def default_tools() -> tuple[Tool, ...]:
         ListDirTool(),
         GrepTool(),
         BashTool(),
+        FetchTool(),
     )
     return tools
 
@@ -25,6 +27,7 @@ def default_tools() -> tuple[Tool, ...]:
 __all__ = [
     "BashTool",
     "EditFileTool",
+    "FetchTool",
     "GrepTool",
     "ListDirTool",
     "ReadFileTool",
