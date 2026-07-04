@@ -15,9 +15,11 @@ DEFAULT_OUTPUT_RESERVE = 8000
 DEFAULT_SAFETY_MARGIN = 32000
 DEFAULT_BASH_TIMEOUT_SECONDS = 60
 DEFAULT_FETCH_TIMEOUT_SECONDS = 30
+DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS = 45
 DEFAULT_RETENTION_DAYS = 30
 DEFAULT_BASH_OUTPUT_MAX_CHARS = 128000
 DEFAULT_FETCH_OUTPUT_MAX_CHARS = 100000
+DEFAULT_WEB_SEARCH_OUTPUT_MAX_CHARS = 20000
 DEFAULT_READ_OUTPUT_MAX_CHARS = 64000
 DEFAULT_SEARCH_OUTPUT_MAX_CHARS = 32000
 DEFAULT_SUMMARIZATION_TRIGGER_TOKENS = 96000
@@ -42,6 +44,10 @@ CONFIG_TEMPLATE = (
     f"# fetch Tool: outbound HTTP GET timeout (seconds). Loopback/private hosts\n"
     f"# are blocked to prevent SSRF; every fetch requires approval.\n"
     f"# fetch_timeout_seconds = {DEFAULT_FETCH_TIMEOUT_SECONDS}\n"
+    f"\n"
+    f"# web_search Tool: only registered when MILKY_FROG_JINA_API_KEY is set.\n"
+    f"# web_search_timeout_seconds = {DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS}\n"
+    f"# web_search_output_max_chars = {DEFAULT_WEB_SEARCH_OUTPUT_MAX_CHARS}\n"
     f"\n"
     f"# Conversation summarization (compaction): when the transcript exceeds the\n"
     f"# trigger, older rounds are summarized away from the model request (the full\n"
@@ -83,10 +89,14 @@ class ProjectConfig(BaseModel):
     safety_margin: int = Field(default=DEFAULT_SAFETY_MARGIN, ge=0)
     bash_timeout_seconds: int = Field(default=DEFAULT_BASH_TIMEOUT_SECONDS, ge=1, le=600)
     fetch_timeout_seconds: int = Field(default=DEFAULT_FETCH_TIMEOUT_SECONDS, ge=1, le=600)
+    web_search_timeout_seconds: int = Field(
+        default=DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS, ge=1, le=600
+    )
     bash_output_max_chars: int = Field(default=DEFAULT_BASH_OUTPUT_MAX_CHARS, ge=1000)
     read_output_max_chars: int = Field(default=DEFAULT_READ_OUTPUT_MAX_CHARS, ge=1000)
     search_output_max_chars: int = Field(default=DEFAULT_SEARCH_OUTPUT_MAX_CHARS, ge=1000)
     fetch_output_max_chars: int = Field(default=DEFAULT_FETCH_OUTPUT_MAX_CHARS, ge=1000)
+    web_search_output_max_chars: int = Field(default=DEFAULT_WEB_SEARCH_OUTPUT_MAX_CHARS, ge=1000)
     summarization_enabled: bool = False
     summarization_trigger_tokens: int = Field(default=DEFAULT_SUMMARIZATION_TRIGGER_TOKENS, ge=1000)
     summarization_keep_recent_tokens: int = Field(
@@ -104,10 +114,12 @@ class ProjectConfig(BaseModel):
         "safety_margin",
         "bash_timeout_seconds",
         "fetch_timeout_seconds",
+        "web_search_timeout_seconds",
         "bash_output_max_chars",
         "read_output_max_chars",
         "search_output_max_chars",
         "fetch_output_max_chars",
+        "web_search_output_max_chars",
         "summarization_trigger_tokens",
         "summarization_keep_recent_tokens",
         mode="before",

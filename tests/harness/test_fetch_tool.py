@@ -214,3 +214,102 @@ async def test_fetch_http_error_status_is_error(tmp_path: Path, server: str) -> 
 
 def test_fetch_tool_requires_approval() -> None:
     assert FetchTool().requires_approval is True
+
+
+# ── Jina Reader fallback ────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("status", "text"),
+    [
+        (403, "forbidden"),
+        (429, "too many requests"),
+        (503, "service unavailable"),
+        (999, "blocked"),
+        (200, "Just a moment... Checking your browser before accessing"),
+        (200, "Please verify you are human to continue"),
+    ],
+)
+def test_looks_blocked_detects_bot_defenses(status: int, text: str) -> None:
+    assert fetch_mod._looks_blocked(status, text)
+
+
+@pytest.mark.parametrize(("status", "text"), [(200, "normal page body"), (404, "not found")])
+def test_looks_blocked_ignores_normal_responses(status: int, text: str) -> None:
+    assert not fetch_mod._looks_blocked(status, text)
+
+
+async def test_fetch_without_jina_key_does_not_retry_blocked_response(
+    tmp_path: Path, server: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_handler(self: _Handler) -> None:
+        self._respond(403, "text/plain", b"forbidden")
+
+    monkeypatch.setattr(_Handler, "do_GET", fake_handler)
+
+    result = await FetchTool().execute(_context(tmp_path), FetchTool.input_model(url=server))
+
+    assert result.is_error
+    assert "-> 403" in result.content
+    assert "Jina" not in result.content
+
+
+async def test_fetch_with_jina_key_retries_blocked_response(
+    tmp_path: Path, server: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_handler(self: _Handler) -> None:
+        self._respond(403, "text/plain", b"forbidden")
+
+    monkeypatch.setattr(_Handler, "do_GET", fake_handler)
+
+    def fake_jina(url: str, api_key: str, timeout: float) -> str:
+        assert api_key == "jina-key"
+        return "clean rendered content"
+
+    monkeypatch.setattr(fetch_mod, "_fetch_via_jina", fake_jina)
+
+    result = await FetchTool(jina_api_key="jina-key").execute(
+        _context(tmp_path), FetchTool.input_model(url=server)
+    )
+
+    assert not result.is_error
+    assert "-> 200" in result.content
+    assert "blocked; retried via Jina Reader" in result.content
+    assert "clean rendered content" in result.content
+
+
+async def test_fetch_jina_fallback_failure_returns_original_blocked_response(
+    tmp_path: Path, server: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_handler(self: _Handler) -> None:
+        self._respond(403, "text/plain", b"forbidden")
+
+    monkeypatch.setattr(_Handler, "do_GET", fake_handler)
+
+    def failing_jina(url: str, api_key: str, timeout: float) -> str:
+        raise TimeoutError
+
+    monkeypatch.setattr(fetch_mod, "_fetch_via_jina", failing_jina)
+
+    result = await FetchTool(jina_api_key="jina-key").execute(
+        _context(tmp_path), FetchTool.input_model(url=server)
+    )
+
+    assert result.is_error
+    assert "-> 403" in result.content
+    assert "Jina" not in result.content
+
+
+async def test_fetch_does_not_retry_a_clean_200_response(
+    tmp_path: Path, server: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def unexpected_jina(url: str, api_key: str, timeout: float) -> str:
+        raise AssertionError("should not be called for a clean 200 response")
+
+    monkeypatch.setattr(fetch_mod, "_fetch_via_jina", unexpected_jina)
+
+    result = await FetchTool(jina_api_key="jina-key").execute(
+        _context(tmp_path), FetchTool.input_model(url=f"{server}/html")
+    )
+
+    assert not result.is_error
