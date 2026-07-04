@@ -26,18 +26,6 @@ def test_default_tools_exposes_all_builtin_tools() -> None:
     assert names == {"read_file", "write_file", "edit_file", "list_dir", "grep", "bash", "fetch"}
 
 
-def test_default_tools_omits_web_search_without_jina_key() -> None:
-    names = {tool.name for tool in default_tools(jina_api_key=None)}
-
-    assert "web_search" not in names
-
-
-def test_default_tools_includes_web_search_with_jina_key() -> None:
-    names = {tool.name for tool in default_tools(jina_api_key="a-key")}
-
-    assert "web_search" in names
-
-
 async def test_read_file_returns_contents(tmp_path: Path) -> None:
     (tmp_path / "note.txt").write_text("hello", encoding="utf-8")
 

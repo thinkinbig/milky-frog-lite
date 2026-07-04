@@ -39,31 +39,6 @@ def test_real_environment_overrides_dotenv(monkeypatch: pytest.MonkeyPatch, tmp_
     assert settings.api_key == "from-environment"
 
 
-def test_jina_api_key_defaults_to_none(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.delenv("MILKY_FROG_JINA_API_KEY", raising=False)
-    monkeypatch.chdir(tmp_path)
-
-    settings = Settings.from_environment()
-
-    assert settings.jina_api_key is None
-
-
-def test_jina_api_key_reads_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MILKY_FROG_JINA_API_KEY", "jina-secret")
-
-    settings = Settings.from_environment()
-
-    assert settings.jina_api_key == "jina-secret"
-
-
-def test_jina_api_key_empty_string_coerced_to_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MILKY_FROG_JINA_API_KEY", "")
-
-    settings = Settings.from_environment()
-
-    assert settings.jina_api_key is None
-
-
 def test_empty_real_environment_overrides_dotenv(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

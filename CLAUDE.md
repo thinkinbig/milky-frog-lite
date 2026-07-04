@@ -43,8 +43,6 @@ see `settings.py`):
 - `MILKY_FROG_PROVIDER` (optional; `openai`/`deepseek`/`compatible`, inferred from
   the model name by default — selects the exact token counter, else approximate)
 - `MILKY_FROG_HOME` (optional, state dir; default `~/.milky-frog`)
-- `MILKY_FROG_JINA_API_KEY` (optional; enables the `web_search` Tool and lets
-  `fetch` retry anti-bot-blocked requests via Jina Reader)
 
 Per-workspace config lives in `.milky-frog/config.toml` (e.g. `max_model_calls`)
 and is safe to commit. Credentials must never be committed.
@@ -104,11 +102,7 @@ named class — so alternatives can be swapped without touching the Harness:
 
 - `models/` — `Model` protocol, `OpenAIModel` adapter.
 - `harness/tools/` — `Tool` protocol + `ToolRegistry` + built-in Tools
-  (`read_file`, `write_file`, `edit_file`, `list_dir`, `grep`, `bash`, `fetch`,
-  `web_search`). `web_search` locates (title/url/snippet via Jina); reading a
-  result's full content is a separate `fetch` call. `web_search` is only
-  registered when `MILKY_FROG_JINA_API_KEY` is set; `fetch` also uses that key
-  to retry anti-bot-blocked requests via Jina Reader.
+  (`read_file`, `write_file`, `edit_file`, `list_dir`, `grep`, `bash`).
 - `checkpoint/` — `CheckpointStore` protocol, `SqliteCheckpointStore`, `RunSnapshot` serialization.
 - `harness/state.py` — transcript mutators and `repair_transcript` (interrupted-tool repair).
 - `events/` — lifecycle signals, `EventHub`, `AgentLoop`; the Harness publishes.

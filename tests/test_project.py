@@ -7,7 +7,6 @@ from milky_frog.project import (
     CONFIG_FILENAME,
     CONFIG_TEMPLATE,
     DEFAULT_BASH_TIMEOUT_SECONDS,
-    DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS,
     PROJECT_DIRNAME,
     load_project_config,
 )
@@ -61,25 +60,6 @@ def test_invalid_bash_timeout_falls_back_to_default(tmp_path: Path) -> None:
     _write_config(tmp_path, "bash_timeout_seconds = 0\n")
 
     assert load_project_config(tmp_path).bash_timeout_seconds == DEFAULT_BASH_TIMEOUT_SECONDS
-
-
-def test_reads_web_search_timeout_seconds_from_config(tmp_path: Path) -> None:
-    _write_config(tmp_path, "web_search_timeout_seconds = 45\n")
-
-    assert load_project_config(tmp_path).web_search_timeout_seconds == 45
-
-
-def test_missing_config_uses_default_web_search_timeout(tmp_path: Path) -> None:
-    assert (
-        load_project_config(tmp_path).web_search_timeout_seconds
-        == DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS
-    )
-
-
-def test_reads_web_search_output_max_chars_from_config(tmp_path: Path) -> None:
-    _write_config(tmp_path, "web_search_output_max_chars = 5000\n")
-
-    assert load_project_config(tmp_path).web_search_output_max_chars == 5000
 
 
 def test_checkpoint_retention_days_from_config(tmp_path: Path) -> None:
