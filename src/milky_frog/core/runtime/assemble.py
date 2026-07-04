@@ -58,9 +58,12 @@ def make_agent_harness(
     token_counter: TokenCounter | None = None,
     max_retries: int = 3,
     retry_base_delay: float = 1.0,
+    jina_api_key: str | None = None,
 ) -> AgentHarness:
     """Wire the Harness runtime stack — shared by ``AgentSession`` and tests."""
-    registry = tools if tools is not None else ToolRegistry(default_tools())
+    registry = (
+        tools if tools is not None else ToolRegistry(default_tools(jina_api_key=jina_api_key))
+    )
     policy = SessionToolPolicy(registry)
     budget = TokenBudget(counter=token_counter)
     tool_step = ToolStepExecutor(registry, hub.emitter, policy, budget=budget)

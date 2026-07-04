@@ -222,6 +222,7 @@ class AgentSession:
             token_counter=counter,
             max_retries=self._settings.max_retries,
             retry_base_delay=self._settings.retry_base_delay,
+            jina_api_key=self._settings.jina_api_key,
         )
 
         self._foreground = ForegroundRun(

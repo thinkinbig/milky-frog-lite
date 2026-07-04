@@ -56,6 +56,10 @@ class Settings(BaseSettings):
         default=None,
         validation_alias="MILKY_FROG_PROVIDER",
     )
+    jina_api_key: str | None = Field(
+        default=None,
+        validation_alias="MILKY_FROG_JINA_API_KEY",
+    )
     home: Path = Field(
         default=Path.home() / ".milky-frog",
         validation_alias="MILKY_FROG_HOME",
@@ -101,6 +105,7 @@ class Settings(BaseSettings):
         "model",
         "base_url",
         "provider",
+        "jina_api_key",
         "langfuse_public_key",
         "langfuse_secret_key",
         mode="before",
