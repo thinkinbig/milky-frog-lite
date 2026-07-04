@@ -23,7 +23,7 @@ def _context(workspace: Path, config: ProjectConfig | None = None) -> ToolContex
 def test_default_tools_exposes_all_builtin_tools() -> None:
     names = {tool.name for tool in default_tools()}
 
-    assert names == {"read_file", "write_file", "edit_file", "list_dir", "grep", "bash"}
+    assert names == {"read_file", "write_file", "edit_file", "list_dir", "grep", "bash", "fetch"}
 
 
 async def test_read_file_returns_contents(tmp_path: Path) -> None:
