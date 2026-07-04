@@ -26,11 +26,18 @@ class Skill:
     path: Path
 
 
+_BUNDLED_DIR = Path(__file__).parent / "bundled"
+
+
 class SkillCatalog:
-    """Discovers user and project Skills, with project Skills taking precedence."""
+    """Discovers bundled, user, and project Skills.
+
+    Priority (highest wins): project > user > bundled.
+    """
 
     def __init__(self, user_directory: Path, project_directory: Path) -> None:
-        self._paths = self._discover(user_directory)
+        self._paths = self._discover(_BUNDLED_DIR)
+        self._paths.update(self._discover(user_directory))
         self._paths.update(self._discover(project_directory))
 
     def summaries(self) -> tuple[SkillSummary, ...]:

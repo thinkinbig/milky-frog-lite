@@ -38,6 +38,7 @@ class RunRequest:
     workspace: Path
     max_model_calls: int = DEFAULT_MAX_MODEL_CALLS
     cancellation: RunCancellation | None = None
+    skill_content: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,3 +99,4 @@ class RunState:
     reasoning_log: tuple[str, ...] = ()
     usage: RunUsage = field(default_factory=RunUsage)
     compaction: CompactionState | None = None
+    run_extra: tuple[str, ...] = ()  # ephemeral extra system-prompt sections, not persisted

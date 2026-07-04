@@ -24,7 +24,8 @@ from milky_frog.events import EventHub, Handler
 from milky_frog.harness.compaction import CompactionHandler
 from milky_frog.harness.harness import AgentHarness
 from milky_frog.harness.prompt import make_context_loader
-from milky_frog.project import load_project_config
+from milky_frog.harness.skills import SkillCatalog
+from milky_frog.project import load_project_config, project_root
 from milky_frog.settings import Settings
 from milky_frog.tokens import make_token_counter
 
@@ -275,8 +276,24 @@ class AgentSession:
         """
         self._shutdown.attach_worker(cancel)
 
-    async def start_new(self, task: str, workspace: Path | None = None) -> RunResult:
-        return await _active(self._foreground).start_new(task, workspace)
+    async def start_new(
+        self,
+        task: str,
+        workspace: Path | None = None,
+        *,
+        selected_skills: tuple[str, ...] = (),
+    ) -> RunResult:
+        skill_content: str | None = None
+        if selected_skills:
+            resolved = (workspace or Path.cwd()).resolve()
+            catalog = SkillCatalog(
+                self._settings.home / "skills",
+                project_root(resolved) / "skills",
+            )
+            skill_content = _format_skill_injection(catalog, selected_skills)
+        return await _active(self._foreground).start_new(
+            task, workspace, skill_content=skill_content
+        )
 
     async def continue_with(
         self,
@@ -292,3 +309,21 @@ class AgentSession:
     @staticmethod
     def cancelled_result(run_id: str | None) -> RunResult:
         return ForegroundRun.cancelled_result(run_id)
+
+
+def _format_skill_injection(catalog: SkillCatalog, names: tuple[str, ...]) -> str | None:
+    """Load named skills and format them for eager system-prompt injection."""
+    parts: list[str] = []
+    for name in names:
+        try:
+            skill = catalog.load(name)
+        except KeyError:
+            logger.warning("selected skill %r not found; skipping", name)
+            continue
+        parts.append(f'<active_skill name="{name}">\n{skill.instructions.strip()}\n</active_skill>')
+    if not parts:
+        return None
+    return (
+        "The following skill has been activated for this Run. "
+        "Follow its instructions throughout the task.\n\n" + "\n\n".join(parts)
+    )

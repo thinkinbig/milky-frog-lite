@@ -59,7 +59,13 @@ class ForegroundRun:
             return
         self._checkpoints.seal_interrupt(run_id)
 
-    async def start_new(self, task: str, workspace: Path | None = None) -> RunResult:
+    async def start_new(
+        self,
+        task: str,
+        workspace: Path | None = None,
+        *,
+        skill_content: str | None = None,
+    ) -> RunResult:
         workspace = (workspace or Path.cwd()).resolve(strict=True)
         project_cfg = load_project_config(workspace)
         self.busy = True
@@ -73,6 +79,7 @@ class ForegroundRun:
                         workspace,
                         max_model_calls=max_calls,
                         cancellation=self._cancellation,
+                        skill_content=skill_content,
                     )
                 )
             except asyncio.CancelledError:

@@ -75,8 +75,9 @@ class AgentHarness:
         with self._checkpoints.claim(run_id):
             self._checkpoints.create_run(run_id, workspace)
             await self._hub.run_before_start(run_id, run_request, workspace)
+            run_extra = (run_request.skill_content,) if run_request.skill_content else ()
             state = start_run(
-                RunState(run_id=run_id, workspace=workspace),
+                RunState(run_id=run_id, workspace=workspace, run_extra=run_extra),
                 run_request.prompt,
             )
             await self._hub.run_started(run_id, run_request, state)

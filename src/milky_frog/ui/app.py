@@ -16,14 +16,17 @@ from textual.binding import Binding, BindingType
 from textual.containers import Vertical, VerticalScroll
 from textual.reactive import reactive
 from textual.timer import Timer
-from textual.widgets import Footer, Header, Input, OptionList, Static
+from textual.widgets import Footer, Header, Input, OptionList, SelectionList, Static
 from textual.widgets.option_list import Option
+from textual.widgets.selection_list import Selection
 from textual.worker import Worker
 
 from milky_frog.app.session import AgentSession
 from milky_frog.core.controller import RunController
 from milky_frog.domain import ApprovalDecision, ApprovalVerdict, ResumeError, RunStatus, RunUsage
-from milky_frog.project import load_project_config
+from milky_frog.harness.skills import SkillCatalog, SkillSummary
+from milky_frog.project import load_project_config, project_root
+from milky_frog.tokens.base import ApproxCharCounter
 from milky_frog.ui.cli import runs_table
 from milky_frog.ui.logo import welcome_banner
 from milky_frog.ui.messages import (
@@ -37,6 +40,7 @@ from milky_frog.ui.messages import (
     RunError,
     RunFinished,
     RunNoticeMsg,
+    SkillOptionSelected,
     ToolCallMsg,
     ToolResultMsg,
     UpdateUsage,
@@ -351,6 +355,57 @@ class ApprovalPrompt(Vertical):
         self._pick(4)
 
 
+# ── Skill Picker ──────────────────────────────────────────────────────
+
+
+class SkillPicker(Vertical):
+    """Multi-select skill picker: Space toggles, Enter confirms, Esc cancels."""
+
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding("enter", "confirm", "Confirm", show=True, priority=True),
+        Binding("escape", "dismiss", "Cancel", show=False, priority=True),
+    ]
+
+    def __init__(
+        self,
+        entries: tuple[tuple[SkillSummary, int], ...],
+        active: frozenset[str],
+    ) -> None:
+        super().__init__(classes="skill-picker")
+        self._entries = entries
+        self._active = active
+
+    @override
+    def compose(self) -> ComposeResult:
+        yield Static(
+            Text.assemble(
+                ("  Select skills  ", "bold"),
+                ("  Space to toggle · Enter to confirm · Esc to cancel", "dim"),
+            ),
+            id="skill-picker-header",
+        )
+        selections: list[Selection[str]] = [
+            Selection(
+                f"[bold]{s.name}[/bold]  [dim]— {s.description}[/dim]  [cyan]~{tok} tok[/cyan]",
+                s.name,
+                initial_state=s.name in self._active,
+            )
+            for s, tok in self._entries
+        ]
+        yield SelectionList(*selections, id="skill-list")
+
+    def on_mount(self) -> None:
+        self.query_one("#skill-list", SelectionList).focus()
+
+    def action_confirm(self) -> None:
+        widget = self.query_one("#skill-list", SelectionList)
+        selected: frozenset[str] = frozenset(widget.selected)
+        self.post_message(SkillOptionSelected(selected))
+
+    def action_dismiss(self) -> None:
+        self.post_message(SkillOptionSelected(self._active))  # no change
+
+
 # ── Main App ───────────────────────────────────────────────────────────
 
 
@@ -416,6 +471,27 @@ class MilkyFrogApp(App[None]):
         background: $accent 20%;
         color: $text;
     }
+
+    .skill-picker {
+        height: auto;
+        margin-bottom: 1;
+        border: round cyan;
+        padding: 0 1 1 0;
+    }
+
+    .skill-picker SelectionList {
+        height: auto;
+        max-height: 12;
+        margin: 0 1;
+        background: transparent;
+        border: none;
+        padding: 0;
+    }
+
+    .skill-picker SelectionList > .option-list--option-highlighted {
+        background: $accent 20%;
+        color: $text;
+    }
     """
 
     BINDINGS: ClassVar[list[BindingType]] = [
@@ -459,6 +535,9 @@ class MilkyFrogApp(App[None]):
 
         self._thinking_spinner_timer: Timer | None = None
         self._thinking_frame_idx: int = 0
+
+        self._active_skills: frozenset[str] = frozenset()
+        self._skill_picker_widget: SkillPicker | None = None
 
     @property
     def session(self) -> AgentSession:
@@ -943,6 +1022,12 @@ class MilkyFrogApp(App[None]):
         if not task:
             return
 
+        # Auto-expand a partial slash command prefix to the unique match on Enter.
+        if task.startswith("/") and " " not in task:
+            completed = complete_command(task)
+            if completed is not None and completed != task:
+                task = completed
+
         prompt_input = self.query_one("#prompt-input", PromptInput)
         prompt_input.remember(task)
         prompt_input.clear()
@@ -978,7 +1063,95 @@ class MilkyFrogApp(App[None]):
             self._handle_resume(task)
             return
 
+        if command.startswith("/skill"):
+            self._handle_skill(task)
+            return
+
         self._start_run(task, run_id=self.session.run_id)
+
+    def _handle_skill(self, task: str) -> None:
+        """Handle ``/skill [name|off]``."""
+        parts = task.split(None, 1)
+        arg = parts[1].strip() if len(parts) > 1 else ""
+
+        catalog = SkillCatalog(
+            self.session._settings.home / "skills",
+            project_root(Path.cwd()) / "skills",
+        )
+
+        if not arg:
+            summaries = catalog.summaries()
+            if not summaries:
+                self._append(Text("No skills found.", style="dim"))
+                return
+            self._show_skill_picker(catalog, summaries)
+            return
+
+        if arg in ("off", "none", "clear"):
+            self._active_skills = frozenset()
+            self._append(Text("Skills deactivated.", style="dim"))
+            self._update_skill_placeholder()
+            return
+
+        summaries = catalog.summaries()
+        names = {s.name for s in summaries}
+        if arg not in names:
+            self._append(Text(f"Unknown skill: {arg!r}. Use /skill to list.", style="bold red"))
+            return
+
+        # Toggle: add if absent, remove if already active.
+        if arg in self._active_skills:
+            self._active_skills = self._active_skills - {arg}
+            self._append(Text(f"Skill removed: {arg}", style="dim"))
+        else:
+            self._active_skills = self._active_skills | {arg}
+            self._append(Text(f"Skill added: {arg}", style="yellow"))
+        self._update_skill_placeholder()
+
+    def _show_skill_picker(
+        self,
+        catalog: SkillCatalog,
+        summaries: tuple[SkillSummary, ...],
+    ) -> None:
+        counter = ApproxCharCounter()
+        entries: list[tuple[SkillSummary, int]] = []
+        for s in summaries:
+            try:
+                tok = counter.count_text(catalog.load(s.name).instructions)
+            except Exception:
+                tok = 0
+            entries.append((s, tok))
+        if self._skill_picker_widget is not None:
+            self._skill_picker_widget.remove()
+        picker = SkillPicker(tuple(entries), self._active_skills)
+        self._skill_picker_widget = picker
+        conversation = self.query_one("#conversation", VerticalScroll)
+        conversation.mount(picker)
+        conversation.scroll_end(animate=False)
+        self.query_one("#prompt-input", Input).disabled = True
+
+    def on_skill_option_selected(self, event: SkillOptionSelected) -> None:
+        if self._skill_picker_widget is not None:
+            self._skill_picker_widget.remove()
+            self._skill_picker_widget = None
+        self.query_one("#prompt-input", Input).disabled = False
+        self.query_one("#prompt-input", Input).focus()
+        if event.selected != self._active_skills:
+            self._active_skills = event.selected
+            if event.selected:
+                names = ", ".join(sorted(event.selected))
+                self._append(Text(f"Active skills: {names}", style="yellow"))
+            else:
+                self._append(Text("Skills deactivated.", style="dim"))
+        self._update_skill_placeholder()
+
+    def _update_skill_placeholder(self) -> None:
+        prompt_input = self.query_one("#prompt-input", PromptInput)
+        if self._active_skills:
+            names = ", ".join(sorted(self._active_skills))
+            prompt_input.placeholder = f"[skills: {names}] Type a task..."
+        else:
+            prompt_input.placeholder = "Type a task and press Enter..."
 
     def _handle_resume(self, task: str) -> None:
         """Parse ``/resume`` and either attach to a Run or continue it."""
@@ -1057,7 +1230,7 @@ class MilkyFrogApp(App[None]):
         self.query_one(RunStatusBar).set_working()
         self.query_one("#prompt-input", PromptInput).disabled = True
 
-        self._worker = self._do_run(task, run_id)
+        self._worker = self._do_run(task, run_id, self._active_skills)
         self.session.attach_worker(self._worker.cancel)
 
     def _start_continue_pending(self, run_id: str) -> None:
@@ -1096,11 +1269,13 @@ class MilkyFrogApp(App[None]):
             raise
 
     @work(thread=False, exit_on_error=False)
-    async def _do_run(self, task: str, run_id: str | None) -> None:
+    async def _do_run(
+        self, task: str, run_id: str | None, active_skills: frozenset[str] = frozenset()
+    ) -> None:
         """Thin worker: delegate to AgentSession; UI via TuiPresentationHandler."""
         try:
             if run_id is None:
-                await self.session.start_new(task)
+                await self.session.start_new(task, selected_skills=tuple(sorted(active_skills)))
             else:
                 await self.session.continue_with(run_id, prompt=task)
         except ResumeError as error:
@@ -1179,6 +1354,9 @@ class MilkyFrogApp(App[None]):
         hard-cancel the Textual worker so Esc still works when the stream or a
         Tool is slow to honour the token.
         """
+        if self._skill_picker_widget is not None:
+            self._skill_picker_widget.action_dismiss()
+            return
         if not self.session.busy:
             return
         self.query_one(RunStatusBar).set_cancelling()
