@@ -262,9 +262,10 @@ async def test_fetch_with_jina_key_retries_blocked_response(
 
     monkeypatch.setattr(_Handler, "do_GET", fake_handler)
 
-    def fake_jina(url: str, api_key: str, timeout: float) -> str:
+    def fake_jina(url: str, api_key: str, timeout: float) -> tuple[int, str]:
         assert api_key == "jina-key"
-        return "clean rendered content"
+        assert timeout > 0  # retry gets the remaining budget, not a fresh timeout
+        return 200, "clean rendered content"
 
     monkeypatch.setattr(fetch_mod, "_fetch_via_jina", fake_jina)
 
@@ -276,6 +277,8 @@ async def test_fetch_with_jina_key_retries_blocked_response(
     assert "-> 200" in result.content
     assert "blocked; retried via Jina Reader" in result.content
     assert "clean rendered content" in result.content
+    # The type line reflects Jina's markdown, not the blocked page's old type.
+    assert "content-type: text/markdown" in result.content
 
 
 async def test_fetch_jina_fallback_failure_returns_original_blocked_response(
@@ -286,7 +289,7 @@ async def test_fetch_jina_fallback_failure_returns_original_blocked_response(
 
     monkeypatch.setattr(_Handler, "do_GET", fake_handler)
 
-    def failing_jina(url: str, api_key: str, timeout: float) -> str:
+    def failing_jina(url: str, api_key: str, timeout: float) -> tuple[int, str]:
         raise TimeoutError
 
     monkeypatch.setattr(fetch_mod, "_fetch_via_jina", failing_jina)
@@ -300,10 +303,54 @@ async def test_fetch_jina_fallback_failure_returns_original_blocked_response(
     assert "Jina" not in result.content
 
 
+async def test_fetch_jina_redirect_falls_back_to_original_blocked_response(
+    tmp_path: Path, server: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_handler(self: _Handler) -> None:
+        self._respond(403, "text/plain", b"forbidden")
+
+    monkeypatch.setattr(_Handler, "do_GET", fake_handler)
+
+    def redirecting_jina(url: str, api_key: str, timeout: float) -> tuple[int, str]:
+        raise fetch_mod.JinaRedirectError("Jina responded with an unexpected redirect (302)")
+
+    monkeypatch.setattr(fetch_mod, "_fetch_via_jina", redirecting_jina)
+
+    result = await FetchTool(jina_api_key="jina-key").execute(
+        _context(tmp_path), FetchTool.input_model(url=server)
+    )
+
+    assert result.is_error
+    assert "-> 403" in result.content
+    assert "Jina" not in result.content
+
+
+async def test_fetch_jina_error_status_falls_back_to_original_blocked_response(
+    tmp_path: Path, server: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_handler(self: _Handler) -> None:
+        self._respond(403, "text/plain", b"forbidden")
+
+    monkeypatch.setattr(_Handler, "do_GET", fake_handler)
+
+    def erroring_jina(url: str, api_key: str, timeout: float) -> tuple[int, str]:
+        return 502, "upstream exploded"  # Jina reached but failed to fetch
+
+    monkeypatch.setattr(fetch_mod, "_fetch_via_jina", erroring_jina)
+
+    result = await FetchTool(jina_api_key="jina-key").execute(
+        _context(tmp_path), FetchTool.input_model(url=server)
+    )
+
+    assert result.is_error
+    assert "-> 403" in result.content  # original block, not Jina's 502
+    assert "Jina" not in result.content
+
+
 async def test_fetch_does_not_retry_a_clean_200_response(
     tmp_path: Path, server: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def unexpected_jina(url: str, api_key: str, timeout: float) -> str:
+    def unexpected_jina(url: str, api_key: str, timeout: float) -> tuple[int, str]:
         raise AssertionError("should not be called for a clean 200 response")
 
     monkeypatch.setattr(fetch_mod, "_fetch_via_jina", unexpected_jina)

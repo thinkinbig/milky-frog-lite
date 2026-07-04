@@ -5,6 +5,7 @@ import json
 import threading
 from collections.abc import Iterator
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -19,14 +20,21 @@ def _context(workspace: Path) -> ToolContext:
 
 
 class _Handler(http.server.BaseHTTPRequestHandler):
+    last_headers: ClassVar[dict[str, str]] = {}
+
     def do_POST(self) -> None:
         length = int(self.headers.get("Content-Length", "0"))
+        type(self).last_headers = {key: value for key, value in self.headers.items()}
         payload = json.loads(self.rfile.read(length) or b"{}")
         query = payload.get("q", "")
+        status = 200
         if query == "empty":
             body = json.dumps({"code": 200, "status": 20000, "data": []}).encode("utf-8")
         elif query == "malformed":
             body = b"not json"
+        elif query == "boom":
+            status = 502
+            body = b'{"error": "upstream exploded"}'
         else:
             body = json.dumps(
                 {
@@ -43,7 +51,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     ],
                 }
             ).encode("utf-8")
-        self.send_response(200)
+        self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -81,6 +89,16 @@ async def test_web_search_returns_wrapped_snippets(tmp_path: Path, server: str) 
     assert "full page text" not in result.content  # snippet only, not full content
 
 
+async def test_web_search_requests_locate_only_results(tmp_path: Path, server: str) -> None:
+    # The X-Respond-With: no-content header keeps Jina from crawling each hit's
+    # full page — we only render title/url/snippet, so the crawl is wasted work.
+    await WebSearchTool(api_key="key").execute(
+        _context(tmp_path), WebSearchTool.input_model(query="python")
+    )
+
+    assert _Handler.last_headers.get("X-Respond-With") == "no-content"
+
+
 async def test_web_search_caps_results_at_max_results(tmp_path: Path, server: str) -> None:
     result = await WebSearchTool(api_key="key").execute(
         _context(tmp_path), WebSearchTool.input_model(query="python", max_results=3)
@@ -107,6 +125,18 @@ async def test_web_search_malformed_response_is_error(tmp_path: Path, server: st
 
     assert result.is_error
     assert "malformed" in result.content
+
+
+async def test_web_search_reports_http_error_status(tmp_path: Path, server: str) -> None:
+    # An error status comes back from jina_request as a status, not an
+    # exception, so execute reports it and surfaces the response body.
+    result = await WebSearchTool(api_key="key").execute(
+        _context(tmp_path), WebSearchTool.input_model(query="boom")
+    )
+
+    assert result.is_error
+    assert "HTTP 502" in result.content
+    assert "upstream exploded" in result.content
 
 
 async def test_web_search_empty_query_is_error(tmp_path: Path) -> None:

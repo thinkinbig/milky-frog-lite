@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import http.client
 import json
-from urllib import error as urllib_error
-from urllib import request as urllib_request
 
 from pydantic import BaseModel, Field
 
 from milky_frog.domain import ToolResult
 from milky_frog.harness.tools.base import ToolContext
+from milky_frog.harness.tools.jina import JinaRedirectError, jina_request
 from milky_frog.harness.tools.truncate import truncate_tool_output
 from milky_frog.project import DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS
 
@@ -16,7 +16,6 @@ from milky_frog.project import DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS
 # Exposed as a module attribute so tests can point it at a local server.
 SEARCH_ENDPOINT = "https://s.jina.ai/"
 
-_USER_AGENT = "milky-frog-web-search/1.0"
 _MAX_RESULTS_CAP = 10
 
 # Search hits are attacker-influenceable (SEO poisoning of titles/snippets), so
@@ -38,22 +37,34 @@ class WebSearchInput(BaseModel):
     )
 
 
-def _search(query: str, api_key: str, max_results: int, timeout: float) -> list[dict[str, str]]:
-    """Blocking POST to Jina's search endpoint. Runs on a worker thread."""
+def _search(query: str, api_key: str, timeout: float) -> tuple[int, bytes]:
+    """Blocking POST to Jina's search endpoint. Runs on a worker thread.
+
+    Returns ``(status, raw_body)`` from the shared ``jina_request`` helper, so
+    the search inherits the bounded read (memory cap) and redirect refusal used
+    by every Jina call, and an error status comes back for the caller to judge
+    rather than raising. The ``X-Respond-With: no-content`` header keeps this
+    locate-only: Jina returns just title/url/description and skips crawling each
+    hit's full page, which is all we render and the bulk of the latency.
+    """
     body = json.dumps({"q": query}).encode("utf-8")
-    request = urllib_request.Request(
+    return jina_request(
         SEARCH_ENDPOINT,
+        api_key,
+        method="POST",
         data=body,
-        headers={
-            "Authorization": f"Bearer {api_key}",
+        extra_headers={
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "User-Agent": _USER_AGENT,
+            "X-Respond-With": "no-content",
         },
-        method="POST",
+        timeout=timeout,
     )
-    with urllib_request.urlopen(request, timeout=timeout) as response:
-        payload = json.loads(response.read().decode("utf-8"))
+
+
+def _parse_hits(raw: bytes, max_results: int) -> list[dict[str, str]]:
+    """Extract locate-only hits from a Jina search body. Raises on malformed JSON."""
+    payload = json.loads(raw.decode("utf-8"))
 
     items = payload.get("data") if isinstance(payload, dict) else None
     if not isinstance(items, list):
@@ -109,15 +120,19 @@ class WebSearchTool:
         max_chars = sandbox.config.web_search_output_max_chars
 
         try:
-            hits = await asyncio.to_thread(
-                _search, query, self._api_key, params.max_results, timeout
-            )
+            status, raw = await asyncio.to_thread(_search, query, self._api_key, timeout)
         except TimeoutError:
             return ToolResult(f"web search timed out after {timeout:g}s", is_error=True)
-        except urllib_error.HTTPError as error:
-            return ToolResult(f"web search failed: HTTP {error.code}", is_error=True)
-        except urllib_error.URLError as error:
-            return ToolResult(f"web search failed: {error.reason}", is_error=True)
+        except (JinaRedirectError, http.client.HTTPException, OSError) as error:
+            return ToolResult(f"web search failed: {error}", is_error=True)
+
+        if status >= 400:
+            detail = raw.decode("utf-8", errors="replace").strip()
+            suffix = f": {detail[:200]}" if detail else ""
+            return ToolResult(f"web search failed: HTTP {status}{suffix}", is_error=True)
+
+        try:
+            hits = _parse_hits(raw, params.max_results)
         except (ValueError, UnicodeDecodeError) as error:
             return ToolResult(f"web search returned malformed data: {error}", is_error=True)
 
