@@ -10,9 +10,9 @@ from textual.message import Message
 from milky_frog.app.session import AgentSession
 from milky_frog.core.controller import RunController
 from milky_frog.settings import Settings
-from milky_frog.ui.app import MilkyFrogApp, TuiLaunch
-from milky_frog.ui.bundles import make_tui_presentation_handlers
-from milky_frog.ui.textual_patch import patch_textual_utf8_decode
+from milky_frog.tui.app import MilkyFrogApp, TuiLaunch
+from milky_frog.tui.bundles import make_tui_presentation_handlers
+from milky_frog.tui.textual_patch import patch_textual_utf8_decode
 
 
 class _TuiMessageSink:

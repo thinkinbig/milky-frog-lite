@@ -22,7 +22,7 @@ from milky_frog.events.events import (
     RunStarted,
 )
 from milky_frog.events.hub import EventHub, Handler
-from milky_frog.ui.messages import (
+from milky_frog.tui.messages import (
     AddText,
     AddThinking,
     ApprovalRequired,

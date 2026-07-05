@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.cli import app
 from milky_frog.domain import RunStatus
-from milky_frog.ui.app import TuiLaunch
+from milky_frog.tui.app import TuiLaunch
 from tests.checkpoint_helpers import seed_run
 
 runner = CliRunner()

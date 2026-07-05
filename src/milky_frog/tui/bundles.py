@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from milky_frog.events.hub import Handler
-from milky_frog.ui.bash_render import BashRenderHandler
-from milky_frog.ui.presentation import Emit, TuiPresentationHandler
+from milky_frog.tui.bash_render import BashRenderHandler
+from milky_frog.tui.presentation import Emit, TuiPresentationHandler
 
 
 def make_tui_presentation_handlers(emit: Emit) -> list[Handler]:
