@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
-import time
 from collections.abc import AsyncIterator
 from types import SimpleNamespace
 from typing import Any
@@ -254,6 +254,9 @@ def test_openai_model_default_timeout_is_explicit() -> None:
         def __init__(self, **kwargs: Any) -> None:
             captured.update(kwargs)
 
+        async def close(self) -> None:  # match ``AsyncOpenAI.close`` shape
+            return None
+
     import asyncio
     from unittest.mock import patch
 
@@ -294,18 +297,26 @@ async def test_openai_model_stream_raises_on_idle_chunk_timeout() -> None:
     """A stalled mid-stream upstream must surface a TimeoutError, not hang."""
     import asyncio
 
-    client = SimpleNamespace(
-        chat=SimpleNamespace(
+    class _HangingClient:
+        chat = SimpleNamespace(
             completions=SimpleNamespace(
                 create=lambda **_kwargs: _HangingStream(),
             ),
-        ),
-    )
+        )
+
+        async def close(self) -> None:
+            return None
+
+    async def _hanging_create(**_kwargs: Any) -> _HangingStream:
+        return _HangingStream()
+
+    _HangingClient.chat.completions.create = _hanging_create  # type: ignore[method-assign]
+
     model = OpenAIModel(
         api_key="k",
         model="m",
-        client=client,  # type: ignore[arg-type]
-        idle_chunk_timeout=0.1,
+        client=_HangingClient(),  # type: ignore[arg-type]
+        idle_chunk_timeout=0.05,
     )
 
     with pytest.raises((TimeoutError, asyncio.TimeoutError)):

@@ -11,6 +11,16 @@ from milky_frog.models.base import Model
 def is_retriable_model_error(error: BaseException) -> bool:
     if isinstance(error, (ConnectionError, TimeoutError, OSError)):
         return True
+    # Mid-stream ``httpx.ReadTimeout`` (and the rest of the timeout/transport
+    # hierarchy) is raised *outside* the openai SDK's request-level wrapping,
+    # so it never reaches ``APIConnectionError``. Recognise those directly
+    # or a transient stall aborts the whole Run instead of being retried.
+    try:
+        import httpx
+    except ImportError:
+        httpx = None  # type: ignore[assignment]
+    if httpx is not None and isinstance(error, (httpx.TimeoutException, httpx.TransportError)):
+        return True
     try:
         from openai import APIConnectionError, APITimeoutError
     except ImportError:

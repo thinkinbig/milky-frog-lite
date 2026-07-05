@@ -16,6 +16,7 @@ from milky_frog.domain import (
     RunState,
     RunStatus,
     TextDelta,
+    TokenUsage,
     ToolCall,
     ToolResult,
 )
@@ -29,6 +30,7 @@ from milky_frog.events.events import (
     RunBeforeStart,
     RunBeforeTool,
     RunCancelled,
+    RunCompaction,
     RunCompleted,
     RunFailed,
     RunModelChunk,
@@ -136,6 +138,13 @@ class RunEmitter:
     ) -> list[HandlerResult]:
         return await self._broadcast(RunNotice(run_id=run_id, message=message, level=level))
 
+    async def run_compaction(
+        self, run_id: str, messages_folded: int, usage: TokenUsage
+    ) -> list[HandlerResult]:
+        return await self._broadcast(
+            RunCompaction(run_id=run_id, messages_folded=messages_folded, usage=usage)
+        )
+
     async def run_completed(self, state: RunState, result: RunResult) -> list[HandlerResult]:
         return await self._broadcast(RunCompleted(run_id=state.run_id, result=result, state=state))
 
@@ -152,7 +161,7 @@ class RunEmitter:
         result = RunResult(
             state.run_id,
             RunStatus.FAILED,
-            f"{type(error).__name__}: {error}",
+            _format_failure_message(error),
             state.completed_model_calls,
             state.usage,
         )
@@ -268,3 +277,25 @@ def _tool_arg_preview(arguments: dict[str, JsonValue]) -> str:
     if parts:
         return "(" + ", ".join(parts) + ")"
     return ""
+
+
+def _format_failure_message(error: BaseException) -> str:
+    """Render ``error`` into the ``final_message`` string stored on a failed Run.
+
+    The default ``f"{type(error).__name__}: {error}"`` is useless for exceptions
+    whose ``str()`` is empty (notably bare ``httpx.ReadTimeout`` raised mid
+    stream, whose tail we see as ``"ReadTimeout: "``). Pull a useful identifier
+    out of the request object when available.
+    """
+    base = f"{type(error).__name__}: {error}"
+    if str(error):
+        return base
+    try:
+        import httpx
+
+        request: httpx.Request | None = getattr(error, "request", None)
+    except ImportError:
+        request = None
+    if request is not None and request.url:
+        return f"{type(error).__name__}: upstream {request.url.host}{request.url.path}"
+    return base

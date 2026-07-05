@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncGenerator
@@ -7,6 +8,7 @@ from dataclasses import dataclass, field
 from types import TracebackType
 from typing import Any, Self, cast
 
+import httpx
 from openai import AsyncOpenAI, AsyncStream
 from openai.types.chat import ChatCompletionChunk
 
@@ -25,6 +27,18 @@ from milky_frog.domain import (
 _logger = logging.getLogger(__name__)
 
 
+# Default upstream timeout policy for chat-completions streams.
+#
+# The openai SDK's library default (``read=600s``) silently lets a stalled
+# upstream block the entire Run with no visible signal until it expires. We
+# pin an explicit default so changing SDK behaviour can't quietly lengthen
+# that window again. Reasoning models with long transcripts may legitimately
+# stream for >10 min; bump ``idle_chunk_timeout`` / ``timeout`` rather than
+# disabling this in code.
+_DEFAULT_TIMEOUT = httpx.Timeout(connect=30.0, read=600.0, write=600.0, pool=30.0)
+_DEFAULT_IDLE_CHUNK_TIMEOUT_SECONDS = 180.0
+
+
 class OpenAIModel:
     """OpenAI-compatible chat-completions adapter for the Harness.
 
@@ -41,6 +55,8 @@ class OpenAIModel:
         base_url: str | None = None,
         client: AsyncOpenAI | None = None,
         include_stream_usage: bool | None = None,
+        timeout: httpx.Timeout | None = None,
+        idle_chunk_timeout: float | None = None,
     ) -> None:
         self._api_key = api_key
         self._model = model
@@ -51,13 +67,26 @@ class OpenAIModel:
         self._include_stream_usage = (
             include_stream_usage if include_stream_usage is not None else base_url is None
         )
+        # Pin an explicit ``httpx.Timeout`` so we don't silently inherit an
+        # arbitrary SDK library default. Per-chunk idle deadline below is
+        # what actually catches a stalled mid-stream upstream.
+        self._timeout = timeout if timeout is not None else _DEFAULT_TIMEOUT
+        self._idle_chunk_timeout = (
+            idle_chunk_timeout
+            if idle_chunk_timeout is not None
+            else _DEFAULT_IDLE_CHUNK_TIMEOUT_SECONDS
+        )
 
     async def __aenter__(self) -> Self:
         if self._client is None:
             if self._injected_client is not None:
                 self._client = self._injected_client
             else:
-                self._client = AsyncOpenAI(api_key=self._api_key, base_url=self._base_url)
+                self._client = AsyncOpenAI(
+                    api_key=self._api_key,
+                    base_url=self._base_url,
+                    timeout=self._timeout,
+                )
         return self
 
     async def __aexit__(
@@ -104,8 +133,31 @@ class OpenAIModel:
         tool_fragments: dict[int, _ToolFragment] = {}
         usage = TokenUsage()
 
+        # Bound the gap between SSE chunks. ``httpx.ReadTimeout`` only fires when
+        # the *kernel* recv times out (10 min default) and never when the upstream
+        # silently stops emitting. Reset the budget after every chunk so a long,
+        # actively streaming response is unaffected.
+        aiter_stream = aiter(stream)
+        idle_chunk_timeout = self._idle_chunk_timeout
         try:
-            async for chunk in stream:
+            while True:
+                try:
+                    if idle_chunk_timeout > 0:
+                        try:
+                            chunk = await asyncio.wait_for(
+                                anext(aiter_stream), timeout=idle_chunk_timeout
+                            )
+                        except TimeoutError:
+                            _logger.warning(
+                                "Model stream idle for %.1fs; aborting (model=%s)",
+                                idle_chunk_timeout,
+                                self._model,
+                            )
+                            raise
+                    else:
+                        chunk = await anext(aiter_stream)
+                except StopAsyncIteration:
+                    break
                 if chunk.usage is not None:
                     usage = _token_usage(chunk.usage)
                 if not chunk.choices:

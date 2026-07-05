@@ -109,7 +109,10 @@ async def test_finish_failed_formats_httpx_read_timeout_helpfully(
     store.create_run(state.run_id, tmp_path)
 
     request = httpx.Request("POST", "https://api.deepseek.com/v1/chat/completions")
-    error = httpx.ReadTimeout("upstream stalled", request=request)
+    # Mirror the shape we see in the wild: ``str(error) == ""`` but a request
+    # attached, so ``f"{Type}: {error}"`` would have rendered as ``"ReadTimeout: "``.
+    error = httpx.ReadTimeout("", request=request)
+    assert str(error) == ""
 
     result = await dispatcher.finish_failed(state, error)
 
