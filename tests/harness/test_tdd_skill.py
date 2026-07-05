@@ -21,10 +21,10 @@ def test_tdd_skill_discovered_by_catalog(tmp_path: Path) -> None:
     skill_path = _install_fixture_skill(tmp_path)
     catalog = SkillCatalog(tmp_path / "missing-user-skills", tmp_path / PROJECT_DIRNAME / "skills")
 
-    summaries = catalog.summaries()
-    assert len(summaries) == 1
-    assert summaries[0].name == "tdd"
-    assert "test-first" in summaries[0].description
+    # Bundled skills are always present — find the test fixture by name.
+    summaries = {summary.name: summary for summary in catalog.summaries()}
+    assert "tdd" in summaries
+    assert "test-first" in summaries["tdd"].description
 
     loaded = catalog.load("tdd")
     assert loaded.path == skill_path

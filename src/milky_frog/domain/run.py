@@ -99,4 +99,10 @@ class RunState:
     reasoning_log: tuple[str, ...] = ()
     usage: RunUsage = field(default_factory=RunUsage)
     compaction: CompactionState | None = None
-    run_extra: tuple[str, ...] = ()  # ephemeral extra system-prompt sections, not persisted
+    run_extra: tuple[str, ...] = ()
+    """Extra eager system-prompt sections (e.g. activated-skill instructions).
+
+    ``ContextManager._system_message`` extends these into the system prompt on
+    every model call. Persisted in the snapshot so skill injection survives
+    ``resume`` / ``continue_with`` (see ADR-0014).
+    """

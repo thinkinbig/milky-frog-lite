@@ -95,6 +95,15 @@ class AgentSession:
         return self._model_name
 
     @property
+    def skills_home(self) -> Path:
+        """User-scope skills directory (``<home>/skills``).
+
+        Public accessor so UI surfaces can build a ``SkillCatalog`` without
+        reaching into ``_settings`` directly.
+        """
+        return self._settings.home / "skills"
+
+    @property
     def hub(self) -> EventHub:
         return _active(self._hub)
 

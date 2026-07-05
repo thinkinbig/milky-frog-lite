@@ -1075,7 +1075,7 @@ class MilkyFrogApp(App[None]):
         arg = parts[1].strip() if len(parts) > 1 else ""
 
         catalog = SkillCatalog(
-            self.session._settings.home / "skills",
+            self.session.skills_home,
             project_root(Path.cwd()) / "skills",
         )
 

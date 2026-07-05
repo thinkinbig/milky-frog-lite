@@ -12,8 +12,10 @@ from milky_frog.domain import (
     ModelRequest,
     ModelResponse,
     RunRequest,
+    RunStatus,
     StreamDone,
 )
+from milky_frog.events import EventHub
 from milky_frog.harness.context import ContextManager
 from milky_frog.harness.prompt import make_context_loader
 from milky_frog.harness.skills import SkillCatalog
@@ -38,8 +40,11 @@ def test_project_skill_overrides_user_skill(tmp_path: Path) -> None:
 
     catalog = SkillCatalog(user, project)
 
-    assert catalog.summaries()[0].description == "project description"
+    # Bundled skills are always discovered, so ``summaries()[0]`` is no longer
+    # guaranteed to be ``review``. Look up by name to assert the override.
     assert catalog.load("review").instructions == "project instructions"
+    descriptions = {name: description for name, description, _path in catalog.prompt_locations()}
+    assert descriptions["review"] == "project description"
 
 
 # ── ContextLoader ──────────────────────────────────────────────────────────
@@ -61,13 +66,56 @@ def test_context_loader_injects_skill_catalog_metadata(tmp_path: Path) -> None:
 
 
 def test_context_loader_returns_none_when_no_context(tmp_path: Path) -> None:
+    """When the loader has nothing to report it returns ``None``.
+
+    Bundled skills are always discoverable, so an empty workspace + empty home
+    is no longer enough to make the loader return ``None``. The only reachable
+    None path is now: bundled cache cleared *and* no user/project content.
+    Monkey-patch ``load_agent_context`` to simulate that case.
+    """
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+
+    from milky_frog.harness import prompt
+
+    loader = make_context_loader(home)
+    original = prompt.load_agent_context
+
+    def empty(workspace: Path, home: Path) -> object:  # type: ignore[no-untyped-def]
+        from milky_frog.harness.prompt_context import AgentContext
+
+        del workspace, home
+        return AgentContext()
+
+    prompt.load_agent_context = empty
+    try:
+        assert loader(workspace) is None
+    finally:
+        prompt.load_agent_context = original
+
+
+def test_context_loader_includes_bundled_skill_metadata(tmp_path: Path) -> None:
+    """Bundled skills always contribute to the context section, even with an
+    empty user home and empty workspace. The model can discover them by name."""
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     home = tmp_path / "home"
     home.mkdir()
 
     loader = make_context_loader(home)
-    assert loader(workspace) is None
+    section = loader(workspace)
+
+    assert section is not None
+    assert "<available_skills>" in section
+    # A known bundled skill must be present.
+    from milky_frog.harness.skills.catalog import _BUNDLED_DIR
+
+    bundled_names = {path.parent.name for path in _BUNDLED_DIR.glob("*/SKILL.md")}
+    assert bundled_names
+    for name in bundled_names:
+        assert f"<name>{name}</name>" in section
 
 
 def test_context_loader_project_skills_override_user_skills(tmp_path: Path) -> None:
@@ -135,3 +183,72 @@ async def test_skill_catalog_appears_in_system_message(tmp_path: Path) -> None:
     assert system_message.role is MessageRole.SYSTEM
     assert "<name>style</name>" in system_message.content
     assert "Style guide" in system_message.content
+
+
+# ── Resume: skill injection must survive checkpoint reload ────────────────
+
+
+@pytest.mark.asyncio
+async def test_run_extra_survives_checkpoint_reload(tmp_path: Path) -> None:
+    """``run_extra`` (eager skill injection) must round-trip through the snapshot,
+    otherwise resume / continue_with lose the activated-skill prompt and the
+    model no longer sees instructions that say 'apply throughout the task'."""
+
+    skill_text = '<active_skill name="review">\nAlways check edge cases.\n</active_skill>'
+
+    class RecordingModel:
+        """Records every system prompt the loop sees, then completes."""
+
+        def __init__(self) -> None:
+            self.system_prompts: list[str] = []
+
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            system = next((m for m in request.messages if m.role is MessageRole.SYSTEM), None)
+            assert system is not None
+            self.system_prompts.append(system.content)
+            yield StreamDone(ModelResponse(content="done"))
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    model = RecordingModel()
+    harness = make_harness(model, ToolRegistry(), store, EventHub())
+
+    first = await harness.run(
+        RunRequest("hello", workspace, skill_content=skill_text),
+    )
+    assert first.status is RunStatus.COMPLETED
+    assert skill_text in model.system_prompts[-1]
+
+    # Snapshot must persist the activated skill instructions (ADR-0014).
+    state_before = store.load_state(first.run_id)
+    assert state_before.run_extra == (skill_text,)
+
+    # Resume fires another model call — the skill prompt must still be there.
+    continued = await harness.resume(first.run_id, max_model_calls=5, prompt="again")
+    assert continued.status is RunStatus.COMPLETED
+    state_after = store.load_state(first.run_id)
+    assert state_after.run_extra == (skill_text,)
+    assert skill_text in model.system_prompts[-1]  # last model call after resume
+
+
+@pytest.mark.asyncio
+async def test_run_extra_drops_when_no_skill_injected(tmp_path: Path) -> None:
+    """Runs without ``skill_content`` must not gain a phantom prompt on resume
+    — backstop that the persisted field defaults to empty, not stale state."""
+
+    class NoOpModel:
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            yield StreamDone(ModelResponse(content="done"))
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    harness = make_harness(NoOpModel(), ToolRegistry(), store, EventHub())
+
+    first = await harness.run(RunRequest("hello", workspace))
+    assert first.status is RunStatus.COMPLETED
+
+    await harness.resume(first.run_id, max_model_calls=5, prompt="again")
+    loaded = store.load_state(first.run_id)
+    assert loaded.run_extra == ()
