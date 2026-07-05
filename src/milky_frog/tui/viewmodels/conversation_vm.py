@@ -61,6 +61,11 @@ class ConversationViewModel:
         self._tool_spinner_timer: Timer | None = None
         self._tool_frame_idx: int = 0
 
+        # Compaction state
+        self._compaction_widget: Static | None = None
+        self._compaction_spinner_timer: Timer | None = None
+        self._compaction_frame_idx: int = 0
+
     # ── Delegates to App ───────────────────────────────────────────
 
     def _append(self, renderable: RenderableType, *, spaced: bool = True) -> Static:
@@ -87,6 +92,7 @@ class ConversationViewModel:
     def on_thinking(self, text: str) -> None:
         """Accumulate reasoning chunks; update the live reasoning widget in place."""
         if self.phase != "thinking":
+            self._finalize_compaction()
             self.close_phase()
             self.phase = "thinking"
             self._thinking_frame_idx = 0
@@ -131,6 +137,7 @@ class ConversationViewModel:
     def on_text(self, text: str) -> None:
         """Accumulate answer chunks; update the live answer widget in place."""
         if self.phase != "answer":
+            self._finalize_compaction()
             self.close_phase()
             self.phase = "answer"
             self._answer_widget = self._append(
@@ -153,6 +160,7 @@ class ConversationViewModel:
 
     def on_tool_call(self, name: str, arguments: dict[str, JsonValue]) -> None:
         """Write the tool call signature, plus a colored diff for file edits."""
+        self._finalize_compaction()
         self.close_phase()
         signature = format_tool_signature(name, arguments)
         self._active_tool_signature = signature
@@ -187,9 +195,52 @@ class ConversationViewModel:
             )
             self._active_tool_widget = None
 
+    def on_compaction(self, from_count: int, to_count: int) -> None:
+        """Show compaction animation with spinner."""
+        self.close_phase()
+        self._compaction_frame_idx = 0
+        msg = f"📦 Compacting ({from_count} → {to_count} summary)"
+        self._compaction_widget = self._append(
+            Text.assemble(
+                (f"  {self._SPINNER_FRAMES[0]} ", "dim yellow"),
+                (msg, "dim"),
+            ),
+            spaced=False,
+        )
+        if self._compaction_spinner_timer is None:
+            self._compaction_spinner_timer = self._set_interval(0.1, self._tick_compaction_spinner)
+        self._scroll_end()
+
+    def _tick_compaction_spinner(self) -> None:
+        if self._compaction_widget is not None:
+            idx = (self._compaction_frame_idx + 1) % len(self._SPINNER_FRAMES)
+            self._compaction_frame_idx = idx
+            spinner = self._SPINNER_FRAMES[idx]
+            self._compaction_widget.update(
+                Text.assemble(
+                    (f"  {spinner} ", "dim yellow"),
+                    ("📦 Compacting...", "dim"),
+                )
+            )
+
+    def _finalize_compaction(self) -> None:
+        if self._compaction_spinner_timer is not None:
+            self._compaction_spinner_timer.stop()
+            self._compaction_spinner_timer = None
+        widget = self._compaction_widget
+        self._compaction_widget = None
+        if widget is not None:
+            widget.update(
+                Text.assemble(
+                    ("  ✓ ", "green"),
+                    ("Consolidated", "dim"),
+                )
+            )
+
     def finish(self) -> None:
         """Reset all streaming/tool state (called when a Run finishes)."""
         self.close_phase()
+        self._finalize_compaction()
         if self._tool_spinner_timer is not None:
             self._tool_spinner_timer.stop()
             self._tool_spinner_timer = None

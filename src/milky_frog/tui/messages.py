@@ -136,3 +136,12 @@ class BashOutputMsg(Message):
         super().__init__()
         self.content = content
         self.is_error = is_error
+
+
+class CompactionMsg(Message):
+    """Transcript compaction started."""
+
+    def __init__(self, from_count: int, to_count: int) -> None:
+        super().__init__()
+        self.from_count = from_count
+        self.to_count = to_count

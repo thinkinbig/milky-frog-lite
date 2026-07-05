@@ -93,6 +93,34 @@ async def test_finish_failed_returns_result_and_notifies(tmp_path: Path) -> None
 
 
 @pytest.mark.asyncio
+async def test_finish_failed_formats_httpx_read_timeout_helpfully(
+    tmp_path: Path,
+) -> None:
+    """A bare ``httpx.ReadTimeout`` (empty ``str()``) must still produce a
+    final_message that tells the user *which* upstream hung.
+    Without this, the UI shows ``"ReadTimeout: "`` with nothing after the colon.
+    """
+    import httpx
+
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    registry = EventHub()
+    dispatcher = _make_dispatcher(store, registry)
+    state = RunState(run_id="run-3", workspace=tmp_path)
+    store.create_run(state.run_id, tmp_path)
+
+    request = httpx.Request("POST", "https://api.deepseek.com/v1/chat/completions")
+    error = httpx.ReadTimeout("upstream stalled", request=request)
+
+    result = await dispatcher.finish_failed(state, error)
+
+    assert result.status is RunStatus.FAILED
+    final = result.final_message
+    assert final.startswith("ReadTimeout"), final
+    assert "api.deepseek.com" in final, final
+    assert final != "ReadTimeout: ", final
+
+
+@pytest.mark.asyncio
 async def test_turn_started_notifies_handler(tmp_path: Path) -> None:
     registry = EventHub()
     seen: list[RunTurnStart] = []

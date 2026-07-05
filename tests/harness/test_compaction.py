@@ -116,16 +116,22 @@ def test_apply_control_folds_compacted_into_state() -> None:
     state = _state((Message(MessageRole.USER, "hi"),))
     compaction = CompactionState(summary="earlier", through_index=1)
 
-    updated = _apply_control(state, [Compacted(compaction)])
+    updated, from_count, to_count = _apply_control(state, [Compacted(compaction)])
 
     assert updated.compaction == compaction
     assert state.compaction is None  # the original state is untouched
+    assert from_count == 1
+    assert to_count == 1
 
 
 def test_apply_control_returns_same_state_when_no_results() -> None:
     state = _state((Message(MessageRole.USER, "hi"),))
 
-    assert _apply_control(state, []) is state
+    updated, from_count, to_count = _apply_control(state, [])
+
+    assert updated is state
+    assert from_count == 0
+    assert to_count == 0
 
 
 def _handler(*, trigger_tokens: int, keep_recent_tokens: int) -> CompactionHandler:

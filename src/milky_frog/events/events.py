@@ -166,6 +166,17 @@ class RunNotice(BaseEvent):
     level: NoticeLevel = "info"
 
 
+@dataclass(frozen=True)
+class RunCompaction(BaseEvent):
+    """Transcript compaction occurred.
+
+    Fired when compaction applies to the state, carrying metadata for UI animation.
+    """
+
+    from_count: int
+    to_count: int
+
+
 LIFECYCLE_EVENT_TYPES: tuple[type[BaseEvent], ...] = (
     RunBeforeStart,
     RunBeforeResume,
@@ -183,4 +194,5 @@ LIFECYCLE_EVENT_TYPES: tuple[type[BaseEvent], ...] = (
     RunCancelled,
     RunFailed,
     RunNotice,
+    RunCompaction,
 )

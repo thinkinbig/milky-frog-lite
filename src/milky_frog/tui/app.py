@@ -28,6 +28,7 @@ from milky_frog.tui.messages import (
     ApprovalOptionSelected,
     ApprovalRequired,
     BashOutputMsg,
+    CompactionMsg,
     GitOutputMsg,
     GrepOutputMsg,
     RunError,
@@ -326,6 +327,9 @@ class MilkyFrogApp(App[None]):
         self._conv.render_error(event.error)
         self.query_one(RunStatusBar).set_ready()
         self._enable_input_focus()
+
+    def on_compaction_msg(self, event: CompactionMsg) -> None:
+        self._conv.on_compaction(event.from_count, event.to_count)
 
     def on_run_notice_msg(self, event: RunNoticeMsg) -> None:
         self._conv.render_notification(event.message, event.level)

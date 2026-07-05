@@ -13,6 +13,7 @@ from milky_frog.events.events import (
     RunBeforeModel,
     RunBeforeTool,
     RunCancelled,
+    RunCompaction,
     RunCompleted,
     RunFailed,
     RunModelChunk,
@@ -26,6 +27,7 @@ from milky_frog.tui.messages import (
     AddText,
     AddThinking,
     ApprovalRequired,
+    CompactionMsg,
     RunFinished,
     RunNoticeMsg,
     ToolCallMsg,
@@ -57,6 +59,7 @@ class TuiPresentationHandler(Handler):
         hub.on(RunAfterModel)(self._on_after_model)
         hub.on(RunBeforeTool)(self._on_before_tool)
         hub.on(RunAfterTool)(self._on_after_tool)
+        hub.on(RunCompaction)(self._on_compaction)
         hub.on(RunNotice)(self._on_notice)
         hub.on(RunPaused)(self._on_paused)
         hub.on(RunCompleted)(self._on_terminal)
@@ -93,6 +96,9 @@ class TuiPresentationHandler(Handler):
         call = event.call
         result = event.result
         self._emit(ToolResultMsg(call.name, content=result.content, is_error=result.is_error))
+
+    async def _on_compaction(self, event: RunCompaction, deps: HandlerDeps | None = None) -> None:
+        self._emit(CompactionMsg(event.from_count, event.to_count))
 
     async def _on_notice(self, event: RunNotice, deps: HandlerDeps | None = None) -> None:
         self._emit(RunNoticeMsg(event.message, level=event.level))

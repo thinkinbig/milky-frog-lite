@@ -37,18 +37,23 @@ if TYPE_CHECKING:
     from milky_frog.harness.budget import TokenBudget
 
 
-def _apply_control(state: RunState, results: list[HandlerResult]) -> RunState:
+def _apply_control(state: RunState, results: list[HandlerResult]) -> tuple[RunState, int, int]:
     """Apply Handler control proposals from ``before_model`` to the ``RunState``.
 
     The loop owns RunState evolution; Handlers only propose. Handles
     ``Compacted`` (from ``before_model``); ``VerificationNotice`` is applied
     inline in the tool loop (after ``after_tool``).
+
+    Returns: (updated state, from_count, to_count) — counts are 0 if no compaction
     """
+    from_count, to_count = 0, 0
     for result in results:
         match result:
             case Compacted(compaction):
+                from_count = compaction.through_index
+                to_count = 1
                 state = replace(state, compaction=compaction)
-    return state
+    return state, from_count, to_count
 
 
 class AgentLoop:
@@ -104,9 +109,11 @@ class AgentLoop:
                 model_call = state.completed_model_calls + 1
                 await self._hub.turn_started(run_id, model_call=model_call)
                 shaping = await self._hub.before_model(run_id, request, state)
-                shaped = _apply_control(state, shaping)
+                shaped, from_count, to_count = _apply_control(state, shaping)
                 if shaped is not state:
                     state = shaped
+                    if from_count > 0:
+                        await self._hub.run_compaction(run_id, from_count, to_count)
                     request = ModelRequest(
                         self._context.assemble(state), self._tools.schemas(), run_id=run_id
                     )

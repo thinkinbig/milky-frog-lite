@@ -30,6 +30,20 @@ def test_is_retriable_model_error_for_connection_failures() -> None:
     assert is_retriable_model_error(ValueError("bad request")) is False
 
 
+def test_is_retriable_model_error_for_httpx_timeouts() -> None:
+    """Bare ``httpx.ReadTimeout`` during streaming must also retry.
+
+    During the body read (after the connection is up), the openai SDK bubbles
+    the raw ``httpx.ReadTimeout`` instead of wrapping it as ``APITimeoutError``.
+    Without recognising that, a transient stall aborts the whole Run.
+    """
+    import httpx
+
+    assert is_retriable_model_error(httpx.ReadTimeout("read timed out")) is True
+    assert is_retriable_model_error(httpx.ConnectTimeout("connect timed out")) is True
+    assert is_retriable_model_error(httpx.WriteTimeout("write timed out")) is True
+
+
 @pytest.mark.asyncio
 async def test_retries_retriable_model_errors_and_emits_run_notice(
     tmp_path: Path, instant_retry_sleep: list[float]

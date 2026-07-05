@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import contextlib
+import time
 from collections.abc import AsyncIterator
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 
 from milky_frog.domain import (
@@ -206,3 +208,107 @@ async def test_stream_omits_tools_when_none_requested() -> None:
             pass
 
     assert "tools" not in client.captured
+
+
+def test_openai_model_forwards_timeout_to_async_openai(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``OpenAIModel`` must hand a configured ``timeout`` down to ``AsyncOpenAI``.
+
+    Without this, an upstream that hangs after sending headers would only be
+    caught by the SDK's 600 s default — long enough that a Run appears to hang
+    forever in the UI.
+    """
+    captured: dict[str, Any] = {}
+
+    class _CapturingAsyncOpenAI:
+        def __init__(self, **kwargs: Any) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr("milky_frog.models.openai.AsyncOpenAI", _CapturingAsyncOpenAI)
+    timeout = httpx.Timeout(connect=30, read=600, write=600, pool=30)
+
+    model = OpenAIModel(api_key="k", model="m", base_url="https://x.test/v1", timeout=timeout)
+
+    async def _enter() -> None:
+        await model.__aenter__()
+
+    import asyncio
+
+    asyncio.run(_enter())
+
+    assert captured["api_key"] == "k"
+    assert captured["base_url"] == "https://x.test/v1"
+    assert captured["timeout"] is timeout
+
+
+def test_openai_model_default_timeout_is_explicit() -> None:
+    """Even without an injected ``timeout``, the underlying client gets one.
+
+    The default is wired through ``__aenter__`` so a free-form ``AsyncOpenAI()``
+    cannot silently inherit an unknown SDK default.
+    """
+    captured: dict[str, Any] = {}
+
+    class _CapturingAsyncOpenAI:
+        def __init__(self, **kwargs: Any) -> None:
+            captured.update(kwargs)
+
+    import asyncio
+    from unittest.mock import patch
+
+    async def _exercise() -> None:
+        with patch("milky_frog.models.openai.AsyncOpenAI", _CapturingAsyncOpenAI):
+            model = OpenAIModel(api_key="k", model="m")
+            await model.__aenter__()
+            await model.aclose()
+
+    asyncio.run(_exercise())
+    assert isinstance(captured["timeout"], httpx.Timeout)
+
+
+class _HangingStream:
+    """Async stream that yields one chunk then blocks indefinitely."""
+
+    def __init__(self) -> None:
+        self.closed = False
+        self._first_chunk_yielded = False
+
+    def __aiter__(self) -> AsyncIterator[Any]:
+        return self
+
+    async def __anext__(self) -> Any:
+        if not self._first_chunk_yielded:
+            self._first_chunk_yielded = True
+            return _chunk(content="hi")
+        # Simulate an upstream that stopped sending and never times out via httpx.
+        await asyncio.sleep(60)
+        raise AssertionError("idle timeout did not fire")
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_openai_model_stream_raises_on_idle_chunk_timeout() -> None:
+    """A stalled mid-stream upstream must surface a TimeoutError, not hang."""
+    import asyncio
+
+    client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(
+                create=lambda **_kwargs: _HangingStream(),
+            ),
+        ),
+    )
+    model = OpenAIModel(
+        api_key="k",
+        model="m",
+        client=client,  # type: ignore[arg-type]
+        idle_chunk_timeout=0.1,
+    )
+
+    with pytest.raises((TimeoutError, asyncio.TimeoutError)):
+        async with model:
+            async for _ in model.stream(ModelRequest((Message(MessageRole.USER, "hi"),), ())):
+                pass
