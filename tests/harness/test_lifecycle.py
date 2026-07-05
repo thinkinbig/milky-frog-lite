@@ -10,6 +10,7 @@ import pytest
 from pydantic import BaseModel
 
 from milky_frog.checkpoint import SqliteCheckpointStore
+from milky_frog.core.handlers import HandlerDeps
 from milky_frog.domain import (
     ModelChunk,
     ModelRequest,
@@ -20,9 +21,11 @@ from milky_frog.domain import (
     RunStatus,
     StreamDone,
     ToolCall,
+    VerificationNotice,
 )
 from milky_frog.events import (
     EventHub,
+    RunAfterTool,
     RunBeforeTool,
     RunCancelled,
     RunFailed,
@@ -31,6 +34,7 @@ from milky_frog.events import (
     RunTurnEnd,
     RunTurnStart,
 )
+from milky_frog.events.hub import Handler
 from milky_frog.harness.tools import ToolContext, ToolRegistry, ToolResult
 from tests.checkpoint_helpers import run_status, tool_messages
 from tests.stubs import EchoTool, FakeModel, SlowStreamModel, make_harness
@@ -409,3 +413,49 @@ async def test_turn_events_fire_before_complete(tmp_path: Path) -> None:
         "RunTurnEnd",
         "RunCompleted",
     ]
+
+
+@pytest.mark.asyncio
+async def test_after_tool_applies_verification_notice(tmp_path: Path) -> None:
+    """VerificationNotice returned from after_tool is injected as a synthetic tool result."""
+    registry = EventHub()
+
+    # Build a stub handler that returns VerificationNotice on after_tool.
+    class StubVerification(Handler):
+        def register(self, hub: EventHub) -> None:
+            hub.on(RunAfterTool)(self._on_after_tool)
+
+        async def _on_after_tool(
+            self, event: RunAfterTool, deps: HandlerDeps
+        ) -> VerificationNotice | None:
+            if event.call.name == "echo":
+                return VerificationNotice(
+                    summary="$ uv run ruff check .\nAll good!",
+                    exit_code_summary="all pass",
+                )
+            return None
+
+    stub = StubVerification()
+    stub.register(registry)
+
+    harness = make_harness(
+        model=FakeModel(),
+        tools=ToolRegistry((EchoTool(),)),
+        checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
+        hub=registry,
+    )
+
+    result = await harness.run(RunRequest("echo hello", tmp_path))
+
+    assert result.status is RunStatus.COMPLETED
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    state = store.load_state(result.run_id)
+    assert state is not None
+    # The verification synthetic tool result should appear in the transcript.
+    tool_msgs = [m for m in state.messages if m.role.value == "tool"]
+    verification_msgs = [
+        m for m in tool_msgs if m.tool_call_id == "__verification__"
+    ]
+    assert len(verification_msgs) == 1
+    assert "uv run ruff check" in verification_msgs[0].content
+    assert "All good!" in verification_msgs[0].content

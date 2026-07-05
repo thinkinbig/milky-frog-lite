@@ -20,7 +20,10 @@ from milky_frog.domain import (
     RunState,
     StreamDone,
     TextDelta,
+    ToolCall,
+    ToolResult,
     ToolRunCancelled,
+    VerificationNotice,
     is_cancelled,
 )
 from milky_frog.events.hub import EventHub
@@ -37,8 +40,9 @@ if TYPE_CHECKING:
 def _apply_control(state: RunState, results: list[HandlerResult]) -> RunState:
     """Apply Handler control proposals from ``before_model`` to the ``RunState``.
 
-    The loop owns RunState evolution; Handlers only propose. Today the sole
-    proposal is ``Compacted``; add a ``case`` here when a new control point lands.
+    The loop owns RunState evolution; Handlers only propose. Handles
+    ``Compacted`` (from ``before_model``); ``VerificationNotice`` is applied
+    inline in the tool loop (after ``after_tool``).
     """
     for result in results:
         match result:
@@ -149,7 +153,23 @@ class AgentLoop:
                         return outcome
 
                     state = append_tool_result(state, call, outcome)
-                    await self._hub.after_tool(run_id, call, outcome, state)
+                    after_results = await self._hub.after_tool(run_id, call, outcome, state)
+                    for after_result in after_results:
+                        if isinstance(after_result, VerificationNotice):
+                            state = append_tool_result(
+                                state,
+                                ToolCall(
+                                    id="__verification__",
+                                    name="verification",
+                                    arguments={},
+                                ),
+                                ToolResult(
+                                    content=after_result.summary,
+                                    is_error=(
+                                        "FAILED" in after_result.exit_code_summary
+                                    ),
+                                ),
+                            )
 
                 model_call = state.completed_model_calls
                 await self._hub.turn_ended(run_id, model_call=model_call)
