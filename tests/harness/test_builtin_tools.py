@@ -20,7 +20,10 @@ def _context(
     workspace: Path, config: ProjectConfig | None = None, search_prefix: str = ""
 ) -> ToolContext:
     return ToolContext(
-        "run-1", workspace, sandbox=LocalSandbox(workspace, config=config), search_prefix=search_prefix
+        "run-1",
+        workspace,
+        sandbox=LocalSandbox(workspace, config=config),
+        search_prefix=search_prefix,
     )
 
 
