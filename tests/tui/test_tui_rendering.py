@@ -57,7 +57,7 @@ def test_summarize_tool_result_empty_distinguishes_error() -> None:
 
 
 def test_matching_commands_filters_by_prefix() -> None:
-    assert [command.name for command in matching_commands("/c")] == ["/clear"]
+    assert [command.name for command in matching_commands("/c")] == ["/clear", "/compact"]
     assert matching_commands("/zzz") == ()
 
 

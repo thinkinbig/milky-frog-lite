@@ -414,6 +414,10 @@ class MilkyFrogApp(App[None]):
             self._skills.handle_command(task)
             return
 
+        if command == "/compact":
+            self._handle_compact()
+            return
+
         self._start_run(task, run_id=self.session.run_id)
 
     def _handle_resume(self, task: str) -> None:
@@ -429,6 +433,20 @@ class MilkyFrogApp(App[None]):
             prompt=parsed.prompt,
             advance_pending=False,
         )
+
+    def _handle_compact(self) -> None:
+        """Force-compact the current Run's transcript."""
+        run_id = self.session.run_id
+        if run_id is None:
+            self._conv.render_error("No active run to compact.", hint="Start a task first.")
+            return
+
+        self.session.busy = True
+        self.query_one(RunStatusBar).set_working()
+        self.query_one("#prompt-input", PromptInput).disabled = True
+
+        self._worker = self._do_compact(run_id)
+        self.session.attach_worker(self._worker.cancel)
 
     def _attach_or_continue_run(
         self,
@@ -531,6 +549,38 @@ class MilkyFrogApp(App[None]):
                 )
             )
             raise
+
+    @work(thread=False, exit_on_error=False)
+    async def _do_compact(self, run_id: str) -> None:
+        """Worker: force compaction, show result or error in conversation."""
+        try:
+            summary = await self.session.compact(run_id)
+        except Exception as error:
+            self.post_message(RunError(f"Compaction failed: {error}"))
+            return
+
+        self._worker = None
+        self.session.attach_worker(None)
+        self.session.busy = False
+        self.query_one(RunStatusBar).set_ready()
+        self.query_one("#prompt-input", PromptInput).disabled = False
+        self.query_one("#prompt-input", Input).focus()
+
+        if summary:
+            self._append(
+                Panel(
+                    Text(summary, style="dim"),
+                    title="Compacted · transcript summarised",
+                    border_style="cyan",
+                )
+            )
+        else:
+            self._append(
+                Text(
+                    "Compacted — transcript fits within budget; nothing to summarise.",
+                    style="dim",
+                )
+            )
 
     @work(thread=False, exit_on_error=False)
     async def _do_run(self, task: str, run_id: str | None) -> None:
