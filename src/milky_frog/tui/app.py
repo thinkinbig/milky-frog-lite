@@ -292,9 +292,18 @@ class MilkyFrogApp(App[None]):
     def on_update_usage(self, event: UpdateUsage) -> None:
         self.query_one(RunStatusBar).set_usage(event.usage)
 
-    def on_run_finished(self, event: RunFinished) -> None:
+    def _clear_worker(self) -> None:
+        """Clean up worker reference and notify session."""
         self._worker = None
         self.session.attach_worker(None)
+
+    def _enable_input_focus(self) -> None:
+        """Enable prompt input and focus it."""
+        self.query_one("#prompt-input", Input).disabled = False
+        self.query_one("#prompt-input", Input).focus()
+
+    def on_run_finished(self, event: RunFinished) -> None:
+        self._clear_worker()
         self._conv.finish()
 
         status_bar = self.query_one(RunStatusBar)
@@ -309,17 +318,14 @@ class MilkyFrogApp(App[None]):
         status_bar.set_run_id(event.result.run_id)
         status_bar.set_usage(event.result.usage or RunUsage())
         status_bar.set_ready()
-        self.query_one("#prompt-input", Input).disabled = False
-        self.query_one("#prompt-input", Input).focus()
+        self._enable_input_focus()
 
     def on_run_error(self, event: RunError) -> None:
-        self._worker = None
-        self.session.attach_worker(None)
+        self._clear_worker()
         self._conv.close_phase()
         self._conv.render_error(event.error)
         self.query_one(RunStatusBar).set_ready()
-        self.query_one("#prompt-input", Input).disabled = False
-        self.query_one("#prompt-input", Input).focus()
+        self._enable_input_focus()
 
     def on_run_notice_msg(self, event: RunNoticeMsg) -> None:
         self._conv.render_notification(event.message, event.level)
@@ -536,7 +542,8 @@ class MilkyFrogApp(App[None]):
     @work(thread=False, exit_on_error=False)
     async def _do_continue(self, run_id: str) -> None:
         try:
-            await self.session.continue_with(run_id)
+            selected = tuple(sorted(self._skills.active)) if self._skills.touched else None
+            await self.session.continue_with(run_id, selected_skills=selected)
         except ResumeError as error:
             self.post_message(RunError(str(error)))
         except asyncio.CancelledError:
@@ -555,32 +562,29 @@ class MilkyFrogApp(App[None]):
         """Worker: force compaction, show result or error in conversation."""
         try:
             summary = await self.session.compact(run_id)
-        except Exception as error:
-            self.post_message(RunError(f"Compaction failed: {error}"))
-            return
-
-        self._worker = None
-        self.session.attach_worker(None)
-        self.session.busy = False
-        self.query_one(RunStatusBar).set_ready()
-        self.query_one("#prompt-input", PromptInput).disabled = False
-        self.query_one("#prompt-input", Input).focus()
-
-        if summary:
-            self._append(
-                Panel(
-                    Text(summary, style="dim"),
-                    title="Compacted · transcript summarised",
-                    border_style="cyan",
-                )
-            )
+        except ValueError as error:
+            self.post_message(RunError(str(error)))
         else:
-            self._append(
-                Text(
-                    "Compacted — transcript fits within budget; nothing to summarise.",
-                    style="dim",
+            if summary:
+                self._append(
+                    Panel(
+                        Text(summary, style="dim"),
+                        title="Compacted · transcript summarised",
+                        border_style="cyan",
+                    )
                 )
-            )
+            else:
+                self._append(
+                    Text(
+                        "Compacted — transcript fits within budget; nothing to summarise.",
+                        style="dim",
+                    )
+                )
+        finally:
+            self._clear_worker()
+            self.session.busy = False
+            self.query_one(RunStatusBar).set_ready()
+            self._enable_input_focus()
 
     @work(thread=False, exit_on_error=False)
     async def _do_run(self, task: str, run_id: str | None) -> None:

@@ -57,7 +57,7 @@ asyncio_mode = "auto"
 omit = [
   "src/milky_frog/__main__.py",
   "src/milky_frog/cli/*",
-  "src/milky_frog/ui/*",
+  "src/milky_frog/tui/*",
 ]
 
 [tool.ruff]

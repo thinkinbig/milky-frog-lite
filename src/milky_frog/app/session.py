@@ -351,7 +351,10 @@ class AgentSession:
         model = _active(self._model)
         counter = _active(self._counter)
         ck = _active(self._checkpoints)
-        state = ck.load_state(run_id)
+        try:
+            state = ck.load_state(run_id)
+        except LookupError:
+            raise ValueError(f"Run not found: {run_id}") from None
 
         compaction = await CompactionHandler.force_compact(model, counter, state)
         if compaction is None:
@@ -367,7 +370,10 @@ class AgentSession:
     def compaction_summary_text(self, run_id: str) -> str:
         """Return the current compaction summary for *run_id* (empty string if none)."""
         ck = _active(self._checkpoints)
-        state = ck.load_state(run_id)
+        try:
+            state = ck.load_state(run_id)
+        except LookupError:
+            return ""
         return state.compaction.summary if state.compaction else ""
 
     @staticmethod

@@ -81,14 +81,11 @@ class SkillsViewModel:
         self._touched = True
         self._update_placeholder()
 
-    def _show_picker(self, catalog: SkillCatalog, summaries: tuple[SkillSummary, ...]) -> None:
+    def _show_picker(self, _catalog: SkillCatalog, summaries: tuple[SkillSummary, ...]) -> None:
         counter = ApproxCharCounter()
         entries: list[tuple[SkillSummary, int]] = []
         for s in summaries:
-            try:
-                tok = counter.count_text(catalog.load(s.name).instructions)
-            except Exception:
-                tok = 0
+            tok = counter.count_text(s.name + "\n" + s.description)
             entries.append((s, tok))
         if self._picker is not None:
             self._picker.remove()
