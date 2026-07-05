@@ -12,6 +12,7 @@ from milky_frog.events.loop import AgentLoop
 from milky_frog.events.tool_step import ToolStepExecutor
 from milky_frog.handlers.checkpoint import CheckpointHandler
 from milky_frog.handlers.langfuse import LangfuseHandler
+from milky_frog.handlers.verification import VerificationHandler
 from milky_frog.harness.budget import TokenBudget
 from milky_frog.harness.context import ContextManager
 from milky_frog.harness.harness import AgentHarness
@@ -28,6 +29,7 @@ def make_session_handlers(
     checkpoints: CheckpointStore,
     *,
     extra: Sequence[Handler] = (),
+    sandbox_factory: SandboxFactory = LocalSandbox,
 ) -> list[Handler]:
     """Assemble every lifecycle handler for a session, in one place.
 
@@ -39,6 +41,7 @@ def make_session_handlers(
     """
     handlers: list[Handler] = [
         CheckpointHandler(checkpoints),
+        VerificationHandler(sandbox_factory),
     ]
     handlers.extend(extra)
     langfuse = LangfuseHandler.from_settings(settings)
