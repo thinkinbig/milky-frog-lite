@@ -16,8 +16,26 @@ from milky_frog.harness.tools.builtins import (
 from milky_frog.project import ProjectConfig
 
 
-def _context(workspace: Path, config: ProjectConfig | None = None) -> ToolContext:
-    return ToolContext("run-1", workspace, sandbox=LocalSandbox(workspace, config=config))
+def _context(
+    workspace: Path, config: ProjectConfig | None = None, search_prefix: str = ""
+) -> ToolContext:
+    return ToolContext(
+        "run-1", workspace, sandbox=LocalSandbox(workspace, config=config), search_prefix=search_prefix
+    )
+
+
+def test_tool_context_make_output_path_with_prefix(tmp_path: Path) -> None:
+    ctx = _context(tmp_path, search_prefix="src")
+    assert ctx.make_output_path("module.py") == "src/module.py"
+    assert ctx.make_output_path("subdir/file.py") == "src/subdir/file.py"
+
+
+def test_tool_context_make_output_path_without_prefix(tmp_path: Path) -> None:
+    ctx = _context(tmp_path, search_prefix="")
+    assert ctx.make_output_path("module.py") == "module.py"
+
+    ctx_dot = _context(tmp_path, search_prefix=".")
+    assert ctx_dot.make_output_path("module.py") == "module.py"
 
 
 def test_default_tools_exposes_all_builtin_tools() -> None:

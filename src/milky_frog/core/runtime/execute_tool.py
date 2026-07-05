@@ -24,12 +24,14 @@ async def execute_tool(
 ) -> ToolResult:
     """Execute one tool call with cancellation polling."""
     tool = tools.get(call.name)
+    search_prefix = _extract_search_prefix(call.arguments)
     context = ToolContext(
         run_id,
         workspace,
         cancellation,
         sandbox=sandbox,
         token_counter=token_counter,
+        search_prefix=search_prefix,
     )
     try:
         input_model = tool.input_model.model_validate(call.arguments)
@@ -39,6 +41,20 @@ async def execute_tool(
     except Exception as error:
         result = ToolResult(f"{type(error).__name__}: {error}", is_error=True)
     return result
+
+
+def _extract_search_prefix(arguments: dict[str, Any]) -> str:
+    """Extract the search path from tool arguments to use as path prefix for output.
+
+    Tools that search in subdirectories (grep, bash, etc.) need to output paths
+    that are workspace-relative. This function extracts the 'path' argument
+    (which is the search scope) and returns it as a prefix, defaulting to "" if
+    the path is "." or missing.
+    """
+    path = arguments.get("path", ".")
+    if isinstance(path, str) and path != ".":
+        return path
+    return ""
 
 
 async def wait_for_cancellation(cancellation: RunCancellation) -> None:
