@@ -11,7 +11,7 @@ Create thorough implementation plans for multi-step tasks before coding, assumin
 
 **Start announcement:** "I'm using the writing-plans skill to create the implementation plan."
 
-**Save location:** `docs/plans/YYYY-MM-DD-<feature-name>.md`
+**Save location:** `/tmp/milky-frog/plans/YYYY-MM-DD-<feature-name>.md`
 
 ## File Structure
 
@@ -118,4 +118,4 @@ After completing plan:
 
 ## Execution Handoff
 
-After saving plan: "Plan complete and saved to `docs/plans/<filename>.md`. Ready to execute with the executing-plans skill."
+After saving plan: "Plan complete and saved to `/tmp/milky-frog/plans/<filename>.md`. Ready to execute with the executing-plans skill."

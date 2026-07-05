@@ -18,7 +18,7 @@ This applies universally, regardless of project complexity. There is no "this is
 3. **Propose 2–3 approaches** — each with concrete trade-offs
 4. **Present design sections** — seek approval after each section
 5. **Scale to complexity** — a few sentences for simple items, up to 300 words for nuanced sections
-6. **Write the spec** — save to `docs/specs/YYYY-MM-DD-<topic>-design.md`
+6. **Write the spec** — save to `/tmp/milky-frog/specs/YYYY-MM-DD-<topic>-design.md`
 7. **Self-review the spec** — check for placeholders, contradictions, ambiguity
 8. **Request user review** — do not proceed until approved
 9. **Invoke writing-plans** — the only implementation action that follows brainstorming
