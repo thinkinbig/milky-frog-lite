@@ -7,13 +7,14 @@ description: Review code for correctness bugs, type safety, style violations, an
 
 ## Running checks
 
-Before reviewing manually, run all CI checks at once:
+Before reviewing manually, run the standard verification commands:
 
-```bash
-bash .milky-frog/skills/code-review/scripts/run_checks.sh
-```
+    uv run pytest
+    uv run ruff check .
+    uv run ruff format --check .
+    uv run pyrefly check
 
-This runs pytest → ruff check → ruff format --check → pyrefly in order, stopping on first failure.
+Run them in that order and stop on the first failure.
 
 ## Order of review
 
