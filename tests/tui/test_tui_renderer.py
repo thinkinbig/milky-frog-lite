@@ -18,13 +18,13 @@ from milky_frog.events.events import (
     RunNotice,
     RunPaused,
 )
-from milky_frog.ui.messages import (
+from milky_frog.tui.messages import (
     AddText,
     ApprovalRequired,
     RunNoticeMsg,
     UpdateUsage,
 )
-from milky_frog.ui.presentation import TuiPresentationHandler
+from milky_frog.tui.presentation import TuiPresentationHandler
 
 _WORKSPACE = Path("/tmp")
 

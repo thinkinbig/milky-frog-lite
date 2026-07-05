@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from milky_frog.domain import RunUsage, TokenUsage
-from milky_frog.ui.usage import context_fraction, format_context_meter, format_run_usage
+from milky_frog.tui.usage import context_fraction, format_context_meter, format_run_usage
 
 
 def test_token_usage_total_and_recorded() -> None:

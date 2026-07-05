@@ -9,7 +9,7 @@ from textual.message import Message
 from milky_frog.core.handlers import HandlerDeps
 from milky_frog.events.events import RunAfterTool
 from milky_frog.events.hub import EventHub, Handler
-from milky_frog.ui.messages import BashOutputMsg, GitOutputMsg, GrepOutputMsg
+from milky_frog.tui.messages import BashOutputMsg, GitOutputMsg, GrepOutputMsg
 
 Emit = Callable[[Message], object]
 

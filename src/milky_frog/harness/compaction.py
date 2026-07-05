@@ -118,6 +118,66 @@ class CompactionHandler(Handler):
         )
         return await self._stream_final_content(request)
 
+    @staticmethod
+    async def force_compact(
+        model: Model,
+        counter: TokenCounter,
+        state: RunState,
+        *,
+        keep_recent_tokens: int = 0,
+    ) -> CompactionState | None:
+        """Summarise **all** messages in *state* into a ``CompactionState``.
+
+        When ``keep_recent_tokens > 0`` only messages before the keep window
+        are summarised (matching the automatic path); otherwise everything is
+        folded.
+        """
+        messages = state.messages
+        threshold = keep_recent_tokens or 0
+        already = state.compaction.through_index if state.compaction is not None else 0
+        if not already < len(messages):
+            return None
+        if threshold > 0:
+            kept = 0
+            cut = len(messages)
+            for i in range(len(messages) - 1, already - 1, -1):
+                kept += counter.count_text(message_count_dict(messages[i])["content"])
+                if kept > threshold:
+                    cut = i
+                    break
+            else:
+                return None
+            while cut < len(messages) and messages[cut].role is MessageRole.TOOL:
+                cut += 1
+            if not already < cut < len(messages):
+                return None
+        else:
+            cut = len(messages)
+
+        parts: list[str] = []
+        if state.compaction is not None:
+            parts.append(f"Summary so far:\n{state.compaction.summary}")
+        parts.extend(
+            f"{message.role.value}: {message.content}" for message in messages[already:cut]
+        )
+        request = ModelRequest(
+            messages=(
+                Message(MessageRole.SYSTEM, _SUMMARY_INSTRUCTIONS),
+                Message(MessageRole.USER, "\n\n".join(parts)),
+            ),
+            tools=(),
+            run_id=state.run_id,
+        )
+        final: ModelResponse | None = None
+        async with contextlib.aclosing(model.stream(request)) as stream:
+            async for chunk in stream:
+                if isinstance(chunk, StreamDone):
+                    final = chunk.response
+                    break
+        if final is None or not final.content:
+            return None
+        return CompactionState(summary=final.content, through_index=cut)
+
     async def _stream_final_content(self, request: ModelRequest) -> str:
         """Run a one-shot model request and return the assembled reply text."""
         final: ModelResponse | None = None

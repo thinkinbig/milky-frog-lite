@@ -6,6 +6,13 @@ context_window = 128000      # Model's context window size
 output_reserve = 8000        # Tokens reserved for model output
 safety_margin = 1000         # Safety margin below the actual limit
 
+# Conversation summarization (compaction): when the transcript exceeds the
+# trigger, older rounds are summarized away from the model request (the full
+# transcript is still kept in the snapshot).
+summarization_enabled = true
+# summarization_trigger_tokens = 96000
+# summarization_keep_recent_tokens = 32000
+
 # Shell command timeout (seconds); increase for slow test suites or builds
 bash_timeout_seconds = 60
 

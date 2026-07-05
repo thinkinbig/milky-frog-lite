@@ -12,8 +12,8 @@ import pytest
 from milky_frog.app.session import AgentSession
 from milky_frog.core.controller import RunController
 from milky_frog.settings import Settings
-from milky_frog.ui.app import MilkyFrogApp
-from milky_frog.ui.runtime import TuiRuntime
+from milky_frog.tui.app import MilkyFrogApp
+from milky_frog.tui.runtime import TuiRuntime
 
 
 def _settings(tmp_path: Path) -> Settings:
@@ -65,8 +65,8 @@ def test_runtime_installs_sigint_handler_before_asyncio_run(
         finally:
             coro.close()
 
-    monkeypatch.setattr("milky_frog.ui.runtime.signal.signal", fake_signal)
-    monkeypatch.setattr("milky_frog.ui.runtime.asyncio.run", fake_asyncio_run)
+    monkeypatch.setattr("milky_frog.tui.runtime.signal.signal", fake_signal)
+    monkeypatch.setattr("milky_frog.tui.runtime.asyncio.run", fake_asyncio_run)
 
     runtime.run()
 
@@ -83,7 +83,7 @@ def test_runtime_swallows_startup_keyboard_interrupt(
         coro.close()
         raise KeyboardInterrupt
 
-    monkeypatch.setattr("milky_frog.ui.runtime.asyncio.run", fake_asyncio_run)
+    monkeypatch.setattr("milky_frog.tui.runtime.asyncio.run", fake_asyncio_run)
 
     assert runtime.run() is None
     assert runtime._session.shutdown_requested is True

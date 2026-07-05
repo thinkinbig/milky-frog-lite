@@ -52,9 +52,9 @@ CONFIG_TEMPLATE = (
     f"# Conversation summarization (compaction): when the transcript exceeds the\n"
     f"# trigger, older rounds are summarized away from the model request (the full\n"
     f"# transcript is still kept in the snapshot).\n"
-    f"# summarization_enabled = false\n"
-    f"# summarization_trigger_tokens = {DEFAULT_SUMMARIZATION_TRIGGER_TOKENS}\n"
-    f"# summarization_keep_recent_tokens = {DEFAULT_SUMMARIZATION_KEEP_RECENT_TOKENS}\n"
+    f"summarization_enabled = true\n"
+    f"summarization_trigger_tokens = {DEFAULT_SUMMARIZATION_TRIGGER_TOKENS}\n"
+    f"summarization_keep_recent_tokens = {DEFAULT_SUMMARIZATION_KEEP_RECENT_TOKENS}\n"
     f"\n"
     f"[checkpoint]\n"
     f"retention_days = 30\n"
@@ -97,7 +97,7 @@ class ProjectConfig(BaseModel):
     search_output_max_chars: int = Field(default=DEFAULT_SEARCH_OUTPUT_MAX_CHARS, ge=1000)
     fetch_output_max_chars: int = Field(default=DEFAULT_FETCH_OUTPUT_MAX_CHARS, ge=1000)
     web_search_output_max_chars: int = Field(default=DEFAULT_WEB_SEARCH_OUTPUT_MAX_CHARS, ge=1000)
-    summarization_enabled: bool = False
+    summarization_enabled: bool = True
     summarization_trigger_tokens: int = Field(default=DEFAULT_SUMMARIZATION_TRIGGER_TOKENS, ge=1000)
     summarization_keep_recent_tokens: int = Field(
         default=DEFAULT_SUMMARIZATION_KEEP_RECENT_TOKENS, ge=1000

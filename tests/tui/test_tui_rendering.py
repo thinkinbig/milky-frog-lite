@@ -6,9 +6,9 @@ import pytest
 
 from milky_frog.domain import RunState, ToolCall, ToolResult
 from milky_frog.events import EventHub
-from milky_frog.ui.bash_render import BashRenderHandler
-from milky_frog.ui.messages import BashOutputMsg
-from milky_frog.ui.rendering import (
+from milky_frog.tui.bash_render import BashRenderHandler
+from milky_frog.tui.messages import BashOutputMsg
+from milky_frog.tui.rendering import (
     build_diff_lines,
     complete_command,
     file_change_diff,
@@ -57,7 +57,7 @@ def test_summarize_tool_result_empty_distinguishes_error() -> None:
 
 
 def test_matching_commands_filters_by_prefix() -> None:
-    assert [command.name for command in matching_commands("/c")] == ["/clear"]
+    assert [command.name for command in matching_commands("/c")] == ["/clear", "/compact"]
     assert matching_commands("/zzz") == ()
 
 

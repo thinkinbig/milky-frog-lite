@@ -20,8 +20,8 @@ from milky_frog.cli.launch import (
 from milky_frog.cli.runs import find_last_run, resolve_run_id
 from milky_frog.domain import ResumeError
 from milky_frog.settings import Settings
-from milky_frog.ui.app import TuiLaunch
-from milky_frog.ui.cli import (
+from milky_frog.tui.app import TuiLaunch
+from milky_frog.tui.cli import (
     console,
     render_diagnostics,
     render_error,

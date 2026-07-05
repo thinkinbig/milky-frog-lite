@@ -4,9 +4,9 @@ import typer
 
 from milky_frog.app.session import AgentSession, MissingModelConfiguration
 from milky_frog.settings import Settings
-from milky_frog.ui.app import TuiLaunch
-from milky_frog.ui.cli import render_error
-from milky_frog.ui.runtime import run_tui
+from milky_frog.tui.app import TuiLaunch
+from milky_frog.tui.cli import render_error
+from milky_frog.tui.runtime import run_tui
 
 
 def interactive(*, launch: TuiLaunch | None = None) -> None:

@@ -27,7 +27,7 @@ from milky_frog.harness.prompt import make_context_loader
 from milky_frog.harness.skills import SkillCatalog
 from milky_frog.project import load_project_config, project_root
 from milky_frog.settings import Settings
-from milky_frog.tokens import make_token_counter
+from milky_frog.tokens import TokenCounter, make_token_counter
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +85,7 @@ class AgentSession:
         self._harness: AgentHarness | None = None
         self._foreground: ForegroundRun | None = None
         self._shutdown: ShutdownManager = ShutdownManager()
+        self._counter: TokenCounter | None = None
 
     @property
     def config(self) -> AgentSessionConfig:
@@ -208,6 +209,7 @@ class AgentSession:
             self._model_name,
             cache_dir=self._settings.home / "tokenizers",
         )
+        self._counter = counter
 
         extra: list[Handler] = list(self._extra_bundles)
         if project_cfg.summarization_enabled:
@@ -259,6 +261,7 @@ class AgentSession:
         self._foreground = None
         self._harness = None
         self._model = None
+        self._counter = None
         self._handlers = []
         self._checkpoints = None
         self._hub = None
@@ -335,6 +338,37 @@ class AgentSession:
 
     async def respond_approval(self, run_id: str, verdict: ApprovalVerdict) -> RunResult:
         return await _active(self._foreground).respond_approval(run_id, verdict)
+
+    async def compact(self, run_id: str) -> str:
+        """Force-compact the transcript of *run_id* into a summary.
+
+        Returns the new summary text.  Only meaningful when
+        ``summarization_enabled`` is true in ``.milky-frog/config.toml``.
+        """
+        from milky_frog.domain import RunStatus
+        from milky_frog.harness.compaction import CompactionHandler
+
+        model = _active(self._model)
+        counter = _active(self._counter)
+        ck = _active(self._checkpoints)
+        state = ck.load_state(run_id)
+
+        compaction = await CompactionHandler.force_compact(model, counter, state)
+        if compaction is None:
+            return state.compaction.summary if state.compaction else ""
+
+        from dataclasses import replace
+
+        state = replace(state, compaction=compaction)
+        stored = ck.get_run(run_id)
+        ck.save_state(run_id, state, status=stored.status if stored else RunStatus.RUNNING)
+        return compaction.summary
+
+    def compaction_summary_text(self, run_id: str) -> str:
+        """Return the current compaction summary for *run_id* (empty string if none)."""
+        ck = _active(self._checkpoints)
+        state = ck.load_state(run_id)
+        return state.compaction.summary if state.compaction else ""
 
     @staticmethod
     def cancelled_result(run_id: str | None) -> RunResult:
