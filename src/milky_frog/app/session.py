@@ -323,7 +323,9 @@ def _format_skill_injection(catalog: SkillCatalog, names: tuple[str, ...]) -> st
         parts.append(f'<active_skill name="{name}">\n{skill.instructions.strip()}\n</active_skill>')
     if not parts:
         return None
-    return (
-        "The following skill has been activated for this Run. "
-        "Follow its instructions throughout the task.\n\n" + "\n\n".join(parts)
+    intro = (
+        "The following skill has been activated for this Run."
+        if len(parts) == 1
+        else "The following skills have been activated for this Run."
     )
+    return intro + " Follow these instructions throughout the task.\n\n" + "\n\n".join(parts)
