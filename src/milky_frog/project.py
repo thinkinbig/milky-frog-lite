@@ -60,6 +60,10 @@ CONFIG_TEMPLATE = (
     f"retention_days = 30\n"
     f"prune_on_start = true\n"
     f"\n"
+    f"[verification]\n"
+    f"after_edit = true\n"
+    f'commands = ["uv run ruff check .", "uv run pytest -q"]\n'
+    f"\n"
     f"# Additional host env var names forwarded to subprocesses (uppercase identifiers).\n"
     f'# env_allowlist_extra = ["MY_BUILD_VAR", "DEPLOY_TOKEN"]\n'
 )
@@ -72,6 +76,23 @@ class CheckpointConfig(BaseModel):
 
     retention_days: int = Field(default=DEFAULT_RETENTION_DAYS, ge=0)
     prune_on_start: bool = True
+
+
+class VerificationConfig(BaseModel):
+    """Post-edit verification policy.
+
+    When ``after_edit`` is true, the Harness runs ``commands`` sequentially
+    after every successful ``edit_file`` / ``write_file`` call. Results are
+    injected into the transcript; failures do not block the loop.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    after_edit: bool = True
+    commands: tuple[str, ...] = (
+        "uv run ruff check .",
+        "uv run pytest -q",
+    )
 
 
 class ProjectConfig(BaseModel):
@@ -104,6 +125,7 @@ class ProjectConfig(BaseModel):
     )
     env_allowlist_extra: tuple[str, ...] = ()
     checkpoint: CheckpointConfig = CheckpointConfig()
+    verification: VerificationConfig = VerificationConfig()
 
     # ── Validators ────────────────────────────────────────────────
 
