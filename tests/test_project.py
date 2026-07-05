@@ -146,9 +146,7 @@ def test_verification_defaults(tmp_path: Path) -> None:
 def test_verification_from_config(tmp_path: Path) -> None:
     _write_config(
         tmp_path,
-        "[verification]\n"
-        "after_edit = false\n"
-        'commands = ["uv run ruff check ."]\n',
+        '[verification]\nafter_edit = false\ncommands = ["uv run ruff check ."]\n',
     )
     cfg = load_project_config(tmp_path)
     assert cfg.verification.after_edit is False

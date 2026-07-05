@@ -165,9 +165,7 @@ class AgentLoop:
                                 ),
                                 ToolResult(
                                     content=after_result.summary,
-                                    is_error=(
-                                        "FAILED" in after_result.exit_code_summary
-                                    ),
+                                    is_error=("FAILED" in after_result.exit_code_summary),
                                 ),
                             )
 

@@ -453,9 +453,7 @@ async def test_after_tool_applies_verification_notice(tmp_path: Path) -> None:
     assert state is not None
     # The verification synthetic tool result should appear in the transcript.
     tool_msgs = [m for m in state.messages if m.role.value == "tool"]
-    verification_msgs = [
-        m for m in tool_msgs if m.tool_call_id == "__verification__"
-    ]
+    verification_msgs = [m for m in tool_msgs if m.tool_call_id == "__verification__"]
     assert len(verification_msgs) == 1
     assert "uv run ruff check" in verification_msgs[0].content
     assert "All good!" in verification_msgs[0].content

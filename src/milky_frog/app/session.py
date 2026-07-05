@@ -222,7 +222,9 @@ class AgentSession:
                 )
             )
         self._handlers = make_session_handlers(
-            self._settings, store, extra=extra,
+            self._settings,
+            store,
+            extra=extra,
             sandbox_factory=self._config.sandbox_factory,
         )
         for bundle in self._handlers:
