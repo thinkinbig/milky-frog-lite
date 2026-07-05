@@ -47,6 +47,42 @@ def test_project_skill_overrides_user_skill(tmp_path: Path) -> None:
     assert descriptions["review"] == "project description"
 
 
+def test_summaries_and_prompt_locations_serve_cached_metadata(tmp_path: Path) -> None:
+    """Metadata accessors must reflect state at construction time.
+
+    ``summaries()`` and ``prompt_locations()`` are called on every Run to build
+    the system prompt — they cannot afford to re-read every SKILL.md on disk.
+    The contract is: cache the summary at discovery, only ``load(name)`` reads
+    fresh on demand. We verify by mutating a file after construction and
+    asserting metadata stays frozen while ``load`` sees the change.
+    """
+    user = tmp_path / "user"
+    project = tmp_path / "project"
+    skill_file = user / "review" / "SKILL.md"
+    _write_skill(user, "review", "original description", "original instructions")
+
+    catalog = SkillCatalog(user, project)
+    assert catalog.load("review").summary.description == "original description"
+
+    # Mutate the file on disk after the catalog is built.
+    skill_file.write_text(
+        "---\nname: review\ndescription: MUTATED\n---\nnew instructions\n",
+        encoding="utf-8",
+    )
+
+    # Cached accessors must still report the construction-time description.
+    assert {s.description for s in catalog.summaries() if s.name == "review"} == {
+        "original description",
+    }
+    assert dict((n, d) for n, d, _ in catalog.prompt_locations())["review"] == (
+        "original description"
+    )
+
+    # load(name) is the one path that must read fresh — on-demand contract.
+    assert catalog.load("review").summary.description == "MUTATED"
+    assert catalog.load("review").instructions == "new instructions"
+
+
 # ── ContextLoader ──────────────────────────────────────────────────────────
 
 

@@ -26,6 +26,19 @@ class Skill:
     path: Path
 
 
+@dataclass(frozen=True, slots=True)
+class _Discovered:
+    """Cached metadata for a discovered SKILL.md; populated once at construction.
+
+    The catalog serves ``summaries`` and ``prompt_locations`` from this cache
+    (they run on every Run when the system prompt is built) and only loads
+    the full ``Skill`` body when ``load(name)`` is called on demand.
+    """
+
+    summary: SkillSummary
+    path: Path
+
+
 _BUNDLED_DIR = Path(__file__).parent / "bundled"
 
 
@@ -36,39 +49,42 @@ class SkillCatalog:
     """
 
     def __init__(self, user_directory: Path, project_directory: Path) -> None:
-        self._paths = self._discover(_BUNDLED_DIR)
-        self._paths.update(self._discover(user_directory))
-        self._paths.update(self._discover(project_directory))
+        self._skills: dict[str, _Discovered] = {}
+        self._skills.update(self._discover(_BUNDLED_DIR))
+        self._skills.update(self._discover(user_directory))
+        self._skills.update(self._discover(project_directory))
 
     def summaries(self) -> tuple[SkillSummary, ...]:
-        return tuple(self._load(path).summary for _, path in sorted(self._paths.items()))
+        return tuple(entry.summary for entry in self._sorted_entries())
 
     def prompt_locations(self) -> tuple[tuple[str, str, Path], ...]:
         """Skill metadata for system-prompt injection (name, description, path)."""
         return tuple(
-            (skill.summary.name, skill.summary.description, path)
-            for _, path in sorted(self._paths.items())
-            for skill in (self._load(path),)
+            (entry.summary.name, entry.summary.description, entry.path)
+            for entry in self._sorted_entries()
         )
 
     def load(self, name: str) -> Skill:
         try:
-            path = self._paths[name]
+            entry = self._skills[name]
         except KeyError as error:
             raise KeyError(f"unknown skill: {name}") from error
-        return self._load(path)
+        return self._load(entry.path)
 
-    def _discover(self, directory: Path) -> dict[str, Path]:
+    def _sorted_entries(self) -> tuple[_Discovered, ...]:
+        return tuple(self._skills[name] for name in sorted(self._skills))
+
+    def _discover(self, directory: Path) -> dict[str, _Discovered]:
         if not directory.is_dir():
             return {}
-        discovered: dict[str, Path] = {}
+        discovered: dict[str, _Discovered] = {}
         for path in directory.glob("*/SKILL.md"):
             try:
-                skill = self._load(path)
+                summary = self._load(path).summary
             except InvalidSkillError as exc:
                 logger.warning("skipping malformed skill file %s: %s", path, exc)
                 continue
-            discovered[skill.summary.name] = path
+            discovered[summary.name] = _Discovered(summary, path)
         return discovered
 
     @staticmethod
