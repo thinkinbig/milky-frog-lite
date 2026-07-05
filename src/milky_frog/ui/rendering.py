@@ -25,6 +25,7 @@ class SlashCommand:
 COMMANDS: tuple[SlashCommand, ...] = (
     SlashCommand("/help", "Show available commands"),
     SlashCommand("/runs", "List recent Runs"),
+    SlashCommand("/skill", "Activate a skill for the next Run", usage="/skill [NAME|off]"),
     SlashCommand("/clear", "Clear the conversation and start fresh"),
     SlashCommand("/resume", "Attach to or continue a Run", usage="/resume [RUN_ID] [prompt]"),
     SlashCommand("/exit", "Leave Milky Frog"),

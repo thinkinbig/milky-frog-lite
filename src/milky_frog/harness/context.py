@@ -40,9 +40,10 @@ class ContextManager:
         return (summary, *state.messages[compaction.through_index :])
 
     def _system_message(self, state: RunState) -> Message:
-        extra: tuple[str, ...] = ()
+        extra: list[str] = []
         if self._context_loader is not None:
             section = self._context_loader(state.workspace)
             if section is not None:
-                extra = (section,)
-        return Message(MessageRole.SYSTEM, system_prompt(state.workspace, extra))
+                extra.append(section)
+        extra.extend(state.run_extra)
+        return Message(MessageRole.SYSTEM, system_prompt(state.workspace, tuple(extra)))

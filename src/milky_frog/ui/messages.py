@@ -84,6 +84,14 @@ class ApprovalOptionSelected(Message):
         self.action = action
 
 
+class SkillOptionSelected(Message):
+    """User confirmed a selection from the inline skill picker."""
+
+    def __init__(self, selected: frozenset[str]) -> None:
+        super().__init__()
+        self.selected = selected  # empty set = deactivate all
+
+
 class RunError(Message):
     """An unexpected error occurred during the Run."""
 

@@ -32,6 +32,15 @@ def append_user_message(state: RunState, content: str) -> RunState:
     return replace(state, messages=(*state.messages, Message(MessageRole.USER, content)))
 
 
+def with_run_extra(state: RunState, run_extra: tuple[str, ...]) -> RunState:
+    """Replace the eager system-prompt sections (e.g. activated-skill instructions).
+
+    Used on resume/continue to re-apply the caller's current Skill selection over
+    the persisted value, so mid-run activation and deactivation both take effect.
+    """
+    return replace(state, run_extra=run_extra)
+
+
 def append_model_response(state: RunState, response: ModelResponse) -> RunState:
     # Reasoning is intentionally dropped from the transcript: reasoning providers
     # reject their own reasoning_content on input. It survives in reasoning_log.

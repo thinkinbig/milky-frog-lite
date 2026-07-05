@@ -161,6 +161,7 @@ def test_skill_catalog_prompt_locations(tmp_path: Path) -> None:
 
     catalog = SkillCatalog(user, project)
 
-    assert catalog.prompt_locations() == (
-        ("review", "project description", project / "review" / "SKILL.md"),
-    )
+    # Bundled skills are always discovered too — assert the override by name
+    # rather than equality on the whole tuple.
+    by_name = {name: (description, path) for name, description, path in catalog.prompt_locations()}
+    assert by_name["review"] == ("project description", project / "review" / "SKILL.md")

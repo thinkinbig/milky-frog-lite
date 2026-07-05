@@ -66,6 +66,10 @@ class RunSnapshot(BaseModel):
     reasoning_log: tuple[str, ...] = ()
     usage: RunUsageSnapshot = Field(default_factory=RunUsageSnapshot)
     compaction: CompactionSnapshot | None = None
+    # ``run_extra`` carries eager system-prompt sections injected at Run start
+    # (e.g. activated skill instructions). It is durable so that ``resume`` /
+    # ``continue_with`` see the same prompts across every turn (see ADR-0014).
+    run_extra: tuple[str, ...] = ()
 
 
 def dump_run_state(state: RunState) -> str:
@@ -75,6 +79,7 @@ def dump_run_state(state: RunState) -> str:
         reasoning_log=state.reasoning_log,
         usage=_usage_to_snapshot(state.usage),
         compaction=_compaction_to_snapshot(state.compaction),
+        run_extra=state.run_extra,
     )
     return snapshot.model_dump_json()
 
@@ -95,6 +100,7 @@ def load_run_state(run_id: str, workspace: Path, raw: str) -> RunState:
         reasoning_log=snapshot.reasoning_log,
         usage=_usage_from_snapshot(snapshot.usage),
         compaction=_compaction_from_snapshot(snapshot.compaction),
+        run_extra=snapshot.run_extra,
     )
 
 

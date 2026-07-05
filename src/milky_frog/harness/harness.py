@@ -27,6 +27,7 @@ from milky_frog.harness.state import (
     seal,
     start_run,
     unmatched_tool_calls,
+    with_run_extra,
 )
 
 
@@ -75,8 +76,9 @@ class AgentHarness:
         with self._checkpoints.claim(run_id):
             self._checkpoints.create_run(run_id, workspace)
             await self._hub.run_before_start(run_id, run_request, workspace)
+            run_extra = (run_request.skill_content,) if run_request.skill_content else ()
             state = start_run(
-                RunState(run_id=run_id, workspace=workspace),
+                RunState(run_id=run_id, workspace=workspace, run_extra=run_extra),
                 run_request.prompt,
             )
             await self._hub.run_started(run_id, run_request, state)
@@ -98,8 +100,14 @@ class AgentHarness:
         max_model_calls: int,
         cancellation: RunCancellation | None = None,
         prompt: str | None = None,
+        run_extra: tuple[str, ...] | None = None,
     ) -> RunResult:
-        """Advance an existing Run: load snapshot, repair, then advance."""
+        """Advance an existing Run: load snapshot, repair, then advance.
+
+        ``run_extra is None`` preserves the persisted eager system-prompt
+        sections (skills survive resume); a tuple — including ``()`` — replaces
+        them, so a caller can re-apply or clear activated Skills mid-run.
+        """
         try:
             with self._checkpoints.claim(run_id):
                 stored = self._require_run(run_id)
@@ -111,6 +119,8 @@ class AgentHarness:
                     )
 
                 state = self._checkpoints.load_state(run_id)
+                if run_extra is not None:
+                    state = with_run_extra(state, run_extra)
                 if not waiting_approval:
                     state, _ = seal(state)
                     if prompt is not None:

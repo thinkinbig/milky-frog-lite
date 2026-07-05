@@ -38,6 +38,7 @@ class RunRequest:
     workspace: Path
     max_model_calls: int = DEFAULT_MAX_MODEL_CALLS
     cancellation: RunCancellation | None = None
+    skill_content: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,3 +99,10 @@ class RunState:
     reasoning_log: tuple[str, ...] = ()
     usage: RunUsage = field(default_factory=RunUsage)
     compaction: CompactionState | None = None
+    run_extra: tuple[str, ...] = ()
+    """Extra eager system-prompt sections (e.g. activated-skill instructions).
+
+    ``ContextManager._system_message`` extends these into the system prompt on
+    every model call. Persisted in the snapshot so skill injection survives
+    ``resume`` / ``continue_with`` (see ADR-0014).
+    """

@@ -59,7 +59,13 @@ class ForegroundRun:
             return
         self._checkpoints.seal_interrupt(run_id)
 
-    async def start_new(self, task: str, workspace: Path | None = None) -> RunResult:
+    async def start_new(
+        self,
+        task: str,
+        workspace: Path | None = None,
+        *,
+        skill_content: str | None = None,
+    ) -> RunResult:
         workspace = (workspace or Path.cwd()).resolve(strict=True)
         project_cfg = load_project_config(workspace)
         self.busy = True
@@ -73,6 +79,7 @@ class ForegroundRun:
                         workspace,
                         max_model_calls=max_calls,
                         cancellation=self._cancellation,
+                        skill_content=skill_content,
                     )
                 )
             except asyncio.CancelledError:
@@ -89,6 +96,7 @@ class ForegroundRun:
         run_id: str,
         *,
         prompt: str | None = None,
+        run_extra: tuple[str, ...] | None = None,
     ) -> RunResult:
         stored = self._resolve_stored_run(run_id)
         project_cfg = load_project_config(stored.workspace)
@@ -103,6 +111,7 @@ class ForegroundRun:
                     max_model_calls=max_calls,
                     cancellation=self._cancellation,
                     prompt=prompt,
+                    run_extra=run_extra,
                 )
             except asyncio.CancelledError:
                 self.shutdown()
