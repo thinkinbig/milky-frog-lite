@@ -92,7 +92,6 @@ class ConversationViewModel:
     def on_thinking(self, text: str) -> None:
         """Accumulate reasoning chunks; update the live reasoning widget in place."""
         if self.phase != "thinking":
-            self._finalize_compaction()
             self.close_phase()
             self.phase = "thinking"
             self._thinking_frame_idx = 0
@@ -137,7 +136,6 @@ class ConversationViewModel:
     def on_text(self, text: str) -> None:
         """Accumulate answer chunks; update the live answer widget in place."""
         if self.phase != "answer":
-            self._finalize_compaction()
             self.close_phase()
             self.phase = "answer"
             self._answer_widget = self._append(
@@ -160,7 +158,6 @@ class ConversationViewModel:
 
     def on_tool_call(self, name: str, arguments: dict[str, JsonValue]) -> None:
         """Write the tool call signature, plus a colored diff for file edits."""
-        self._finalize_compaction()
         self.close_phase()
         signature = format_tool_signature(name, arguments)
         self._active_tool_signature = signature
@@ -195,16 +192,17 @@ class ConversationViewModel:
             )
             self._active_tool_widget = None
 
-    def on_compaction(self, from_count: int, to_count: int) -> None:
-        """Show compaction animation with spinner."""
+    def start_compaction(self) -> None:
+        """Begin the compaction spinner while a summarization call is in flight.
+
+        Used by the manual ``/compact`` path, which awaits the model call in the
+        UI worker — so the spinner genuinely animates during the wait. The
+        automatic path has no such window and goes straight to ``finish_compaction``.
+        """
         self.close_phase()
         self._compaction_frame_idx = 0
-        msg = f"📦 Compacting ({from_count} → {to_count} summary)"
         self._compaction_widget = self._append(
-            Text.assemble(
-                (f"  {self._SPINNER_FRAMES[0]} ", "dim yellow"),
-                (msg, "dim"),
-            ),
+            self._compaction_progress(self._SPINNER_FRAMES[0]),
             spaced=False,
         )
         if self._compaction_spinner_timer is None:
@@ -215,32 +213,52 @@ class ConversationViewModel:
         if self._compaction_widget is not None:
             idx = (self._compaction_frame_idx + 1) % len(self._SPINNER_FRAMES)
             self._compaction_frame_idx = idx
-            spinner = self._SPINNER_FRAMES[idx]
-            self._compaction_widget.update(
-                Text.assemble(
-                    (f"  {spinner} ", "dim yellow"),
-                    ("📦 Compacting...", "dim"),
-                )
-            )
+            self._compaction_widget.update(self._compaction_progress(self._SPINNER_FRAMES[idx]))
 
-    def _finalize_compaction(self) -> None:
+    @staticmethod
+    def _compaction_progress(spinner: str) -> Text:
+        return Text.assemble((f"  {spinner} ", "yellow"), ("Compacting transcript…", "dim"))
+
+    def _stop_compaction_spinner(self) -> Static | None:
         if self._compaction_spinner_timer is not None:
             self._compaction_spinner_timer.stop()
             self._compaction_spinner_timer = None
         widget = self._compaction_widget
         self._compaction_widget = None
+        return widget
+
+    def finish_compaction(self, messages_folded: int) -> None:
+        """Show the settled compaction line, replacing any in-flight spinner.
+
+        Called for both paths: the automatic one appends the line directly (no
+        spinner was running); the manual one updates its spinner widget in place.
+        """
+        noun = "message" if messages_folded == 1 else "messages"
+        done = Text.assemble(
+            ("  ✦ ", "cyan"),
+            (f"Compacted · {messages_folded} {noun} folded into summary", "dim"),
+        )
+        widget = self._stop_compaction_spinner()
         if widget is not None:
-            widget.update(
-                Text.assemble(
-                    ("  ✓ ", "green"),
-                    ("Consolidated", "dim"),
-                )
-            )
+            widget.update(done)
+        else:
+            self._append(done, spaced=False)
+        self._scroll_end()
+
+    def cancel_compaction(self, reason: str) -> None:
+        """Replace an in-flight compaction spinner with a dim reason line."""
+        widget = self._stop_compaction_spinner()
+        line = Text.assemble(("  · ", "dim"), (reason, "dim"))
+        if widget is not None:
+            widget.update(line)
+        else:
+            self._append(line, spaced=False)
+        self._scroll_end()
 
     def finish(self) -> None:
         """Reset all streaming/tool state (called when a Run finishes)."""
         self.close_phase()
-        self._finalize_compaction()
+        self._stop_compaction_spinner()
         if self._tool_spinner_timer is not None:
             self._tool_spinner_timer.stop()
             self._tool_spinner_timer = None

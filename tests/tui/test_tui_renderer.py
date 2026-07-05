@@ -14,6 +14,7 @@ from milky_frog.domain import (
 from milky_frog.events import EventHub
 from milky_frog.events.events import (
     RunAfterModel,
+    RunCompaction,
     RunModelChunk,
     RunNotice,
     RunPaused,
@@ -21,6 +22,7 @@ from milky_frog.events.events import (
 from milky_frog.tui.messages import (
     AddText,
     ApprovalRequired,
+    CompactionMsg,
     RunNoticeMsg,
     UpdateUsage,
 )
@@ -107,3 +109,39 @@ async def test_presentation_accumulates_usage_on_after_model() -> None:
     assert isinstance(update, UpdateUsage)
     assert update.usage.cumulative.input_tokens == 3
     assert update.usage.cumulative.output_tokens == 5
+
+
+async def test_presentation_compaction_bills_usage_and_emits_line() -> None:
+    # The summarization call never reaches after_model, so the compaction event
+    # must fold its cost into the running total — otherwise tokens under-report.
+    sink = _MessageSink()
+    bus = EventHub()
+    TuiPresentationHandler(sink).register(bus)
+
+    await bus.broadcast(
+        RunCompaction(
+            run_id="run-1",
+            messages_folded=6,
+            usage=TokenUsage(input_tokens=40, output_tokens=8),
+        )
+    )
+
+    update = next(m for m in sink.messages if isinstance(m, UpdateUsage))
+    assert update.usage.cumulative.input_tokens == 40
+    assert update.usage.cumulative.output_tokens == 8
+    line = next(m for m in sink.messages if isinstance(m, CompactionMsg))
+    assert line.messages_folded == 6
+
+
+async def test_presentation_compaction_without_usage_still_emits_line() -> None:
+    # A provider that omits usage must not spuriously emit an UpdateUsage.
+    sink = _MessageSink()
+    bus = EventHub()
+    TuiPresentationHandler(sink).register(bus)
+
+    await bus.broadcast(
+        RunCompaction(run_id="run-1", messages_folded=3, usage=TokenUsage()),
+    )
+
+    assert not any(isinstance(m, UpdateUsage) for m in sink.messages)
+    assert any(isinstance(m, CompactionMsg) for m in sink.messages)

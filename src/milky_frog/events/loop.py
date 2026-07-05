@@ -37,23 +37,25 @@ if TYPE_CHECKING:
     from milky_frog.harness.budget import TokenBudget
 
 
-def _apply_control(state: RunState, results: list[HandlerResult]) -> tuple[RunState, int, int]:
+def _apply_control(
+    state: RunState, results: list[HandlerResult]
+) -> tuple[RunState, Compacted | None]:
     """Apply Handler control proposals from ``before_model`` to the ``RunState``.
 
     The loop owns RunState evolution; Handlers only propose. Handles
     ``Compacted`` (from ``before_model``); ``VerificationNotice`` is applied
     inline in the tool loop (after ``after_tool``).
 
-    Returns: (updated state, from_count, to_count) — counts are 0 if no compaction
+    Returns: (updated state, the applied ``Compacted`` or ``None``) — the loop
+    emits ``run_compaction`` from the proposal so the UI can render and bill it.
     """
-    from_count, to_count = 0, 0
+    applied: Compacted | None = None
     for result in results:
         match result:
-            case Compacted(compaction):
-                from_count = compaction.through_index
-                to_count = 1
-                state = replace(state, compaction=compaction)
-    return state, from_count, to_count
+            case Compacted() as compacted:
+                state = replace(state, compaction=compacted.compaction)
+                applied = compacted
+    return state, applied
 
 
 class AgentLoop:
@@ -109,11 +111,13 @@ class AgentLoop:
                 model_call = state.completed_model_calls + 1
                 await self._hub.turn_started(run_id, model_call=model_call)
                 shaping = await self._hub.before_model(run_id, request, state)
-                shaped, from_count, to_count = _apply_control(state, shaping)
+                shaped, compacted = _apply_control(state, shaping)
                 if shaped is not state:
                     state = shaped
-                    if from_count > 0:
-                        await self._hub.run_compaction(run_id, from_count, to_count)
+                    if compacted is not None:
+                        await self._hub.run_compaction(
+                            run_id, compacted.messages_folded, compacted.usage
+                        )
                     request = ModelRequest(
                         self._context.assemble(state), self._tools.schemas(), run_id=run_id
                     )

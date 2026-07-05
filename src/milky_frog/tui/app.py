@@ -329,7 +329,7 @@ class MilkyFrogApp(App[None]):
         self._enable_input_focus()
 
     def on_compaction_msg(self, event: CompactionMsg) -> None:
-        self._conv.on_compaction(event.from_count, event.to_count)
+        self._conv.finish_compaction(event.messages_folded)
 
     def on_run_notice_msg(self, event: RunNoticeMsg) -> None:
         self._conv.render_notification(event.message, event.level)
@@ -563,27 +563,22 @@ class MilkyFrogApp(App[None]):
 
     @work(thread=False, exit_on_error=False)
     async def _do_compact(self, run_id: str) -> None:
-        """Worker: force compaction, show result or error in conversation."""
+        """Worker: force compaction, animating a spinner during the model call.
+
+        ``session.compact`` emits ``run_compaction`` on the hub when it actually
+        folds anything, which drives ``on_compaction_msg`` → ``finish_compaction``
+        (settling the spinner and billing the usage). When nothing is compacted we
+        settle the spinner ourselves.
+        """
+        self._conv.start_compaction()
         try:
             summary = await self.session.compact(run_id)
         except ValueError as error:
+            self._conv.cancel_compaction("compaction failed")
             self.post_message(RunError(str(error)))
         else:
-            if summary:
-                self._append(
-                    Panel(
-                        Text(summary, style="dim"),
-                        title="Compacted · transcript summarised",
-                        border_style="cyan",
-                    )
-                )
-            else:
-                self._append(
-                    Text(
-                        "Compacted — transcript fits within budget; nothing to summarise.",
-                        style="dim",
-                    )
-                )
+            if not summary:
+                self._conv.cancel_compaction("transcript fits within budget; nothing to summarise")
         finally:
             self._clear_worker()
             self.session.busy = False

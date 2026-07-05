@@ -361,16 +361,19 @@ class AgentSession:
         except LookupError:
             raise ValueError(f"Run not found: {run_id}") from None
 
-        compaction = await CompactionHandler.force_compact(model, counter, state)
-        if compaction is None:
+        result = await CompactionHandler.force_compact(model, counter, state)
+        if result is None:
             return state.compaction.summary if state.compaction else ""
 
         from dataclasses import replace
 
-        state = replace(state, compaction=compaction)
+        state = replace(state, compaction=result.compaction)
         stored = ck.get_run(run_id)
         ck.save_state(run_id, state, status=stored.status if stored else RunStatus.RUNNING)
-        return compaction.summary
+        # Route the manual /compact through the same hub signal the automatic path
+        # uses, so usage accounting and the UI compaction line stay identical.
+        await self.hub.run_compaction(run_id, result.messages_folded, result.usage)
+        return result.compaction.summary
 
     def compaction_summary_text(self, run_id: str) -> str:
         """Return the current compaction summary for *run_id* (empty string if none)."""

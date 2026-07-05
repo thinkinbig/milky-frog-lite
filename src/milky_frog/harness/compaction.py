@@ -27,6 +27,15 @@ _SUMMARY_INSTRUCTIONS = (
 )
 
 
+async def _stream_final(model: Model, request: ModelRequest) -> ModelResponse | None:
+    """Run a one-shot model request and return the final response, if any."""
+    async with contextlib.aclosing(model.stream(request)) as stream:
+        async for chunk in stream:
+            if isinstance(chunk, StreamDone):
+                return chunk.response
+    return None
+
+
 class CompactionHandler(Handler):
     """Summarizes the oldest messages when the request grows past a token budget.
 
@@ -67,10 +76,15 @@ class CompactionHandler(Handler):
         cutoff = self._cutoff(state)
         if cutoff is None:
             return None
-        summary = await self._summarize(state, cutoff)
-        if not summary:
+        already = state.compaction.through_index if state.compaction is not None else 0
+        response = await self._summarize(state, cutoff)
+        if response is None or not response.content:
             return None
-        return Compacted(CompactionState(summary=summary, through_index=cutoff))
+        return Compacted(
+            CompactionState(summary=response.content, through_index=cutoff),
+            messages_folded=cutoff - already,
+            usage=response.usage,
+        )
 
     def _cutoff(self, state: RunState) -> int | None:
         """Newest index to summarize through, keeping a ``keep_recent_tokens`` tail.
@@ -98,7 +112,7 @@ class CompactionHandler(Handler):
             return None
         return cut
 
-    async def _summarize(self, state: RunState, cutoff: int) -> str:
+    async def _summarize(self, state: RunState, cutoff: int) -> ModelResponse | None:
         already = state.compaction.through_index if state.compaction is not None else 0
         parts: list[str] = []
         if state.compaction is not None:
@@ -116,7 +130,7 @@ class CompactionHandler(Handler):
             tools=(),
             run_id=state.run_id,
         )
-        return await self._stream_final_content(request)
+        return await _stream_final(self._model, request)
 
     @staticmethod
     async def force_compact(
@@ -125,12 +139,13 @@ class CompactionHandler(Handler):
         state: RunState,
         *,
         keep_recent_tokens: int = 0,
-    ) -> CompactionState | None:
-        """Summarise **all** messages in *state* into a ``CompactionState``.
+    ) -> Compacted | None:
+        """Summarise **all** messages in *state* into a ``Compacted`` proposal.
 
         When ``keep_recent_tokens > 0`` only messages before the keep window
         are summarised (matching the automatic path); otherwise everything is
-        folded.
+        folded. Carries the summarization ``usage`` and ``messages_folded`` so the
+        manual ``/compact`` path renders and bills identically to the automatic one.
         """
         messages = state.messages
         threshold = keep_recent_tokens or 0
@@ -168,22 +183,11 @@ class CompactionHandler(Handler):
             tools=(),
             run_id=state.run_id,
         )
-        final: ModelResponse | None = None
-        async with contextlib.aclosing(model.stream(request)) as stream:
-            async for chunk in stream:
-                if isinstance(chunk, StreamDone):
-                    final = chunk.response
-                    break
+        final = await _stream_final(model, request)
         if final is None or not final.content:
             return None
-        return CompactionState(summary=final.content, through_index=cut)
-
-    async def _stream_final_content(self, request: ModelRequest) -> str:
-        """Run a one-shot model request and return the assembled reply text."""
-        final: ModelResponse | None = None
-        async with contextlib.aclosing(self._model.stream(request)) as stream:
-            async for chunk in stream:
-                if isinstance(chunk, StreamDone):
-                    final = chunk.response
-                    break
-        return "" if final is None else final.content
+        return Compacted(
+            CompactionState(summary=final.content, through_index=cut),
+            messages_folded=cut - already,
+            usage=final.usage,
+        )

@@ -13,6 +13,7 @@ from milky_frog.domain import (
     RunState,
     RunStatus,
     TextDelta,
+    TokenUsage,
     ToolCall,
     ToolResult,
 )
@@ -168,13 +169,17 @@ class RunNotice(BaseEvent):
 
 @dataclass(frozen=True)
 class RunCompaction(BaseEvent):
-    """Transcript compaction occurred.
+    """Transcript compaction occurred — the summary now replaces a message prefix.
 
-    Fired when compaction applies to the state, carrying metadata for UI animation.
+    Emitted once per compaction by loop-owned code (the automatic path in
+    ``AgentLoop``; the manual ``/compact`` path in ``AgentSession``), never by a
+    Handler. ``messages_folded`` is how many transcript messages this round rolled
+    into the summary; ``usage`` is the token cost of the summarization call, so the
+    UI can bill it (it never flows through ``after_model``).
     """
 
-    from_count: int
-    to_count: int
+    messages_folded: int
+    usage: TokenUsage
 
 
 LIFECYCLE_EVENT_TYPES: tuple[type[BaseEvent], ...] = (

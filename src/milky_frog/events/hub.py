@@ -19,6 +19,7 @@ from milky_frog.domain import (
     RunState,
     RunStatus,
     TextDelta,
+    TokenUsage,
     ToolCall,
     ToolResult,
 )
@@ -173,6 +174,11 @@ class EventHub:
         self, run_id: str, message: str, *, level: NoticeLevel = "info"
     ) -> list[HandlerResult]:
         return await self._emitter.run_notice(run_id, message, level=level)
+
+    async def run_compaction(
+        self, run_id: str, messages_folded: int, usage: TokenUsage
+    ) -> list[HandlerResult]:
+        return await self._emitter.run_compaction(run_id, messages_folded, usage)
 
     async def run_completed(self, state: RunState, result: RunResult) -> list[HandlerResult]:
         return await self._emitter.run_completed(state, result)

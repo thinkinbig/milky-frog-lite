@@ -263,3 +263,54 @@ def test_render_tool_result_finalizes_active_call_then_appends_block() -> None:
 
     assert vm._active_tool_widget is None
     assert vm._tool_spinner_timer is None
+
+
+# ── Compaction ──────────────────────────────────────────────────────
+
+
+def test_start_compaction_appends_animated_spinner() -> None:
+    vm, host = _vm()
+
+    vm.start_compaction()
+
+    assert vm._compaction_widget is not None
+    assert (0.1, vm._tick_compaction_spinner) in host.intervals
+
+
+def test_finish_compaction_settles_spinner_in_place() -> None:
+    vm, _ = _vm()
+    vm.start_compaction()
+    widget = vm._compaction_widget
+    timer = vm._compaction_spinner_timer
+    assert widget is not None
+
+    vm.finish_compaction(7)
+
+    assert vm._compaction_widget is None
+    assert timer is not None and timer.stopped
+    rendered = widget.updates[-1].plain  # type: ignore[attr-defined]
+    assert "Compacted" in rendered
+    assert "7 messages" in rendered
+
+
+def test_finish_compaction_without_spinner_appends_line() -> None:
+    # The automatic path never starts a spinner; finish appends directly.
+    vm, host = _vm()
+
+    vm.finish_compaction(1)
+
+    assert len(host.appended) == 1
+    rendered = host.appended[-1][0].plain
+    assert "1 message" in rendered  # singular noun for one message
+
+
+def test_cancel_compaction_shows_reason() -> None:
+    vm, _ = _vm()
+    vm.start_compaction()
+    widget = vm._compaction_widget
+    assert widget is not None
+
+    vm.cancel_compaction("nothing to summarise")
+
+    assert vm._compaction_spinner_timer is None
+    assert "nothing to summarise" in widget.updates[-1].plain  # type: ignore[attr-defined]

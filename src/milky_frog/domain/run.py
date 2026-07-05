@@ -5,7 +5,7 @@ from pathlib import Path
 
 from milky_frog.domain.messages import Message
 from milky_frog.domain.status import RunStatus
-from milky_frog.domain.usage import RunUsage
+from milky_frog.domain.usage import RunUsage, TokenUsage
 
 DEFAULT_MAX_MODEL_CALLS = 30
 
@@ -72,9 +72,16 @@ class Compacted:
     A Handler returns this from its callback; the loop applies it by folding
     ``compaction`` into ``RunState`` before assembling the next model request.
     The original messages are never deleted — the snapshot stays the full truth.
+
+    ``messages_folded`` is how many transcript messages this round rolled into the
+    summary (the delta since the previous compaction), and ``usage`` is the token
+    cost of the summarization model call itself — both transient, carried to the UI
+    so the compaction can be shown and billed. Neither is persisted.
     """
 
     compaction: CompactionState
+    messages_folded: int = 0
+    usage: TokenUsage = field(default_factory=TokenUsage)
 
 
 @dataclass(frozen=True, slots=True)

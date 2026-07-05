@@ -98,7 +98,13 @@ class TuiPresentationHandler(Handler):
         self._emit(ToolResultMsg(call.name, content=result.content, is_error=result.is_error))
 
     async def _on_compaction(self, event: RunCompaction, deps: HandlerDeps | None = None) -> None:
-        self._emit(CompactionMsg(event.from_count, event.to_count))
+        # The summarization model call never flows through ``after_model``, so fold
+        # its token cost into the running total here — otherwise the status bar
+        # under-reports what the Run was billed.
+        if event.usage.recorded:
+            self._running = self._running.record(event.usage)
+            self._emit(UpdateUsage(self._running))
+        self._emit(CompactionMsg(event.messages_folded))
 
     async def _on_notice(self, event: RunNotice, deps: HandlerDeps | None = None) -> None:
         self._emit(RunNoticeMsg(event.message, level=event.level))

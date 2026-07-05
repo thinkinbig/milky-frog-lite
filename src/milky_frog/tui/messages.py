@@ -139,9 +139,8 @@ class BashOutputMsg(Message):
 
 
 class CompactionMsg(Message):
-    """Transcript compaction started."""
+    """Transcript compaction finished: ``messages_folded`` messages became a summary."""
 
-    def __init__(self, from_count: int, to_count: int) -> None:
+    def __init__(self, messages_folded: int) -> None:
         super().__init__()
-        self.from_count = from_count
-        self.to_count = to_count
+        self.messages_folded = messages_folded
