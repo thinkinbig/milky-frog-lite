@@ -96,6 +96,7 @@ class ForegroundRun:
         run_id: str,
         *,
         prompt: str | None = None,
+        run_extra: tuple[str, ...] | None = None,
     ) -> RunResult:
         stored = self._resolve_stored_run(run_id)
         project_cfg = load_project_config(stored.workspace)
@@ -110,6 +111,7 @@ class ForegroundRun:
                     max_model_calls=max_calls,
                     cancellation=self._cancellation,
                     prompt=prompt,
+                    run_extra=run_extra,
                 )
             except asyncio.CancelledError:
                 self.shutdown()

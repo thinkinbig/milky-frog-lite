@@ -288,3 +288,47 @@ async def test_run_extra_drops_when_no_skill_injected(tmp_path: Path) -> None:
     await harness.resume(first.run_id, max_model_calls=5, prompt="again")
     loaded = store.load_state(first.run_id)
     assert loaded.run_extra == ()
+
+
+@pytest.mark.asyncio
+async def test_resume_run_extra_re_applies_and_clears(tmp_path: Path) -> None:
+    """Passing ``run_extra`` to resume overrides the persisted value, so mid-run
+    skill activation and ``/skill off`` both take effect; ``None`` preserves it."""
+
+    activated = '<active_skill name="review">\nCheck edge cases.\n</active_skill>'
+
+    class RecordingModel:
+        def __init__(self) -> None:
+            self.system_prompts: list[str] = []
+
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            system = next((m for m in request.messages if m.role is MessageRole.SYSTEM), None)
+            assert system is not None
+            self.system_prompts.append(system.content)
+            yield StreamDone(ModelResponse(content="done"))
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    model = RecordingModel()
+    harness = make_harness(model, ToolRegistry(), store, EventHub())
+
+    # Start with no skills.
+    first = await harness.run(RunRequest("hello", workspace))
+    assert first.status is RunStatus.COMPLETED
+    assert activated not in model.system_prompts[-1]
+
+    # Activate a skill mid-run: resume with an explicit run_extra.
+    await harness.resume(first.run_id, max_model_calls=5, prompt="again", run_extra=(activated,))
+    assert store.load_state(first.run_id).run_extra == (activated,)
+    assert activated in model.system_prompts[-1]
+
+    # A subsequent resume without run_extra preserves it (skills survive resume).
+    await harness.resume(first.run_id, max_model_calls=5, prompt="more")
+    assert store.load_state(first.run_id).run_extra == (activated,)
+    assert activated in model.system_prompts[-1]
+
+    # Deactivate mid-run: resume with an empty run_extra clears it.
+    await harness.resume(first.run_id, max_model_calls=5, prompt="done", run_extra=())
+    assert store.load_state(first.run_id).run_extra == ()
+    assert activated not in model.system_prompts[-1]

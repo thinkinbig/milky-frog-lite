@@ -538,6 +538,10 @@ class MilkyFrogApp(App[None]):
 
         self._active_skills: frozenset[str] = frozenset()
         self._skill_picker_widget: SkillPicker | None = None
+        # True once the user changes skills in this session. Gates whether a
+        # continued Run re-applies the selection: without an explicit change we
+        # leave a resumed Run's persisted skills alone (see AgentSession.continue_with).
+        self._skills_touched: bool = False
 
     @property
     def session(self) -> AgentSession:
@@ -1089,6 +1093,7 @@ class MilkyFrogApp(App[None]):
 
         if arg in ("off", "none", "clear"):
             self._active_skills = frozenset()
+            self._skills_touched = True
             self._append(Text("Skills deactivated.", style="dim"))
             self._update_skill_placeholder()
             return
@@ -1106,6 +1111,7 @@ class MilkyFrogApp(App[None]):
         else:
             self._active_skills = self._active_skills | {arg}
             self._append(Text(f"Skill added: {arg}", style="yellow"))
+        self._skills_touched = True
         self._update_skill_placeholder()
 
     def _show_skill_picker(
@@ -1138,6 +1144,7 @@ class MilkyFrogApp(App[None]):
         self.query_one("#prompt-input", Input).focus()
         if event.selected != self._active_skills:
             self._active_skills = event.selected
+            self._skills_touched = True
             if event.selected:
                 names = ", ".join(sorted(event.selected))
                 self._append(Text(f"Active skills: {names}", style="yellow"))
@@ -1277,7 +1284,10 @@ class MilkyFrogApp(App[None]):
             if run_id is None:
                 await self.session.start_new(task, selected_skills=tuple(sorted(active_skills)))
             else:
-                await self.session.continue_with(run_id, prompt=task)
+                # Re-apply the current selection only if the user changed skills
+                # this session; otherwise leave a resumed Run's persisted skills alone.
+                selected = tuple(sorted(active_skills)) if self._skills_touched else None
+                await self.session.continue_with(run_id, prompt=task, selected_skills=selected)
         except ResumeError as error:
             self.post_message(RunError(str(error)))
         except asyncio.CancelledError:

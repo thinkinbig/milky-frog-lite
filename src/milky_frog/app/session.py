@@ -292,14 +292,7 @@ class AgentSession:
         *,
         selected_skills: tuple[str, ...] = (),
     ) -> RunResult:
-        skill_content: str | None = None
-        if selected_skills:
-            resolved = (workspace or Path.cwd()).resolve()
-            catalog = SkillCatalog(
-                self._settings.home / "skills",
-                project_root(resolved) / "skills",
-            )
-            skill_content = _format_skill_injection(catalog, selected_skills)
+        skill_content = self._skill_injection(selected_skills, workspace)
         return await _active(self._foreground).start_new(
             task, workspace, skill_content=skill_content
         )
@@ -309,8 +302,35 @@ class AgentSession:
         run_id: str,
         *,
         prompt: str | None = None,
+        selected_skills: tuple[str, ...] | None = None,
     ) -> RunResult:
-        return await _active(self._foreground).continue_with(run_id, prompt=prompt)
+        """Advance an existing Run.
+
+        ``selected_skills is None`` leaves the Run's activated Skills untouched
+        (skills survive resume). A tuple — including ``()`` — re-applies the
+        current selection over the persisted value, so mid-run activation and
+        ``/skill off`` both take effect on the next turn.
+        """
+        run_extra: tuple[str, ...] | None = None
+        if selected_skills is not None:
+            content = self._skill_injection(selected_skills, None)
+            run_extra = (content,) if content is not None else ()
+        return await _active(self._foreground).continue_with(
+            run_id, prompt=prompt, run_extra=run_extra
+        )
+
+    def _skill_injection(
+        self, selected_skills: tuple[str, ...], workspace: Path | None
+    ) -> str | None:
+        """Build the eager system-prompt injection for the named Skills, if any."""
+        if not selected_skills:
+            return None
+        resolved = (workspace or Path.cwd()).resolve()
+        catalog = SkillCatalog(
+            self._settings.home / "skills",
+            project_root(resolved) / "skills",
+        )
+        return _format_skill_injection(catalog, selected_skills)
 
     async def respond_approval(self, run_id: str, verdict: ApprovalVerdict) -> RunResult:
         return await _active(self._foreground).respond_approval(run_id, verdict)
