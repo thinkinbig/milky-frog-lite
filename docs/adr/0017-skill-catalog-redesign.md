@@ -1,6 +1,6 @@
 # ADR-0017: SkillCatalog 三段式拆分 — discover / index / load
 
-- **Status:** Proposed (2026-07-05)
+- **Status:** Accepted (2026-07-05)
 - **Supersedes:** the single-class `SkillCatalog` that mixes three lifecycles
   behind `__init__` / `summaries()` / `prompt_locations()` / `load()`.
 - **Related:** issue #77, commit `5a1c33f` (the perf fix this ADR makes
@@ -125,11 +125,12 @@ class SkillCatalog:
     """
 
     def __init__(self, user_directory: Path, project_directory: Path) -> None:
-        paths: dict[str, Path] = {}
-        for directory in (_BUNDLED_DIR, user_directory, project_directory):
-            for path in discover(directory):
-                paths[path.parent.name] = path   # priority merge: later wins
-        self._index = index(paths)
+        paths = (
+            *discover(_BUNDLED_DIR),
+            *discover(user_directory),
+            *discover(project_directory),
+        )
+        self._index = index(paths)   # merges by frontmatter name, later wins
 
     def summaries(self) -> tuple[SkillSummary, ...]:
         return self._index.summaries()
