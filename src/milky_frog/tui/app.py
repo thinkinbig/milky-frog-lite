@@ -31,6 +31,8 @@ from milky_frog.tui.messages import (
     CompactionMsg,
     GitOutputMsg,
     GrepOutputMsg,
+    McpOptionSelected,
+    McpReloadRequested,
     RunError,
     RunFinished,
     RunNoticeMsg,
@@ -47,6 +49,7 @@ from milky_frog.tui.rendering import (
 )
 from milky_frog.tui.viewmodels.approval_vm import ApprovalViewModel
 from milky_frog.tui.viewmodels.conversation_vm import ConversationViewModel
+from milky_frog.tui.viewmodels.mcp_vm import McpViewModel
 from milky_frog.tui.viewmodels.skills_vm import SkillsViewModel
 from milky_frog.tui.widgets.prompt import PromptInput
 from milky_frog.tui.widgets.status_bar import RunStatusBar
@@ -147,6 +150,27 @@ class MilkyFrogApp(App[None]):
         background: $accent 20%;
         color: $text;
     }
+
+    .mcp-picker {
+        height: auto;
+        margin-bottom: 1;
+        border: round magenta;
+        padding: 0 1 1 0;
+    }
+
+    .mcp-picker SelectionList {
+        height: auto;
+        max-height: 12;
+        margin: 0 1;
+        background: transparent;
+        border: none;
+        padding: 0;
+    }
+
+    .mcp-picker SelectionList > .option-list--option-highlighted {
+        background: $accent 20%;
+        color: $text;
+    }
     """
 
     BINDINGS: ClassVar[list[BindingType]] = [
@@ -172,6 +196,7 @@ class MilkyFrogApp(App[None]):
         self._conv = ConversationViewModel(self)
         self._approval = ApprovalViewModel(self)
         self._skills = SkillsViewModel(self)
+        self._mcp = McpViewModel(self)
 
     @property
     def session(self) -> AgentSession:
@@ -347,6 +372,24 @@ class MilkyFrogApp(App[None]):
     def on_skill_option_selected(self, event: SkillOptionSelected) -> None:
         self._skills.on_picker_confirmed(event.selected)
 
+    # ── MCP picker (delegated to McpViewModel) ────────────────────
+
+    def on_mcp_option_selected(self, event: McpOptionSelected) -> None:
+        self._mcp.on_picker_confirmed(event.enabled)
+
+    def on_mcp_reload_requested(self, _event: McpReloadRequested) -> None:
+        self._do_reload_mcp()
+
+    @work(thread=False, exit_on_error=False)
+    async def _do_reload_mcp(self) -> None:
+        try:
+            count = await self.session.reload_mcp()
+        except Exception as exc:
+            self._append(Text(f"MCP reload failed: {exc}", style="bold red"))
+        else:
+            label = "tool" if count == 1 else "tools"
+            self._append(Text(f"MCP ready — {count} {label} active.", style="green"))
+
     # ── Input handling ────────────────────────────────────────────
 
     def on_input_changed(self, message: Input.Changed) -> None:
@@ -422,6 +465,10 @@ class MilkyFrogApp(App[None]):
 
         if command.startswith("/skill"):
             self._skills.handle_command(task)
+            return
+
+        if command == "/mcp":
+            self._mcp.handle_command()
             return
 
         if command == "/compact":
@@ -639,6 +686,9 @@ class MilkyFrogApp(App[None]):
     def action_cancel_run(self) -> None:
         if self._skills.has_picker:
             self._skills.dismiss_picker()
+            return
+        if self._mcp.has_picker:
+            self._mcp.dismiss_picker()
             return
         if not self.session.busy:
             return
