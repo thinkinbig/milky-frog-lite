@@ -4,7 +4,7 @@ import json
 import logging
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,7 @@ class McpServerConfig(BaseModel):
 
     command: str
     args: tuple[str, ...] = ()
-    env: dict[str, str] = {}
+    env: dict[str, str] = Field(default_factory=dict)
     enabled: bool = True
 
     @field_serializer("args")
