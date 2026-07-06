@@ -305,9 +305,10 @@ class AgentSession:
     async def reload_mcp(self) -> int:
         """Diff the new config against running servers and connect/disconnect only what changed.
 
-        Reads the current ``~/.milky-frog/mcp.json``, disconnects servers
-        that are no longer enabled, connects newly enabled ones, and
-        replaces MCP tools in the shared ``ToolRegistry`` in place.
+        Reads ``~/.milky-frog/mcp.json`` plus the optional project-level
+        ``<workspace>/.milky-frog/mcp.json``, disconnects servers that are no longer
+        enabled, connects newly enabled ones, and replaces MCP tools in the shared
+        ``ToolRegistry`` in place.
 
         Returns the number of MCP tools now active.
         """
