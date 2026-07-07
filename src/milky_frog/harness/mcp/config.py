@@ -27,7 +27,7 @@ class McpServerConfig(BaseModel):
 class McpConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    mcpServers: dict[str, McpServerConfig] = {}
+    mcpServers: dict[str, McpServerConfig] = Field(default_factory=dict)
 
 
 def _user_config_path(home: Path) -> Path:
