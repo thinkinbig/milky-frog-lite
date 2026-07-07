@@ -68,8 +68,8 @@ class McpViewModel:
                 try:
                     set_server_enabled(home, name, enabled=want_enabled)
                     changed = True
-                except Exception:
-                    self._append(f"Failed to update {name!r}.", style="bold red")
+                except Exception as exc:
+                    self._append(f"Failed to update {name!r}: {exc}", style="bold red")
 
         if changed:
             self._append("Reconnecting MCP servers…", style="dim")
