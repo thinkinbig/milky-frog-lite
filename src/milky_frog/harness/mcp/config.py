@@ -71,7 +71,12 @@ def load_mcp_config(home: Path, workspace: Path | None = None) -> McpConfig:
             data = json.loads(path.read_text(encoding="utf-8"))
             cfg = McpConfig.model_validate(data)
             servers.update(cfg.mcpServers)
-        except Exception:
-            logger.warning("failed to load MCP config from %s; skipping", path)
+        except Exception as exc:
+            logger.warning(
+                "failed to load MCP config from %s; skipping (%s)",
+                path,
+                exc,
+                exc_info=True,
+            )
 
     return McpConfig(mcpServers=servers)
