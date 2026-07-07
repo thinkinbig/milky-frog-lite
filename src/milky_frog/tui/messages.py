@@ -92,6 +92,18 @@ class SkillOptionSelected(Message):
         self.selected = selected  # empty set = deactivate all
 
 
+class McpOptionSelected(Message):
+    """User confirmed a selection from the inline MCP server picker."""
+
+    def __init__(self, enabled: frozenset[str]) -> None:
+        super().__init__()
+        self.enabled = enabled  # names of servers the user wants enabled
+
+
+class McpReloadRequested(Message):
+    """Config was written; trigger an async MCP reconnect worker."""
+
+
 class RunError(Message):
     """An unexpected error occurred during the Run."""
 

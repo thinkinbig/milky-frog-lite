@@ -5,6 +5,7 @@ from typing import Protocol, TypeVar
 
 from rich.console import RenderableType
 from textual.containers import VerticalScroll
+from textual.message import Message
 from textual.timer import Timer
 from textual.widget import Widget
 from textual.widgets import Static
@@ -46,3 +47,5 @@ class TuiHost(Protocol):
     def query_one(self, selector: str, expect_type: type[_W]) -> _W: ...
 
     def _start_approval(self, run_id: str, verdict: ApprovalVerdict) -> None: ...
+
+    def post_message(self, message: Message) -> bool: ...

@@ -11,6 +11,7 @@ requires-python = ">=3.12"
 license = "MIT"
 dependencies = [
   "langfuse>=4.9.1",
+  "mcp>=1.0.0",
   "openai>=1.68.0",
   "pydantic>=2.10.0",
   "pydantic-settings>=2.0.0",

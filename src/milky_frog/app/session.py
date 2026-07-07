@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -23,8 +24,11 @@ from milky_frog.domain import (
 from milky_frog.events import EventHub, Handler
 from milky_frog.harness.compaction import CompactionHandler
 from milky_frog.harness.harness import AgentHarness
+from milky_frog.harness.mcp import McpClientManager, load_mcp_config
 from milky_frog.harness.prompt import make_context_loader
 from milky_frog.harness.skills import SkillCatalog
+from milky_frog.harness.tools import ToolRegistry
+from milky_frog.harness.tools.builtins import default_tools
 from milky_frog.project import load_project_config, project_root
 from milky_frog.settings import Settings
 from milky_frog.tokens import TokenCounter, make_token_counter
@@ -86,6 +90,9 @@ class AgentSession:
         self._foreground: ForegroundRun | None = None
         self._shutdown: ShutdownManager = ShutdownManager()
         self._counter: TokenCounter | None = None
+        self._mcp_manager: McpClientManager | None = None
+        self._registry: ToolRegistry | None = None
+        self._mcp_reload_lock: asyncio.Lock = asyncio.Lock()
 
     @property
     def config(self) -> AgentSessionConfig:
@@ -96,12 +103,13 @@ class AgentSession:
         return self._model_name
 
     @property
-    def skills_home(self) -> Path:
-        """User-scope skills directory (``<home>/skills``).
+    def home(self) -> Path:
+        """User-scope state directory (``MILKY_FROG_HOME``, default ``~/.milky-frog``)."""
+        return self._settings.home
 
-        Public accessor so UI surfaces can build a ``SkillCatalog`` without
-        reaching into ``_settings`` directly.
-        """
+    @property
+    def skills_home(self) -> Path:
+        """User-scope skills directory (``<home>/skills``)."""
         return self._settings.home / "skills"
 
     @property
@@ -211,47 +219,68 @@ class AgentSession:
         )
         self._counter = counter
 
-        extra: list[Handler] = list(self._extra_bundles)
-        if project_cfg.summarization_enabled:
-            extra.append(
-                CompactionHandler(
-                    self._model,
-                    counter,
-                    trigger_tokens=project_cfg.summarization_trigger_tokens,
-                    keep_recent_tokens=project_cfg.summarization_keep_recent_tokens,
+        mcp_cfg = load_mcp_config(self._settings.home, workspace)
+        mcp_manager = McpClientManager()
+        await mcp_manager.__aenter__()
+        self._mcp_manager = mcp_manager
+        try:
+            enabled_servers = {
+                name: srv_cfg for name, srv_cfg in mcp_cfg.mcpServers.items() if srv_cfg.enabled
+            }
+            await mcp_manager.connect_many(enabled_servers)
+
+            registry = ToolRegistry(default_tools(jina_api_key=self._settings.jina_api_key))
+            registry.replace_mcp_tools(tuple(mcp_manager.tools))
+            self._registry = registry
+
+            extra: list[Handler] = list(self._extra_bundles)
+            if project_cfg.summarization_enabled:
+                extra.append(
+                    CompactionHandler(
+                        self._model,
+                        counter,
+                        trigger_tokens=project_cfg.summarization_trigger_tokens,
+                        keep_recent_tokens=project_cfg.summarization_keep_recent_tokens,
+                    )
                 )
+            self._handlers = make_session_handlers(
+                self._settings,
+                store,
+                extra=extra,
+                sandbox_factory=self._config.sandbox_factory,
             )
-        self._handlers = make_session_handlers(
-            self._settings,
-            store,
-            extra=extra,
-            sandbox_factory=self._config.sandbox_factory,
-        )
-        for bundle in self._handlers:
-            bundle.register(self._hub)
+            for bundle in self._handlers:
+                bundle.register(self._hub)
 
-        self._harness = make_agent_harness(
-            model=self._model,
-            checkpoints=store,
-            hub=self._hub,
-            sandbox_factory=self._config.sandbox_factory,
-            context_loader=make_context_loader(self._settings.home),
-            token_counter=counter,
-            max_retries=self._settings.max_retries,
-            retry_base_delay=self._settings.retry_base_delay,
-            jina_api_key=self._settings.jina_api_key,
-        )
+            self._harness = make_agent_harness(
+                model=self._model,
+                checkpoints=store,
+                hub=self._hub,
+                tools=registry,
+                sandbox_factory=self._config.sandbox_factory,
+                context_loader=make_context_loader(self._settings.home),
+                token_counter=counter,
+                max_retries=self._settings.max_retries,
+                retry_base_delay=self._settings.retry_base_delay,
+            )
 
-        self._foreground = ForegroundRun(
-            self._harness,
-            self._checkpoints,
-            interactive=self._interactive,
-        )
+            self._foreground = ForegroundRun(
+                self._harness,
+                self._checkpoints,
+                interactive=self._interactive,
+            )
 
-        self._shutdown.wire(self._foreground, self._handlers, self._model)
+            self._shutdown.wire(self._foreground, self._handlers, self._model)
 
-        for handler in self._handlers:
-            await handler.__aenter__()
+            for handler in self._handlers:
+                await handler.__aenter__()
+        except Exception:
+            # `async with self._session:` never calls __aexit__ if __aenter__
+            # raises, so connected MCP server subprocesses must be closed here
+            # explicitly or they'd leak for the life of the process.
+            await mcp_manager.__aexit__(None, None, None)
+            self._mcp_manager = None
+            raise
 
         return self
 
@@ -263,6 +292,14 @@ class AgentSession:
     ) -> None:
         await self._shutdown.cleanup(exc_type, exc, traceback)
 
+        mcp = self._mcp_manager
+        if mcp is not None:
+            try:
+                await mcp.__aexit__(exc_type, exc, traceback)
+            except Exception:
+                logger.exception("MCP client cleanup failed")
+            self._mcp_manager = None
+
         self._foreground = None
         self._harness = None
         self._model = None
@@ -270,6 +307,36 @@ class AgentSession:
         self._handlers = []
         self._checkpoints = None
         self._hub = None
+        self._registry = None
+
+    async def reload_mcp(self) -> int:
+        """Diff the new config against running servers and connect/disconnect only what changed.
+
+        Reads ``~/.milky-frog/mcp.json`` plus the optional project-level
+        ``<workspace>/.milky-frog/mcp.json``, disconnects servers that are no longer
+        enabled, connects newly enabled ones, and replaces MCP tools in the shared
+        ``ToolRegistry`` in place.
+
+        Returns the number of MCP tools now active.
+        """
+        manager = _active(self._mcp_manager)
+        registry = _active(self._registry)
+
+        async with self._mcp_reload_lock:
+            new_cfg = load_mcp_config(self._settings.home, Path.cwd())
+            new_enabled = {name for name, srv in new_cfg.mcpServers.items() if srv.enabled}
+            currently_running = manager.running_servers
+
+            for name in currently_running - new_enabled:
+                await manager.disconnect_server(name)
+                logger.info("disconnected MCP server %r", name)
+
+            to_connect = {
+                name: new_cfg.mcpServers[name] for name in new_enabled - currently_running
+            }
+            await manager.connect_many(to_connect)
+
+            return registry.replace_mcp_tools(tuple(manager.tools))
 
     def cancel(self) -> None:
         fg = self._foreground
