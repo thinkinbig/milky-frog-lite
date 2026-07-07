@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from rich.markup import escape
 
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.cli.actions import (
@@ -170,22 +171,22 @@ def prune(
 def mcp_list() -> None:
     """List configured MCP servers and their enabled/disabled status."""
     settings = Settings.from_environment()
-    config_path = settings.home / MCP_CONFIG_FILENAME
-    if not config_path.exists():
-        console.print(f"  No MCP config found at [dim]{config_path}[/]")
-        console.print("  Create it to add MCP servers.")
-        return
-
-    cfg = load_mcp_config(settings.home)
+    cfg = load_mcp_config(settings.home, Path.cwd())
     if not cfg.mcpServers:
         console.print("  No MCP servers configured.")
+        console.print(
+            f"  Add them to [dim]{settings.home / MCP_CONFIG_FILENAME}[/] "
+            f"or [dim].milky-frog/{MCP_CONFIG_FILENAME}[/] in this project."
+        )
         return
 
     console.print()
     for name, srv in cfg.mcpServers.items():
         status = "[green]enabled[/]" if srv.enabled else "[yellow]disabled[/]"
         args_str = " ".join(srv.args) if srv.args else ""
-        console.print(f"  {status}  [bold]{name}[/]  [dim]{srv.command} {args_str}[/]")
+        console.print(
+            f"  {status}  [bold]{escape(name)}[/]  [dim]{escape(srv.command)} {escape(args_str)}[/]"
+        )
     console.print()
 
 
@@ -193,25 +194,29 @@ def mcp_enable(name: Annotated[str, typer.Argument(help="Server name to enable."
     """Enable an MCP server."""
     settings = Settings.from_environment()
     try:
-        set_server_enabled(settings.home, name, enabled=True)
+        set_server_enabled(settings.home, name, enabled=True, workspace=Path.cwd())
     except KeyError:
         render_error(f"MCP server {name!r} not found in config.")
         raise typer.Exit(code=1) from None
     except OSError as exc:
         render_error(str(exc))
         raise typer.Exit(code=1) from exc
-    console.print(f"  MCP server [bold]{name}[/] [green]enabled[/]. Restart milky-frog to apply.")
+    console.print(
+        f"  MCP server [bold]{escape(name)}[/] [green]enabled[/]. Restart milky-frog to apply."
+    )
 
 
 def mcp_disable(name: Annotated[str, typer.Argument(help="Server name to disable.")]) -> None:
     """Disable an MCP server without removing it from config."""
     settings = Settings.from_environment()
     try:
-        set_server_enabled(settings.home, name, enabled=False)
+        set_server_enabled(settings.home, name, enabled=False, workspace=Path.cwd())
     except KeyError:
         render_error(f"MCP server {name!r} not found in config.")
         raise typer.Exit(code=1) from None
     except OSError as exc:
         render_error(str(exc))
         raise typer.Exit(code=1) from exc
-    console.print(f"  MCP server [bold]{name}[/] [yellow]disabled[/]. Restart milky-frog to apply.")
+    console.print(
+        f"  MCP server [bold]{escape(name)}[/] [yellow]disabled[/]. Restart milky-frog to apply."
+    )

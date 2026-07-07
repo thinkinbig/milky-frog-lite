@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -91,6 +92,7 @@ class AgentSession:
         self._counter: TokenCounter | None = None
         self._mcp_manager: McpClientManager | None = None
         self._registry: ToolRegistry | None = None
+        self._mcp_reload_lock: asyncio.Lock = asyncio.Lock()
 
     @property
     def config(self) -> AgentSessionConfig:
@@ -221,59 +223,64 @@ class AgentSession:
         mcp_manager = McpClientManager()
         await mcp_manager.__aenter__()
         self._mcp_manager = mcp_manager
-        for name, srv_cfg in mcp_cfg.mcpServers.items():
-            if not srv_cfg.enabled:
-                continue
-            try:
-                await mcp_manager.connect_server(name, srv_cfg)
-            except Exception:
-                logger.warning("failed to connect to MCP server %r; skipping", name, exc_info=True)
+        try:
+            enabled_servers = {
+                name: srv_cfg for name, srv_cfg in mcp_cfg.mcpServers.items() if srv_cfg.enabled
+            }
+            await mcp_manager.connect_many(enabled_servers)
 
-        registry = ToolRegistry(default_tools(jina_api_key=self._settings.jina_api_key))
-        registry.replace_mcp_tools(tuple(mcp_manager.tools))
-        self._registry = registry
+            registry = ToolRegistry(default_tools(jina_api_key=self._settings.jina_api_key))
+            registry.replace_mcp_tools(tuple(mcp_manager.tools))
+            self._registry = registry
 
-        extra: list[Handler] = list(self._extra_bundles)
-        if project_cfg.summarization_enabled:
-            extra.append(
-                CompactionHandler(
-                    self._model,
-                    counter,
-                    trigger_tokens=project_cfg.summarization_trigger_tokens,
-                    keep_recent_tokens=project_cfg.summarization_keep_recent_tokens,
+            extra: list[Handler] = list(self._extra_bundles)
+            if project_cfg.summarization_enabled:
+                extra.append(
+                    CompactionHandler(
+                        self._model,
+                        counter,
+                        trigger_tokens=project_cfg.summarization_trigger_tokens,
+                        keep_recent_tokens=project_cfg.summarization_keep_recent_tokens,
+                    )
                 )
+            self._handlers = make_session_handlers(
+                self._settings,
+                store,
+                extra=extra,
+                sandbox_factory=self._config.sandbox_factory,
             )
-        self._handlers = make_session_handlers(
-            self._settings,
-            store,
-            extra=extra,
-            sandbox_factory=self._config.sandbox_factory,
-        )
-        for bundle in self._handlers:
-            bundle.register(self._hub)
+            for bundle in self._handlers:
+                bundle.register(self._hub)
 
-        self._harness = make_agent_harness(
-            model=self._model,
-            checkpoints=store,
-            hub=self._hub,
-            tools=registry,
-            sandbox_factory=self._config.sandbox_factory,
-            context_loader=make_context_loader(self._settings.home),
-            token_counter=counter,
-            max_retries=self._settings.max_retries,
-            retry_base_delay=self._settings.retry_base_delay,
-        )
+            self._harness = make_agent_harness(
+                model=self._model,
+                checkpoints=store,
+                hub=self._hub,
+                tools=registry,
+                sandbox_factory=self._config.sandbox_factory,
+                context_loader=make_context_loader(self._settings.home),
+                token_counter=counter,
+                max_retries=self._settings.max_retries,
+                retry_base_delay=self._settings.retry_base_delay,
+            )
 
-        self._foreground = ForegroundRun(
-            self._harness,
-            self._checkpoints,
-            interactive=self._interactive,
-        )
+            self._foreground = ForegroundRun(
+                self._harness,
+                self._checkpoints,
+                interactive=self._interactive,
+            )
 
-        self._shutdown.wire(self._foreground, self._handlers, self._model)
+            self._shutdown.wire(self._foreground, self._handlers, self._model)
 
-        for handler in self._handlers:
-            await handler.__aenter__()
+            for handler in self._handlers:
+                await handler.__aenter__()
+        except Exception:
+            # `async with self._session:` never calls __aexit__ if __aenter__
+            # raises, so connected MCP server subprocesses must be closed here
+            # explicitly or they'd leak for the life of the process.
+            await mcp_manager.__aexit__(None, None, None)
+            self._mcp_manager = None
+            raise
 
         return self
 
@@ -315,23 +322,21 @@ class AgentSession:
         manager = _active(self._mcp_manager)
         registry = _active(self._registry)
 
-        new_cfg = load_mcp_config(self._settings.home, Path.cwd())
-        new_enabled = {name for name, srv in new_cfg.mcpServers.items() if srv.enabled}
-        currently_running = manager.running_servers
+        async with self._mcp_reload_lock:
+            new_cfg = load_mcp_config(self._settings.home, Path.cwd())
+            new_enabled = {name for name, srv in new_cfg.mcpServers.items() if srv.enabled}
+            currently_running = manager.running_servers
 
-        for name in currently_running - new_enabled:
-            await manager.disconnect_server(name)
-            logger.info("disconnected MCP server %r", name)
+            for name in currently_running - new_enabled:
+                await manager.disconnect_server(name)
+                logger.info("disconnected MCP server %r", name)
 
-        for name in new_enabled - currently_running:
-            srv_cfg = new_cfg.mcpServers[name]
-            try:
-                await manager.connect_server(name, srv_cfg)
-            except Exception:
-                logger.warning("failed to connect MCP server %r; skipping", name, exc_info=True)
+            to_connect = {
+                name: new_cfg.mcpServers[name] for name in new_enabled - currently_running
+            }
+            await manager.connect_many(to_connect)
 
-        registry.replace_mcp_tools(tuple(manager.tools))
-        return len(manager.tools)
+            return registry.replace_mcp_tools(tuple(manager.tools))
 
     def cancel(self) -> None:
         fg = self._foreground

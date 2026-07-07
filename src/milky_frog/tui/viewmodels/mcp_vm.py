@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from rich.text import Text
 from textual.containers import VerticalScroll
 from textual.widgets import Input
@@ -28,7 +30,7 @@ class McpViewModel:
     def handle_command(self) -> None:
         """Open the MCP server picker."""
         home = self._app.session.home
-        cfg = load_mcp_config(home)
+        cfg = load_mcp_config(home, Path.cwd())
 
         if not cfg.mcpServers:
             self._append("No MCP servers configured.", style="dim")
@@ -59,14 +61,15 @@ class McpViewModel:
         self._app.query_one("#prompt-input", Input).focus()
 
         home = self._app.session.home
-        cfg = load_mcp_config(home)
+        workspace = Path.cwd()
+        cfg = load_mcp_config(home, workspace)
         changed = False
 
         for name, srv in cfg.mcpServers.items():
             want_enabled = name in enabled
             if srv.enabled != want_enabled:
                 try:
-                    set_server_enabled(home, name, enabled=want_enabled)
+                    set_server_enabled(home, name, enabled=want_enabled, workspace=workspace)
                     changed = True
                 except Exception as exc:
                     self._append(f"Failed to update {name!r}: {exc}", style="bold red")
