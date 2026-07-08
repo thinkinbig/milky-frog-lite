@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 from rich.console import Console, RenderableType
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -63,7 +64,9 @@ def render_diagnostics(diagnostics: tuple[Diagnostic, ...]) -> None:
     for diagnostic in diagnostics:
         style = check_styles[diagnostic.status]
         status = Text(diagnostic.status, style=style)
-        table.add_row(status, diagnostic.name, diagnostic.value)
+        # Diagnostic.name/value are data, not markup: a value containing "[sandbox]"
+        # must render literally instead of being parsed as a Rich style tag.
+        table.add_row(status, escape(diagnostic.name), escape(diagnostic.value))
     console.print()
     console.print(table)
 

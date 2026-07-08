@@ -252,6 +252,25 @@ def test_validate_sandbox_config_raises_on_bad_mount(tmp_path: Path) -> None:
         validate_sandbox_config(tmp_path)
 
 
+def test_validate_sandbox_config_error_is_compact(tmp_path: Path) -> None:
+    """The message drops pydantic's ValidationError dump, keeping only the gist.
+
+    No "N validation error(s) for SandboxConfig" banner, no indented "Value
+    error," prefix, and no "https://errors.pydantic.dev/..." link — just the
+    "invalid [sandbox] in config.toml: <reason>" a user can act on.
+    """
+    _write_config(tmp_path, '[sandbox]\nkind = "docker"\n')
+
+    with pytest.raises(SandboxConfigError) as excinfo:
+        validate_sandbox_config(tmp_path)
+
+    message = str(excinfo.value)
+    assert "invalid [sandbox] in config.toml" in message
+    assert "image is required" in message
+    assert "errors.pydantic.dev" not in message
+    assert "1 validation error" not in message
+
+
 def test_validate_sandbox_config_passes_when_absent(tmp_path: Path) -> None:
     validate_sandbox_config(tmp_path)  # no [sandbox] table: nothing to validate
 
