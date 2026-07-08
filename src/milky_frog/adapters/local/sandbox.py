@@ -4,7 +4,8 @@ import fnmatch
 import os
 from pathlib import Path
 
-from milky_frog.core.sandbox import SandboxViolation
+from milky_frog.adapters.local.command import run_local_command
+from milky_frog.core.sandbox import CommandOutcome, CommandPresentation, SandboxViolation
 from milky_frog.project import ProjectConfig, load_project_config
 
 _COMMAND_ENV_ALLOWLIST = ("HOME", "LANG", "LC_ALL", "PATH", "SHELL", "TERM", "TMPDIR")
@@ -71,3 +72,18 @@ class LocalSandbox:
         if "/usr/local/bin" not in path:
             env["PATH"] = f"/usr/local/bin:{path}" if path else "/usr/local/bin"
         return env
+
+    async def run_command(
+        self,
+        command: str,
+        *,
+        timeout_seconds: float,
+        presentation: CommandPresentation = CommandPresentation.PLAIN,
+    ) -> CommandOutcome:
+        return await run_local_command(
+            command,
+            workspace=self.workspace,
+            env=self.build_env(),
+            timeout_seconds=timeout_seconds,
+            presentation=presentation,
+        )
