@@ -114,8 +114,8 @@ class SandboxConfig(BaseModel):
     @field_validator("workspace_mount")
     @classmethod
     def _require_mnt_prefix(cls, v: str) -> str:
-        if not v.startswith("/mnt"):
-            raise ValueError(f"workspace_mount must live under /mnt, got {v!r}")
+        if v != "/mnt" and not v.startswith("/mnt/"):
+            raise ValueError(f"workspace_mount must be /mnt or under /mnt/, got {v!r}")
         return v
 
     @model_validator(mode="after")

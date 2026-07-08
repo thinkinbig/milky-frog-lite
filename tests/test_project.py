@@ -201,6 +201,32 @@ def test_sandbox_config_rejects_mount_outside_mnt() -> None:
         SandboxConfig(kind="local", workspace_mount="/workspace")
 
 
+@pytest.mark.parametrize(
+    "rejected_mount",
+    [
+        "/workspace",
+        "/mntfoo",
+        "/mntish/x",
+    ],
+)
+def test_sandbox_config_rejects_invalid_mounts(rejected_mount: str) -> None:
+    with pytest.raises(ValidationError):
+        SandboxConfig(kind="local", workspace_mount=rejected_mount)
+
+
+@pytest.mark.parametrize(
+    "accepted_mount",
+    [
+        "/mnt",
+        "/mnt/workspace",
+        "/mnt/deep/nested",
+    ],
+)
+def test_sandbox_config_accepts_valid_mounts(accepted_mount: str) -> None:
+    config = SandboxConfig(kind="local", workspace_mount=accepted_mount)
+    assert config.workspace_mount == accepted_mount
+
+
 def test_sandbox_config_requires_image_for_docker() -> None:
     with pytest.raises(ValidationError):
         SandboxConfig(kind="docker")
