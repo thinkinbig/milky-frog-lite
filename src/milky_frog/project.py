@@ -263,6 +263,26 @@ def load_project_config(workspace: Path) -> ProjectConfig:
         return ProjectConfig()
 
 
+_VALUE_ERROR_PREFIX = "Value error, "
+
+
+def _compact_validation_message(error: ValidationError) -> str:
+    """Join pydantic error messages, stripping the ``str(ValidationError)`` noise.
+
+    ``str(error)`` drags in "N validation error(s) for SandboxConfig", an
+    indented "Value error," prefix per message, and a
+    "https://errors.pydantic.dev/..." link — none of which helps a user fix
+    their TOML. ``error.errors()[i]["msg"]`` is the human-readable part.
+    """
+    messages = []
+    for item in error.errors():
+        msg = item["msg"]
+        if msg.startswith(_VALUE_ERROR_PREFIX):
+            msg = msg[len(_VALUE_ERROR_PREFIX) :]
+        messages.append(msg)
+    return "; ".join(messages)
+
+
 def validate_sandbox_config(workspace: Path) -> None:
     """Raise ``SandboxConfigError`` if the ``[sandbox]`` table is invalid.
 
@@ -276,4 +296,5 @@ def validate_sandbox_config(workspace: Path) -> None:
     try:
         SandboxConfig.model_validate(data["sandbox"])
     except ValidationError as error:
-        raise SandboxConfigError(f"invalid [sandbox] in {CONFIG_FILENAME}: {error}") from error
+        message = _compact_validation_message(error)
+        raise SandboxConfigError(f"invalid [sandbox] in {CONFIG_FILENAME}: {message}") from error
