@@ -196,6 +196,23 @@ def test_sandbox_config_reads_docker_table(tmp_path: Path) -> None:
     assert config.sandbox.workspace_mount == "/mnt/workspace"
 
 
+def test_sandbox_config_rejects_unknown_keys() -> None:
+    """`workspace` is not `workspace_mount`. Silently ignoring the typo would
+    leave the user believing they configured a mount they did not."""
+    with pytest.raises(ValidationError, match="workspace"):
+        SandboxConfig(kind="docker", image="python:3.12", workspace="/mnt/elsewhere")  # type: ignore[call-arg]
+
+
+def test_validate_sandbox_config_rejects_unknown_keys(tmp_path: Path) -> None:
+    _write_config(
+        tmp_path,
+        '[sandbox]\nkind = "docker"\nimage = "python:3.12"\nworkspace = "/mnt/workspace"\n',
+    )
+
+    with pytest.raises(SandboxConfigError, match="workspace"):
+        validate_sandbox_config(tmp_path)
+
+
 def test_sandbox_config_rejects_mount_outside_mnt() -> None:
     with pytest.raises(ValidationError):
         SandboxConfig(kind="local", workspace_mount="/workspace")

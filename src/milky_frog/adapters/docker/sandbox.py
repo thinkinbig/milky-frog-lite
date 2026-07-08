@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import logging
 import os
 import uuid
 from pathlib import Path
@@ -31,6 +32,8 @@ from milky_frog.adapters.local import LocalSandbox
 from milky_frog.adapters.process import with_presentation_env
 from milky_frog.core.sandbox import CommandOutcome, CommandPresentation, Sandbox
 from milky_frog.project import ProjectConfig
+
+logger = logging.getLogger(__name__)
 
 _NONINTERACTIVE_ENV: dict[str, str] = {
     "CI": "true",
@@ -145,7 +148,16 @@ class ContainerRegistry:
             containers = list(self._containers.values())
             self._containers.clear()
         for container_id in containers:
-            await self._cli.capture([DOCKER_BINARY, "rm", "-f", container_id])
+            # One failing removal must not strand the containers after it —
+            # `_containers` is already cleared, so nothing else will retry them.
+            # Suppressed, but never silent: a surviving container is exactly the
+            # thing an operator needs told, and `docker ps` will not explain why.
+            try:
+                await self._cli.capture([DOCKER_BINARY, "rm", "-f", container_id])
+            except Exception:
+                logger.exception(
+                    "failed to remove container %s; it may be left running", container_id
+                )
 
 
 class DockerSandbox:

@@ -103,9 +103,14 @@ class SandboxConfig(BaseModel):
     ``local`` (the default) runs Tools on the host under the path-deny policy.
     ``docker`` bind-mounts the Workspace into a container and runs commands
     there; it requires an ``image``.
+
+    Unknown keys are rejected. A silently-ignored ``workspace = "/mnt/foo"``
+    (the field is ``workspace_mount``) would leave the user believing they had
+    configured a mount they had not — the same class of quiet wrongness this
+    section's loud validation exists to prevent.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     kind: Literal["local", "docker"] = "local"
     image: str | None = None
@@ -273,13 +278,19 @@ def _compact_validation_message(error: ValidationError) -> str:
     indented "Value error," prefix per message, and a
     "https://errors.pydantic.dev/..." link — none of which helps a user fix
     their TOML. ``error.errors()[i]["msg"]`` is the human-readable part.
+
+    The field is prefixed when pydantic knows one. Without it, an unknown key
+    reports only "Extra inputs are not permitted", which names neither the key
+    at fault nor the key that was meant — loud, but not actionable. Whole-model
+    validators carry an empty ``loc`` and are reported unprefixed.
     """
     messages = []
     for item in error.errors():
         msg = item["msg"]
         if msg.startswith(_VALUE_ERROR_PREFIX):
             msg = msg[len(_VALUE_ERROR_PREFIX) :]
-        messages.append(msg)
+        location = ".".join(str(part) for part in item["loc"])
+        messages.append(f"{location}: {msg}" if location else msg)
     return "; ".join(messages)
 
 
