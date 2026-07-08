@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
 from stubs import StubDockerCli
 
 from milky_frog.adapters.docker import DockerSandboxFactory
+from milky_frog.adapters.docker.cli import DockerUnavailable
 from milky_frog.core.sandbox import (
     CommandPresentation,
     CommandResult,
@@ -13,6 +15,11 @@ from milky_frog.core.sandbox import (
     SandboxViolation,
 )
 from milky_frog.project import ProjectConfig
+
+
+def _container_name(workspace: Path) -> str:
+    digest = hashlib.sha256(str(workspace).encode("utf-8")).hexdigest()[:12]
+    return f"milky-frog-{digest}"
 
 
 def _factory(cli: StubDockerCli, image: str = "python:3.12") -> DockerSandboxFactory:
@@ -156,3 +163,42 @@ async def test_aclose_is_idempotent(tmp_path: Path) -> None:
 
     removals = [argv for argv in cli.captured if argv[:2] == ["docker", "rm"]]
     assert len(removals) == 1
+
+
+async def test_run_command_parses_id_past_a_banner_line(tmp_path: Path) -> None:
+    cli = StubDockerCli(run_stdout="WARNING: something\nabc123\n")
+    sandbox = _factory(cli)(tmp_path)
+
+    outcome = await sandbox.run_command("echo hi", timeout_seconds=5)
+
+    assert isinstance(outcome, CommandResult)
+    exec_argv = cli.combined_calls[0].argv
+    assert "abc123" in exec_argv
+    assert "WARNING: something" not in exec_argv
+
+
+async def test_start_cleans_up_container_when_id_is_unusable(tmp_path: Path) -> None:
+    cli = StubDockerCli(run_stdout="   \n")
+    sandbox = _factory(cli)(tmp_path)
+
+    with pytest.raises(DockerUnavailable):
+        await sandbox.run_command("echo hi", timeout_seconds=5)
+
+    expected_name = _container_name(tmp_path.resolve())
+    assert ["docker", "rm", "-f", expected_name] in cli.captured
+
+
+async def test_acquire_after_aclose_raises_and_issues_no_new_run(tmp_path: Path) -> None:
+    cli = StubDockerCli(container_id="abc123")
+    factory = _factory(cli)
+    sandbox = factory(tmp_path)
+    await sandbox.run_command("echo hi", timeout_seconds=5)
+
+    await factory.aclose()
+    run_calls_before = len([argv for argv in cli.captured if argv[:2] == ["docker", "run"]])
+
+    with pytest.raises(DockerUnavailable):
+        await sandbox.run_command("echo two", timeout_seconds=5)
+
+    run_calls_after = len([argv for argv in cli.captured if argv[:2] == ["docker", "run"]])
+    assert run_calls_after == run_calls_before

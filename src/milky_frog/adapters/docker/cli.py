@@ -88,6 +88,8 @@ class SubprocessDockerCli:
         except BaseException:
             with contextlib.suppress(ProcessLookupError):
                 process.kill()
+            with contextlib.suppress(BaseException):
+                await communicate
             raise
 
         return make_command_result(

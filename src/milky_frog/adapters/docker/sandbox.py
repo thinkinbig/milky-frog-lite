@@ -15,6 +15,7 @@ process in the container can still reach every file in the Workspace.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import os
 from pathlib import Path
@@ -55,9 +56,12 @@ class ContainerRegistry:
         self._cli = cli
         self._containers: dict[Path, str] = {}
         self._lock = asyncio.Lock()
+        self._closed = False
 
     async def acquire(self, workspace: Path) -> str:
         async with self._lock:
+            if self._closed:
+                raise DockerUnavailable("container registry is closed")
             existing = self._containers.get(workspace)
             if existing is not None:
                 return existing
@@ -66,13 +70,14 @@ class ContainerRegistry:
             return container_id
 
     async def _start(self, workspace: Path) -> str:
+        container_name = _container_name(workspace)
         result = await self._cli.capture(
             [
                 DOCKER_BINARY,
                 "run",
                 "-d",
                 "--name",
-                _container_name(workspace),
+                container_name,
                 "-v",
                 f"{workspace}:{self._workspace_mount}",
                 "-w",
@@ -87,13 +92,22 @@ class ContainerRegistry:
                 f"failed to start container from image {self._image!r}: "
                 f"{result.stderr.strip() or result.stdout.strip()}"
             )
-        container_id = result.stdout.strip()
+        lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        container_id = lines[-1] if lines else ""
         if not container_id:
+            # The container is already running (exit code 0) even though we
+            # cannot use its id — best-effort cleanup by name so the next
+            # acquire() for this Workspace doesn't hit "name already in use".
+            with contextlib.suppress(Exception):
+                await self._cli.capture([DOCKER_BINARY, "rm", "-f", container_name])
             raise DockerUnavailable("docker run returned no container id")
         return container_id
 
     async def aclose(self) -> None:
         async with self._lock:
+            if self._closed:
+                return
+            self._closed = True
             containers = list(self._containers.values())
             self._containers.clear()
         for container_id in containers:
@@ -101,7 +115,24 @@ class ContainerRegistry:
 
 
 class DockerSandbox:
-    """Sandbox adapter that executes commands inside a container."""
+    """Sandbox adapter that executes commands inside a container.
+
+    Known limitations, accepted for this MVP rather than oversights:
+
+    A timeout only kills the host-side ``docker exec`` client; the
+    in-container process it started may keep running until the container
+    itself is removed. A dead container is not detected or recreated either:
+    once a container id is cached for a Workspace it is reused for the life
+    of the Run, so if the container dies underneath us (an OOM kill, a
+    daemon restart) every subsequent ``run_command()`` keeps reusing the
+    dead id and ``docker exec`` fails; recovering requires restarting the
+    Run. Finally, ``docker exec``'s own failure codes are not distinguished
+    from the invoked command's: ``docker exec`` returns 126/127 for its own
+    failures (which can collide with the command's real exit codes), and its
+    error text is merged into the command output by ``stderr=STDOUT``, so a
+    container-level failure is indistinguishable from the command itself
+    failing.
+    """
 
     def __init__(
         self,

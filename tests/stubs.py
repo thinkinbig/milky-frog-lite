@@ -364,22 +364,32 @@ class CombinedCall:
 
 
 class StubDockerCli:
-    """DockerCli double: records argv, returns canned results. No daemon needed."""
+    """DockerCli double: records argv, returns canned results. No daemon needed.
+
+    ``run_stdout`` overrides what ``docker run`` reports on stdout, letting a
+    test simulate a banner-prefixed line (id still parses) or empty/whitespace
+    stdout (no usable id).
+    """
 
     def __init__(
         self,
         *,
         container_id: str = "container-1",
         outcome: CommandOutcome | None = None,
+        run_stdout: str | None = None,
     ) -> None:
         self._container_id = container_id
         self._outcome = outcome if outcome is not None else CommandResult(0, "ok\n")
+        self._run_stdout = run_stdout
         self.captured: list[list[str]] = []
         self.combined_calls: list[CombinedCall] = []
 
     async def capture(self, argv: Sequence[str]) -> DockerCliResult:
         self.captured.append(list(argv))
-        stdout = f"{self._container_id}\n" if argv[:2] == ["docker", "run"] else ""
+        if argv[:2] == ["docker", "run"]:
+            stdout = self._run_stdout if self._run_stdout is not None else f"{self._container_id}\n"
+        else:
+            stdout = ""
         return DockerCliResult(exit_code=0, stdout=stdout, stderr="")
 
     async def combined(self, argv: Sequence[str], *, timeout_seconds: float) -> CommandOutcome:
