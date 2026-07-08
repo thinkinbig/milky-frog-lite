@@ -368,7 +368,8 @@ class StubDockerCli:
 
     ``run_stdout`` overrides what ``docker run`` reports on stdout, letting a
     test simulate a banner-prefixed line (id still parses) or empty/whitespace
-    stdout (no usable id).
+    stdout (no usable id). ``run_exit_code`` lets a test simulate ``docker
+    run`` itself failing (e.g. no such image, daemon rejected the request).
     """
 
     def __init__(
@@ -377,10 +378,14 @@ class StubDockerCli:
         container_id: str = "container-1",
         outcome: CommandOutcome | None = None,
         run_stdout: str | None = None,
+        run_exit_code: int = 0,
+        run_stderr: str = "",
     ) -> None:
         self._container_id = container_id
         self._outcome = outcome if outcome is not None else CommandResult(0, "ok\n")
         self._run_stdout = run_stdout
+        self._run_exit_code = run_exit_code
+        self._run_stderr = run_stderr
         self.captured: list[list[str]] = []
         self.combined_calls: list[CombinedCall] = []
 
@@ -388,9 +393,10 @@ class StubDockerCli:
         self.captured.append(list(argv))
         if argv[:2] == ["docker", "run"]:
             stdout = self._run_stdout if self._run_stdout is not None else f"{self._container_id}\n"
-        else:
-            stdout = ""
-        return DockerCliResult(exit_code=0, stdout=stdout, stderr="")
+            return DockerCliResult(
+                exit_code=self._run_exit_code, stdout=stdout, stderr=self._run_stderr
+            )
+        return DockerCliResult(exit_code=0, stdout="", stderr="")
 
     async def combined(self, argv: Sequence[str], *, timeout_seconds: float) -> CommandOutcome:
         self.combined_calls.append(CombinedCall(list(argv), timeout_seconds))

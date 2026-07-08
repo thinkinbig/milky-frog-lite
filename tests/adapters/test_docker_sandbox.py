@@ -8,6 +8,7 @@ from stubs import StubDockerCli
 
 from milky_frog.adapters.docker import DockerSandboxFactory
 from milky_frog.adapters.docker.cli import DockerUnavailable
+from milky_frog.adapters.docker.sandbox import WORKSPACE_LABEL
 from milky_frog.core.sandbox import (
     CommandPresentation,
     CommandResult,
@@ -17,9 +18,8 @@ from milky_frog.core.sandbox import (
 from milky_frog.project import ProjectConfig
 
 
-def _container_name(workspace: Path) -> str:
-    digest = hashlib.sha256(str(workspace).encode("utf-8")).hexdigest()[:12]
-    return f"milky-frog-{digest}"
+def _workspace_hash12(workspace: Path) -> str:
+    return hashlib.sha256(str(workspace).encode("utf-8")).hexdigest()[:12]
 
 
 def _factory(cli: StubDockerCli, image: str = "python:3.12") -> DockerSandboxFactory:
@@ -38,6 +38,12 @@ async def test_run_command_creates_container_then_execs(tmp_path: Path) -> None:
     assert "-v" in run_argv
     assert f"{tmp_path.resolve()}:/mnt/workspace" in run_argv
     assert run_argv[-3:] == ["python:3.12", "sleep", "infinity"]
+
+    expected_hash12 = _workspace_hash12(tmp_path.resolve())
+    name_index = run_argv.index("--name")
+    used_name = run_argv[name_index + 1]
+    assert used_name.startswith(f"milky-frog-{expected_hash12}-")
+    assert len(used_name) > len(f"milky-frog-{expected_hash12}-")
 
     exec_argv = cli.combined_calls[0].argv
     assert exec_argv[:2] == ["docker", "exec"]
@@ -184,8 +190,10 @@ async def test_start_cleans_up_container_when_id_is_unusable(tmp_path: Path) -> 
     with pytest.raises(DockerUnavailable):
         await sandbox.run_command("echo hi", timeout_seconds=5)
 
-    expected_name = _container_name(tmp_path.resolve())
-    assert ["docker", "rm", "-f", expected_name] in cli.captured
+    run_argv = cli.captured[0]
+    name_index = run_argv.index("--name")
+    used_name = run_argv[name_index + 1]
+    assert ["docker", "rm", "-f", used_name] in cli.captured
 
 
 async def test_acquire_after_aclose_raises_and_issues_no_new_run(tmp_path: Path) -> None:
@@ -202,3 +210,48 @@ async def test_acquire_after_aclose_raises_and_issues_no_new_run(tmp_path: Path)
 
     run_calls_after = len([argv for argv in cli.captured if argv[:2] == ["docker", "run"]])
     assert run_calls_after == run_calls_before
+
+
+async def test_different_workspaces_get_different_container_names(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    workspace_a = tmp_path_factory.mktemp("workspace-a")
+    workspace_b = tmp_path_factory.mktemp("workspace-b")
+    cli = StubDockerCli(container_id="abc123")
+    factory = _factory(cli)
+
+    await factory(workspace_a).run_command("echo hi", timeout_seconds=5)
+    await factory(workspace_b).run_command("echo hi", timeout_seconds=5)
+
+    run_calls = [argv for argv in cli.captured if argv[:2] == ["docker", "run"]]
+    assert len(run_calls) == 2
+    names = [argv[argv.index("--name") + 1] for argv in run_calls]
+    assert names[0] != names[1]
+    assert all(name.startswith("milky-frog-") for name in names)
+
+
+async def test_run_command_labels_container_with_workspace_hash(tmp_path: Path) -> None:
+    cli = StubDockerCli(container_id="abc123")
+    sandbox = _factory(cli)(tmp_path)
+
+    await sandbox.run_command("echo hi", timeout_seconds=5)
+
+    expected_hash12 = _workspace_hash12(tmp_path.resolve())
+    run_argv = cli.captured[0]
+    assert "--label" in run_argv
+    label_index = run_argv.index("--label")
+    assert run_argv[label_index + 1] == f"{WORKSPACE_LABEL}={expected_hash12}"
+
+
+async def test_start_cleans_up_container_on_nonzero_exit(tmp_path: Path) -> None:
+    cli = StubDockerCli(run_exit_code=1, run_stderr="no such image")
+    sandbox = _factory(cli)(tmp_path)
+
+    with pytest.raises(DockerUnavailable):
+        await sandbox.run_command("echo hi", timeout_seconds=5)
+
+    run_argv = cli.captured[0]
+    assert run_argv[:2] == ["docker", "run"]
+    name_index = run_argv.index("--name")
+    used_name = run_argv[name_index + 1]
+    assert ["docker", "rm", "-f", used_name] in cli.captured

@@ -18,6 +18,7 @@ import asyncio
 import contextlib
 import hashlib
 import os
+import uuid
 from pathlib import Path
 
 from milky_frog.adapters.docker.cli import (
@@ -36,10 +37,36 @@ _NONINTERACTIVE_ENV: dict[str, str] = {
     "GIT_TERMINAL_PROMPT": "0",
 }
 
+WORKSPACE_LABEL = "milky-frog.workspace"
+
+
+def _workspace_digest(workspace: Path) -> str:
+    return hashlib.sha256(str(workspace).encode("utf-8")).hexdigest()[:12]
+
 
 def _container_name(workspace: Path) -> str:
-    digest = hashlib.sha256(str(workspace).encode("utf-8")).hexdigest()[:12]
-    return f"milky-frog-{digest}"
+    """Build a per-start container name: stable prefix, unique suffix.
+
+    The name is *not* fully deterministic from the Workspace alone. If it
+    were, a container orphaned by a cancelled ``docker run`` (the daemon
+    created it before the client was interrupted, e.g. Ctrl-C mid image-pull)
+    would sit there under that exact name with nothing tracking or removing
+    it. The next ``acquire()`` for the same Workspace would then run
+    ``docker run --name <same name>``, collide with its own orphaned
+    predecessor, fail with "name already in use", and raise
+    ``DockerUnavailable`` forever — wedging the Workspace until a human runs
+    ``docker rm`` by hand. Appending a fresh random suffix on every start
+    means two starts never collide, so an orphan can never block its
+    successor.
+
+    The ``milky-frog-`` prefix is kept stable so operators can still find
+    every container this project created with ``docker ps --filter
+    name=milky-frog``; the ``milky-frog.workspace`` label (see
+    ``WORKSPACE_LABEL``) is what makes containers discoverable *by Workspace*
+    now that the name itself no longer encodes one deterministically.
+    """
+    unique = uuid.uuid4().hex[:8]
+    return f"milky-frog-{_workspace_digest(workspace)}-{unique}"
 
 
 class ContainerRegistry:
@@ -71,6 +98,7 @@ class ContainerRegistry:
 
     async def _start(self, workspace: Path) -> str:
         container_name = _container_name(workspace)
+        workspace_digest = _workspace_digest(workspace)
         result = await self._cli.capture(
             [
                 DOCKER_BINARY,
@@ -78,6 +106,8 @@ class ContainerRegistry:
                 "-d",
                 "--name",
                 container_name,
+                "--label",
+                f"{WORKSPACE_LABEL}={workspace_digest}",
                 "-v",
                 f"{workspace}:{self._workspace_mount}",
                 "-w",
@@ -88,6 +118,10 @@ class ContainerRegistry:
             ]
         )
         if result.exit_code != 0:
+            # The name is unique to this start attempt, so it cannot belong to
+            # a concurrently running milky-frog process — safe to remove.
+            with contextlib.suppress(Exception):
+                await self._cli.capture([DOCKER_BINARY, "rm", "-f", container_name])
             raise DockerUnavailable(
                 f"failed to start container from image {self._image!r}: "
                 f"{result.stderr.strip() or result.stdout.strip()}"
