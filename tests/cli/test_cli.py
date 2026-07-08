@@ -9,11 +9,31 @@ from typer.testing import CliRunner
 
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.cli import app
+from milky_frog.cli.actions import build_doctor_diagnostics
+from milky_frog.diagnostics import CheckStatus
 from milky_frog.domain import RunStatus
+from milky_frog.project import CONFIG_FILENAME, PROJECT_DIRNAME
+from milky_frog.settings import Settings
 from milky_frog.tui.app import TuiLaunch
 from tests.checkpoint_helpers import seed_run
 
 runner = CliRunner()
+
+
+def _settings(tmp_path: Path) -> Settings:
+    return Settings(
+        home=tmp_path,
+        api_key="test-key",
+        model="test-model",
+        base_url=None,
+        _env_file=None,
+    )
+
+
+def _write_config(workspace: Path, body: str) -> None:
+    root = workspace / PROJECT_DIRNAME
+    root.mkdir(parents=True, exist_ok=True)
+    (root / CONFIG_FILENAME).write_text(body, encoding="utf-8")
 
 
 @pytest.fixture(autouse=True)
@@ -235,3 +255,45 @@ def test_unknown_run_is_reported_on_stderr(tmp_path: Path) -> None:
     assert result.stdout == ""
     assert "unknown Run: missing" in result.stderr
     assert "List available Runs with: milky-frog runs" in result.stderr
+
+
+async def test_doctor_reports_local_sandbox_by_default(tmp_path: Path) -> None:
+    diagnostics = await build_doctor_diagnostics(_settings(tmp_path), tmp_path)
+
+    sandbox = next(d for d in diagnostics if d.name == "Sandbox")
+    assert sandbox.status is CheckStatus.PASS
+    assert sandbox.value == "local"
+
+
+async def test_doctor_fails_when_docker_configured_but_unavailable(tmp_path: Path) -> None:
+    _write_config(tmp_path, '[sandbox]\nkind = "docker"\nimage = "python:3.12"\n')
+
+    diagnostics = await build_doctor_diagnostics(
+        _settings(tmp_path), tmp_path, docker_available=False
+    )
+
+    sandbox = next(d for d in diagnostics if d.name == "Sandbox")
+    assert sandbox.status is CheckStatus.FAIL
+    assert "docker" in sandbox.value.lower()
+
+
+async def test_doctor_passes_when_docker_configured_and_available(tmp_path: Path) -> None:
+    _write_config(tmp_path, '[sandbox]\nkind = "docker"\nimage = "python:3.12"\n')
+
+    diagnostics = await build_doctor_diagnostics(
+        _settings(tmp_path), tmp_path, docker_available=True
+    )
+
+    sandbox = next(d for d in diagnostics if d.name == "Sandbox")
+    assert sandbox.status is CheckStatus.PASS
+    assert "python:3.12" in sandbox.value
+
+
+async def test_doctor_fails_on_invalid_sandbox_table(tmp_path: Path) -> None:
+    _write_config(tmp_path, '[sandbox]\nkind = "docker"\n')  # no image
+
+    diagnostics = await build_doctor_diagnostics(_settings(tmp_path), tmp_path)
+
+    sandbox = next(d for d in diagnostics if d.name == "Sandbox")
+    assert sandbox.status is CheckStatus.FAIL
+    assert "image" in sandbox.value
