@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from milky_frog.adapters.docker import docker_is_available
 from milky_frog.checkpoint import SqliteCheckpointStore, StoredRun
 from milky_frog.checkpoint.snapshot import dump_run_state
 from milky_frog.diagnostics import CheckStatus, Diagnostic
@@ -13,7 +14,9 @@ from milky_frog.project import (
     CONFIG_FILENAME,
     CONFIG_TEMPLATE,
     PROJECT_DIRNAME,
+    SandboxConfigError,
     load_project_config,
+    validate_sandbox_config,
 )
 from milky_frog.settings import Settings
 
@@ -49,7 +52,33 @@ class PruneResult:
     dry_run: bool
 
 
-def build_doctor_diagnostics(settings: Settings) -> tuple[Diagnostic, ...]:
+async def _sandbox_diagnostic(workspace: Path, docker_available: bool | None) -> Diagnostic:
+    try:
+        validate_sandbox_config(workspace)
+    except SandboxConfigError as error:
+        return Diagnostic("Sandbox", CheckStatus.FAIL, str(error))
+
+    config = load_project_config(workspace)
+    if config.sandbox.kind == "local":
+        return Diagnostic("Sandbox", CheckStatus.PASS, "local")
+
+    available = docker_available if docker_available is not None else await docker_is_available()
+    if not available:
+        return Diagnostic(
+            "Sandbox",
+            CheckStatus.FAIL,
+            "docker configured but the docker daemon is unreachable",
+        )
+    return Diagnostic("Sandbox", CheckStatus.PASS, f"docker ({config.sandbox.image})")
+
+
+async def build_doctor_diagnostics(
+    settings: Settings,
+    workspace: Path | None = None,
+    *,
+    docker_available: bool | None = None,
+) -> tuple[Diagnostic, ...]:
+    sandbox = await _sandbox_diagnostic(workspace or Path.cwd(), docker_available)
     return (
         Diagnostic("State directory", CheckStatus.PASS, str(settings.home)),
         Diagnostic(
@@ -67,6 +96,7 @@ def build_doctor_diagnostics(settings: Settings) -> tuple[Diagnostic, ...]:
             CheckStatus.PASS if settings.model else CheckStatus.FAIL,
             settings.model or "missing (MILKY_FROG_MODEL)",
         ),
+        sandbox,
     )
 
 

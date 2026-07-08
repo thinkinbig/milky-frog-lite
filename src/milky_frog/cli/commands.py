@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Annotated
 
@@ -19,6 +20,7 @@ from milky_frog.cli.launch import (
     require_model_configuration_or_exit,
 )
 from milky_frog.cli.runs import find_last_run, resolve_run_id
+from milky_frog.diagnostics import CheckStatus
 from milky_frog.domain import ResumeError
 from milky_frog.harness.mcp.config import MCP_CONFIG_FILENAME, load_mcp_config, set_server_enabled
 from milky_frog.settings import Settings
@@ -52,10 +54,12 @@ def register_commands(app: typer.Typer) -> None:
 def doctor() -> None:
     """Check local configuration without making a model request."""
     settings = Settings.from_environment()
-    diagnostics = build_doctor_diagnostics(settings)
+    diagnostics = asyncio.run(build_doctor_diagnostics(settings))
     render_diagnostics(diagnostics)
     if not settings.api_key or not settings.model:
         render_configuration_error(run_doctor_again=True)
+        raise typer.Exit(code=2)
+    if any(d.status is CheckStatus.FAIL for d in diagnostics):
         raise typer.Exit(code=2)
 
 

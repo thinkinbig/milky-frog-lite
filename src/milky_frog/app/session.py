@@ -8,9 +8,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import TracebackType
 
-from milky_frog.adapters.local import LocalSandbox
 from milky_frog.adapters.models import OpenAIModel
-from milky_frog.core.runtime.assemble import make_agent_harness, make_session_handlers
+from milky_frog.core.runtime.assemble import (
+    make_agent_harness,
+    make_sandbox_factory,
+    make_session_handlers,
+)
 from milky_frog.core.runtime.checkpoint import RunCheckpointFacade
 from milky_frog.core.runtime.foreground import ForegroundRun
 from milky_frog.core.sandbox import SandboxFactory
@@ -57,7 +60,7 @@ class AgentSessionConfig:
     """Session-level policy passed to ``AgentSession`` at construction time."""
 
     max_model_calls: int = DEFAULT_MAX_MODEL_CALLS
-    sandbox_factory: SandboxFactory = LocalSandbox
+    sandbox_factory: SandboxFactory | None = None
 
 
 class AgentSession:
@@ -192,6 +195,7 @@ class AgentSession:
         workspace = Path.cwd()
 
         project_cfg = load_project_config(workspace)
+        sandbox_factory = self._config.sandbox_factory or make_sandbox_factory(project_cfg)
         if project_cfg.checkpoint.prune_on_start and project_cfg.checkpoint.retention_days > 0:
             cutoff = datetime.now(UTC) - timedelta(days=project_cfg.checkpoint.retention_days)
             pruned = self._checkpoints.prune(cutoff, workspace)
@@ -247,7 +251,7 @@ class AgentSession:
                 self._settings,
                 store,
                 extra=extra,
-                sandbox_factory=self._config.sandbox_factory,
+                sandbox_factory=sandbox_factory,
             )
             for bundle in self._handlers:
                 bundle.register(self._hub)
@@ -257,7 +261,7 @@ class AgentSession:
                 checkpoints=store,
                 hub=self._hub,
                 tools=registry,
-                sandbox_factory=self._config.sandbox_factory,
+                sandbox_factory=sandbox_factory,
                 context_loader=make_context_loader(self._settings.home),
                 token_counter=counter,
                 max_retries=self._settings.max_retries,
@@ -270,7 +274,12 @@ class AgentSession:
                 interactive=self._interactive,
             )
 
-            self._shutdown.wire(self._foreground, self._handlers, self._model)
+            self._shutdown.wire(
+                self._foreground,
+                self._handlers,
+                self._model,
+                sandbox_factory=sandbox_factory,
+            )
 
             for handler in self._handlers:
                 await handler.__aenter__()

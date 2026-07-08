@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from milky_frog.core.runtime.foreground import ForegroundRun
+    from milky_frog.core.sandbox import SandboxFactory
     from milky_frog.events.hub import Handler
     from milky_frog.models.openai import OpenAIModel
 
@@ -40,6 +41,7 @@ class ShutdownManager:
         self._foreground: ForegroundRun | None = None
         self._handlers: list[Handler] = []
         self._model: OpenAIModel | None = None
+        self._sandbox_factory: SandboxFactory | None = None
 
         # Optional worker-cancel callback (set by MilkyFrogApp).
         self._cancel_worker: Callable[[], None] | None = None
@@ -51,15 +53,20 @@ class ShutdownManager:
         foreground: ForegroundRun,
         handlers: list[Handler],
         model: OpenAIModel,
+        *,
+        sandbox_factory: SandboxFactory | None = None,
     ) -> None:
         """Bind the runtime resources this manager controls.
 
         Called once from ``AgentSession.__aenter__`` after ``ForegroundRun``,
-        handler list, and model client have been created.
+        handler list, and model client have been created. ``sandbox_factory``
+        is released in ``cleanup()`` when it exposes ``aclose()`` (the container
+        Sandbox does; ``LocalSandbox`` does not).
         """
         self._foreground = foreground
         self._handlers = handlers
         self._model = model
+        self._sandbox_factory = sandbox_factory
         if self._shutdown_requested:
             self.shutdown_run()
 
@@ -136,3 +143,11 @@ class ShutdownManager:
                 await model.__aexit__(exc_type, exc, traceback)
             except Exception:
                 logger.exception("Model cleanup failed")
+
+        factory = self._sandbox_factory
+        aclose = getattr(factory, "aclose", None)
+        if aclose is not None:
+            try:
+                await aclose()
+            except Exception:
+                logger.exception("Sandbox factory cleanup failed")

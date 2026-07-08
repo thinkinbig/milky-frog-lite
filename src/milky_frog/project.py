@@ -34,6 +34,14 @@ DEFAULT_SUMMARIZATION_TRIGGER_TOKENS = 96000
 DEFAULT_SUMMARIZATION_KEEP_RECENT_TOKENS = 32000
 DEFAULT_WORKSPACE_MOUNT = "/mnt/workspace"
 
+# Host-built, architecture-specific directories that live inside a Workspace.
+# The bind mount would otherwise carry them into the container, where a macOS
+# `.venv/bin/python` or a natively-compiled `node_modules` is worse than absent:
+# a model, finding no toolchain, reaches for them and gets a misleading failure
+# (`ModuleNotFoundError: No module named 'pydantic_core._pydantic_core'`) that
+# looks like a broken sandbox. Masking makes them plainly empty instead.
+DEFAULT_MASK_PATHS: tuple[str, ...] = (".venv", "node_modules")
+
 CONFIG_TEMPLATE = (
     f"# Project-level Milky Frog configuration.\n"
     f"max_model_calls = {DEFAULT_MAX_MODEL_CALLS}\n\n"
@@ -103,13 +111,32 @@ class SandboxConfig(BaseModel):
     ``local`` (the default) runs Tools on the host under the path-deny policy.
     ``docker`` bind-mounts the Workspace into a container and runs commands
     there; it requires an ``image``.
+
+    Unknown keys are rejected. A silently-ignored ``workspace = "/mnt/foo"``
+    (the field is ``workspace_mount``) would leave the user believing they had
+    configured a mount they had not — the same class of quiet wrongness this
+    section's loud validation exists to prevent.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     kind: Literal["local", "docker"] = "local"
     image: str | None = None
     workspace_mount: str = DEFAULT_WORKSPACE_MOUNT
+    mask_paths: tuple[str, ...] = DEFAULT_MASK_PATHS
+
+    @field_validator("mask_paths")
+    @classmethod
+    def _require_relative_mask_paths(cls, v: tuple[str, ...]) -> tuple[str, ...]:
+        for path in v:
+            if not path or path.startswith("/"):
+                raise ValueError(
+                    f"mask_paths entries must be relative to the workspace, got {path!r}"
+                )
+            normalized = PurePosixPath(path)
+            if ".." in normalized.parts or str(normalized) == ".":
+                raise ValueError(f"mask_paths entries must stay inside the workspace, got {path!r}")
+        return v
 
     @field_validator("workspace_mount")
     @classmethod
@@ -273,13 +300,19 @@ def _compact_validation_message(error: ValidationError) -> str:
     indented "Value error," prefix per message, and a
     "https://errors.pydantic.dev/..." link — none of which helps a user fix
     their TOML. ``error.errors()[i]["msg"]`` is the human-readable part.
+
+    The field is prefixed when pydantic knows one. Without it, an unknown key
+    reports only "Extra inputs are not permitted", which names neither the key
+    at fault nor the key that was meant — loud, but not actionable. Whole-model
+    validators carry an empty ``loc`` and are reported unprefixed.
     """
     messages = []
     for item in error.errors():
         msg = item["msg"]
         if msg.startswith(_VALUE_ERROR_PREFIX):
             msg = msg[len(_VALUE_ERROR_PREFIX) :]
-        messages.append(msg)
+        location = ".".join(str(part) for part in item["loc"])
+        messages.append(f"{location}: {msg}" if location else msg)
     return "; ".join(messages)
 
 

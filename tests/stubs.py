@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import BaseModel
 
+from milky_frog.adapters.docker.cli import DockerCliResult, DockerUnavailable
 from milky_frog.adapters.local import LocalSandbox
 from milky_frog.checkpoint import CheckpointStore
 from milky_frog.core.runtime.assemble import make_agent_harness
@@ -348,3 +350,119 @@ class TimingOutSandboxFactory:
 
     def __call__(self, workspace: Path) -> Sandbox:
         return FixedOutcomeSandbox(workspace, CommandTimeout(seconds=1.0))
+
+
+class ClosingSandboxFactory:
+    """SandboxFactory that records whether aclose() was awaited."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def __call__(self, workspace: Path) -> Sandbox:
+        return LocalSandbox(workspace)
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+# ── Docker CLI stubs ─────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class CombinedCall:
+    """One recorded ``DockerCli.combined`` invocation."""
+
+    argv: list[str]
+    timeout_seconds: float
+
+
+class StubDockerCli:
+    """DockerCli double: records argv, returns canned results. No daemon needed.
+
+    ``run_stdout`` overrides what ``docker run`` reports on stdout, letting a
+    test simulate a banner-prefixed line (id still parses) or empty/whitespace
+    stdout (no usable id). ``run_exit_code`` lets a test simulate ``docker
+    run`` itself failing (e.g. no such image, daemon rejected the request).
+    """
+
+    def __init__(
+        self,
+        *,
+        container_id: str = "container-1",
+        outcome: CommandOutcome | None = None,
+        run_stdout: str | None = None,
+        run_exit_code: int = 0,
+        run_stderr: str = "",
+        unique_ids: bool = False,
+    ) -> None:
+        self._container_id = container_id
+        self._outcome = outcome if outcome is not None else CommandResult(0, "ok\n")
+        self._run_stdout = run_stdout
+        self._run_exit_code = run_exit_code
+        self._run_stderr = run_stderr
+        self._unique_ids = unique_ids
+        self._run_count = 0
+        self.captured: list[list[str]] = []
+        self.combined_calls: list[CombinedCall] = []
+
+    def _next_run_stdout(self) -> str:
+        if self._run_stdout is not None:
+            return self._run_stdout
+        self._run_count += 1
+        if self._unique_ids:
+            return f"{self._container_id}-{self._run_count}\n"
+        return f"{self._container_id}\n"
+
+    async def capture(self, argv: Sequence[str]) -> DockerCliResult:
+        self.captured.append(list(argv))
+        if argv[:2] == ["docker", "run"]:
+            return DockerCliResult(
+                exit_code=self._run_exit_code,
+                stdout=self._next_run_stdout(),
+                stderr=self._run_stderr,
+            )
+        return DockerCliResult(exit_code=0, stdout="", stderr="")
+
+    async def combined(self, argv: Sequence[str], *, timeout_seconds: float) -> CommandOutcome:
+        self.combined_calls.append(CombinedCall(list(argv), timeout_seconds))
+        return self._outcome
+
+    def removed_ids(self) -> list[str]:
+        """Container ids passed to ``docker rm -f``, in call order."""
+        return [argv[-1] for argv in self.captured if argv[:3] == ["docker", "rm", "-f"]]
+
+    def run_count(self) -> int:
+        return sum(1 for argv in self.captured if argv[:2] == ["docker", "run"])
+
+
+class FailingRemoveDockerCli(StubDockerCli):
+    """``docker rm -f`` always raises — proves aclose() keeps going anyway."""
+
+    async def capture(self, argv: Sequence[str]) -> DockerCliResult:
+        result = await super().capture(argv)
+        if argv[:3] == ["docker", "rm", "-f"]:
+            raise DockerUnavailable("daemon died during teardown")
+        return result
+
+
+class CancellingRunDockerCli(StubDockerCli):
+    """``docker run`` is cancelled mid-flight, as Ctrl-C would do.
+
+    Models the dangerous case: the daemon may already have created the
+    container, but the client never returns an id for us to track.
+    """
+
+    async def capture(self, argv: Sequence[str]) -> DockerCliResult:
+        result = await super().capture(argv)
+        if argv[:2] == ["docker", "run"]:
+            raise asyncio.CancelledError
+        return result
+
+
+class SlowRunDockerCli(StubDockerCli):
+    """Yields to the event loop inside ``docker run`` so two acquires can race."""
+
+    async def capture(self, argv: Sequence[str]) -> DockerCliResult:
+        if argv[:2] == ["docker", "run"]:
+            await asyncio.sleep(0)
+        return await super().capture(argv)

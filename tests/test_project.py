@@ -196,6 +196,41 @@ def test_sandbox_config_reads_docker_table(tmp_path: Path) -> None:
     assert config.sandbox.workspace_mount == "/mnt/workspace"
 
 
+
+def test_sandbox_config_rejects_unknown_keys() -> None:
+    """`workspace` is not `workspace_mount`. Silently ignoring the typo would
+    leave the user believing they configured a mount they did not."""
+    with pytest.raises(ValidationError, match="workspace"):
+        SandboxConfig(kind="docker", image="python:3.12", workspace="/mnt/elsewhere")  # type: ignore[call-arg]
+
+
+def test_validate_sandbox_config_rejects_unknown_keys(tmp_path: Path) -> None:
+    _write_config(
+        tmp_path,
+        '[sandbox]\nkind = "docker"\nimage = "python:3.12"\nworkspace = "/mnt/workspace"\n',
+    )
+
+    with pytest.raises(SandboxConfigError, match="workspace"):
+        validate_sandbox_config(tmp_path)
+
+
+@pytest.mark.parametrize("bad", ["/abs/path", "../escape", "a/../../etc", "", "."])
+def test_sandbox_config_rejects_escaping_mask_paths(bad: str) -> None:
+    with pytest.raises(ValidationError):
+        SandboxConfig(mask_paths=(bad,))
+
+
+def test_sandbox_config_masks_host_build_dirs_by_default() -> None:
+    """Defence, not opt-in: a host .venv in the mount is a loaded gun."""
+    assert SandboxConfig().mask_paths == (".venv", "node_modules")
+
+
+def test_sandbox_config_mask_paths_can_be_disabled(tmp_path: Path) -> None:
+    _write_config(tmp_path, "[sandbox]\nmask_paths = []\n")
+
+    assert load_project_config(tmp_path).sandbox.mask_paths == ()
+
+
 def test_sandbox_config_rejects_mount_outside_mnt() -> None:
     with pytest.raises(ValidationError):
         SandboxConfig(kind="local", workspace_mount="/workspace")

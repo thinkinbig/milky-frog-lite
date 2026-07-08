@@ -4,7 +4,9 @@ from dataclasses import dataclass, field
 from types import TracebackType
 
 import pytest
+from stubs import ClosingSandboxFactory
 
+from milky_frog.adapters.local import LocalSandbox
 from milky_frog.core.shutdown import ShutdownManager
 
 
@@ -163,3 +165,30 @@ async def test_failing_handler_does_not_block_siblings() -> None:
     await mgr.cleanup(None, None, None)
 
     assert ok.exit_calls == ["ok"]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_closes_sandbox_factory() -> None:
+    mgr = ShutdownManager()
+    factory = ClosingSandboxFactory()
+    mgr.wire(_FakeForeground(), [], _FakeModel(), sandbox_factory=factory)  # type: ignore[arg-type]
+
+    await mgr.cleanup(None, None, None)
+
+    assert factory.closed is True
+
+
+@pytest.mark.asyncio
+async def test_cleanup_tolerates_factory_without_aclose() -> None:
+    mgr = ShutdownManager()
+    mgr.wire(_FakeForeground(), [], _FakeModel(), sandbox_factory=LocalSandbox)  # type: ignore[arg-type]
+
+    await mgr.cleanup(None, None, None)  # LocalSandbox has no aclose(); must not raise
+
+
+@pytest.mark.asyncio
+async def test_cleanup_without_sandbox_factory_is_a_noop() -> None:
+    mgr = ShutdownManager()
+    mgr.wire(_FakeForeground(), [], _FakeModel())  # type: ignore[arg-type]
+
+    await mgr.cleanup(None, None, None)  # must not raise

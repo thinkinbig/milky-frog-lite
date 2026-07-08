@@ -323,8 +323,10 @@ workspace_mount = "/mnt/workspace"   # must live under /mnt
 - `build_env()` does **not** forward host `HOME`/`PATH`/`SHELL` — those name host
   filesystem locations. `env_allowlist_extra` values do travel.
 - Command execution is genuinely isolated; **file access is not**. A process in
-  the container reaches the whole bind-mounted Workspace. This remains a policy
-  boundary, not a defence against a hostile model.
+  the container reaches the whole bind-mounted Workspace — including a writable
+  `.git/`, so a hook written inside the container is executed *by the host* on
+  the next git operation. This remains a policy boundary, not a defence against
+  a hostile model. Isolating the Workspace itself is tracked in #83.
 - A timeout kills the host-side `docker exec` client. The in-container process
   may linger until the container is removed at session end.
 
