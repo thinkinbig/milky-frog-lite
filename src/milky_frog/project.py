@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import tomllib
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Literal
 
 from pydantic import (
@@ -114,7 +114,15 @@ class SandboxConfig(BaseModel):
     @field_validator("workspace_mount")
     @classmethod
     def _require_mnt_prefix(cls, v: str) -> str:
-        if v != "/mnt" and not v.startswith("/mnt/"):
+        # Require absolute path
+        if not v.startswith("/"):
+            raise ValueError(f"workspace_mount must be /mnt or under /mnt/, got {v!r}")
+        # Reject paths with upward traversals
+        normalized = PurePosixPath(v)
+        if ".." in normalized.parts:
+            raise ValueError(f"workspace_mount must be /mnt or under /mnt/, got {v!r}")
+        # Check normalized path is /mnt or under /mnt/
+        if str(normalized) != "/mnt" and not str(normalized).startswith("/mnt/"):
             raise ValueError(f"workspace_mount must be /mnt or under /mnt/, got {v!r}")
         return v
 
