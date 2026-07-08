@@ -207,6 +207,9 @@ def test_sandbox_config_rejects_mount_outside_mnt() -> None:
         "/workspace",
         "/mntfoo",
         "/mntish/x",
+        "/mnt/../etc",
+        "/mnt/../../root",
+        "mnt/workspace",
     ],
 )
 def test_sandbox_config_rejects_invalid_mounts(rejected_mount: str) -> None:
