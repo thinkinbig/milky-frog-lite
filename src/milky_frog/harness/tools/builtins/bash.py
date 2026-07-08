@@ -38,7 +38,9 @@ class BashTool:
         f"(default inline cap {DEFAULT_BASH_OUTPUT_MAX_CHARS} chars; "
         "override bash_output_max_chars in .milky-frog/config.toml). "
         "Commands run non-interactively (no pagers or terminal prompts; stdin closed). "
-        "Host env is limited to HOME, PATH, SHELL, TERM, LANG, LC_ALL, TMPDIR. "
+        "The environment is a small allowlist, not your shell's: locally HOME, PATH, "
+        "SHELL, TERM, LANG, LC_ALL, TMPDIR; under the container Sandbox no host "
+        "variables are forwarded at all. "
         f"Default timeout is {DEFAULT_BASH_TIMEOUT_SECONDS} seconds; "
         "override with bash_timeout_seconds in .milky-frog/config.toml."
     )
