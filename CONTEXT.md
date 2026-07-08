@@ -54,8 +54,12 @@ _Avoid_: Plugin, Tool
 
 **Local Sandbox**:
 A policy boundary that constrains structured file operations and requires approval for shell commands, but does not isolate untrusted code from the host.
-Implemented by the `Sandbox` protocol; default adapter is `LocalSandbox` (`harness/sandbox/`).
+Implemented by the `Sandbox` protocol; default adapter is `LocalSandbox` (`adapters/local/`).
 _Avoid_: Container, secure sandbox
+
+**Container Sandbox**:
+A Sandbox adapter that executes commands inside a container against a bind-mounted Workspace. Isolates command execution; does not isolate file access. Implemented by `DockerSandbox` (`adapters/docker/`), opt-in via `[sandbox].kind = "docker"`.
+_Avoid_: DockerExecutionBackend, execution backend, secure sandbox
 
 **Provider**:
 The model vendor whose tokenizer and wire conventions a Run uses (for example `openai`, `deepseek`). Inferred from the model name and base URL, overridable via `MILKY_FROG_PROVIDER`. Selects the exact token counter, falling back to an approximate one when the provider is unknown or its tokenizer package is absent.
@@ -123,8 +127,12 @@ _避免使用_：插件、Tool
 
 **Local Sandbox（本地沙箱）**：
 一种策略边界，用于限制结构化文件操作并要求用户批准 shell 命令，但不将不可信代码与宿主机隔离。
-由 `Sandbox` 协议实现；默认适配器为 `LocalSandbox`（`harness/sandbox/`）。
+由 `Sandbox` 协议实现；默认适配器为 `LocalSandbox`（`adapters/local/`）。
 _避免使用_：容器、安全沙箱
+
+**Container Sandbox（容器沙箱）**：
+在容器内针对 bind-mount 的 Workspace 执行命令的 Sandbox 适配器。隔离命令执行，不隔离文件访问。由 `DockerSandbox`（`adapters/docker/`）实现，通过 `[sandbox].kind = "docker"` 选择启用。
+_避免使用_：DockerExecutionBackend、execution backend、secure sandbox
 
 **Provider（提供方）**：
 一个 Run 所用模型供应商的 tokenizer 与传输约定（例如 `openai`、`deepseek`）。由 model 名与 base URL 推断，可用 `MILKY_FROG_PROVIDER` 覆盖。用于选择精确 token 计数器；当 provider 未知或其 tokenizer 包缺失时退回近似计数。

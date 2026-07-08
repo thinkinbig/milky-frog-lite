@@ -265,7 +265,7 @@ harness. The defaults are wired in `make_agent_harness`.
 | **Tools** | `Tool` + `ToolRegistry` (`harness/tools/`) | `default_tools()` — `read_file`, `write_file`, `edit_file`, `list_dir`, `grep`, `bash` | Register more tools; inputs are validated through Pydantic models. |
 | **Tool policy** | `ToolPolicy` | `SessionToolPolicy` | Inline authorization / approval gating before execution. |
 | **Checkpoint store** | `CheckpointStore` (`checkpoint/`) | `SqliteCheckpointStore` | Alternative durable backends. |
-| **Sandbox** | `Sandbox` (`core/sandbox.py`) | `LocalSandbox`, injected via `sandbox_factory` | A future `DockerSandbox` swaps this one seam for real isolation. |
+| **Sandbox** | `Sandbox` (`core/sandbox.py`) | `LocalSandbox`, injected via `sandbox_factory` | `DockerSandbox` (`adapters/docker/`) swaps this one seam for container execution; selected by `[sandbox].kind` in `.milky-frog/config.toml`. |
 | **Context injection** | `ContextLoader` (`harness/prompt_context.py`) | `make_context_loader(home)` | Inject a system-prompt section at Run start. |
 | **Token budget** | `TokenBudget` (`harness/budget.py`) | injected `TokenCounter` | `trim`s each `ModelRequest` before the model call — the one live example of per-call request shaping. |
 | **Token counter** | `TokenCounter` (`tokens/base.py`) | `ApproxCharCounter` | `make_token_counter(provider)` picks `TiktokenCounter` (tiktoken) or `HFTokenizerCounter` (tokenizers) per Provider, degrading to approximate. Optional deps; core never imports them. |
@@ -279,7 +279,7 @@ harness. The defaults are wired in `make_agent_harness`.
 
 ---
 
-## 7. The Local Sandbox policy
+## 7. The Sandbox policy
 
 The `Sandbox` seam (`core/sandbox.py`; default `LocalSandbox` in
 `adapters/local/`) is a **policy boundary, not host isolation**. It:
@@ -289,11 +289,44 @@ The `Sandbox` seam (`core/sandbox.py`; default `LocalSandbox` in
 - gates shell commands behind user approval;
 - owns the subprocess environment for `bash`.
 
-It does **not** contain untrusted code — a determined process running inside it
-still runs on the host. The boundary exists to stop a cooperating model from
-*accidentally* touching something sensitive, and to put a human in the loop for
-shell. Real isolation is deliberately deferred to a future `DockerSandbox` that
-implements the same protocol.
+It does **not** contain untrusted code. Under `LocalSandbox` a determined
+process still runs on the host. The boundary exists to stop a cooperating model
+from *accidentally* touching something sensitive, and to put a human in the loop
+for shell.
+
+Both adapters route **every** shell command through `Sandbox.run_command()` —
+`bash` (`harness/tools/builtins/bash.py`) and the post-edit
+`VerificationHandler`. Nothing else in the codebase spawns a command. (MCP
+servers are the one live exception: `McpClientManager` spawns its own stdio
+subprocesses, because a long-lived piped process needs a `spawn()`-shaped seam
+this protocol does not yet have. Tracked separately.)
+
+### The Container Sandbox
+
+`DockerSandbox` (`adapters/docker/`) is the opt-in alternative, enabled by:
+
+```toml
+[sandbox]
+kind = "docker"
+image = "python:3.12-bookworm"
+workspace_mount = "/mnt/workspace"   # must live under /mnt
+```
+
+- The Workspace is **bind-mounted** at `workspace_mount`. `resolve()` therefore
+  still returns a host path and delegates to a composed `LocalSandbox` — the
+  deny-pattern policy is identical, and `read_file` / `write_file` / `edit_file`
+  / `grep` / `list_dir` need no container awareness at all.
+- `run_command()` is the only container-specific method: a container is created
+  lazily per Workspace (`docker run -d … sleep infinity`) and reused for every
+  subsequent `docker exec`. `DockerSandboxFactory.aclose()`, wired into
+  `ShutdownManager`, removes them.
+- `build_env()` does **not** forward host `HOME`/`PATH`/`SHELL` — those name host
+  filesystem locations. `env_allowlist_extra` values do travel.
+- Command execution is genuinely isolated; **file access is not**. A process in
+  the container reaches the whole bind-mounted Workspace. This remains a policy
+  boundary, not a defence against a hostile model.
+- A timeout kills the host-side `docker exec` client. The in-container process
+  may linger until the container is removed at session end.
 
 ---
 

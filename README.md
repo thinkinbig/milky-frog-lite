@@ -60,6 +60,39 @@ milky-frog resume [RUN_ID]    # resume an interrupted run
 milky-frog prune              # remove old runs (add --dry-run to preview)
 ```
 
+## Containerized execution (opt-in)
+
+By default Milky Frog runs Tools on the host under a path-deny policy. To run
+`bash` and post-edit verification commands inside a container instead, add to
+`.milky-frog/config.toml`:
+
+```toml
+[sandbox]
+kind = "docker"
+image = "python:3.12-bookworm"
+workspace_mount = "/mnt/workspace"   # optional; must live under /mnt
+```
+
+Requires the `docker` CLI on `PATH` and a running daemon — `milky-frog doctor`
+checks both.
+
+How it works: your workspace is bind-mounted into a container that is created
+on first use and reused for the rest of the session, then removed on exit.
+File Tools (`read_file`, `write_file`, `edit_file`, `grep`, `list_dir`) keep
+reading and writing on the host — the bind mount means both sides see the same
+files.
+
+Caveats:
+
+- **File access is not isolated.** A process in the container can reach every
+  file in the bind-mounted workspace. This isolates *command execution*, not
+  the workspace.
+- Host `HOME` / `PATH` / `SHELL` are not forwarded into the container. Names
+  listed in `env_allowlist_extra` are.
+- A `bash` timeout kills the host-side `docker exec`; the process inside the
+  container may keep running until the container is removed at session exit.
+- MCP servers still run on the host, not in the container.
+
 ## Security
 
 Shell commands require your approval before they run, and structured file operations are
@@ -67,7 +100,9 @@ constrained by a local policy. Sensitive paths such as `.env`, private keys, and
 are denied by default; add more exclusions in a `.milkyfrogignore` file.
 
 This is a usage policy, not a security boundary — it does not safely isolate untrusted
-code. Only run Milky Frog against code and commands you trust.
+code. Only run Milky Frog against code and commands you trust. Setting
+`[sandbox].kind = "docker"` moves *command execution* into a container, but the workspace
+is bind-mounted and stays reachable from inside it.
 
 ## License
 
@@ -131,9 +166,39 @@ milky-frog resume [RUN_ID]    # 恢复中断的 Run
 milky-frog prune              # 清理旧的 Run（加 --dry-run 预览）
 ```
 
+## 容器化执行（可选）
+
+奶蛙默认在宿主机上执行 Tool，并受路径拒绝策略约束。若希望改为在容器内执行 `bash`
+与编辑后的校验命令，请在 `.milky-frog/config.toml` 中加入：
+
+```toml
+[sandbox]
+kind = "docker"
+image = "python:3.12-bookworm"
+workspace_mount = "/mnt/workspace"   # 可选；必须位于 /mnt 之下
+```
+
+需要 `PATH` 上有 `docker` CLI 且守护进程正在运行——`milky-frog doctor` 会同时检查这两项。
+
+工作方式：Workspace 会以 bind mount 挂载进容器；容器在首次使用时创建，并在整个
+session 内复用，退出时移除。文件类 Tool（`read_file`、`write_file`、`edit_file`、
+`grep`、`list_dir`）仍在宿主机上读写——bind mount 保证两侧看到的是同一批文件。
+
+注意事项：
+
+- **文件访问并未隔离。** 容器内的进程可以访问 bind-mount 的整个 Workspace。
+  被隔离的是*命令执行*，不是 Workspace 本身。
+- 宿主机的 `HOME` / `PATH` / `SHELL` 不会传入容器；`env_allowlist_extra` 中列出的
+  变量名会传入。
+- `bash` 超时只会杀掉宿主机侧的 `docker exec`；容器内的进程可能一直运行到
+  session 退出、容器被移除为止。
+- MCP server 仍运行在宿主机上，而不在容器内。
+
 ## 安全边界
 
 shell 命令在执行前需要你的批准，结构化文件操作受本地策略约束。`.env`、私钥和 `.git/`
 等敏感路径默认禁止访问；可在 `.milkyfrogignore` 文件中添加更多排除规则。
 
 这是一项使用策略，而非安全隔离边界——它无法安全隔离不可信代码。请仅在你信任的代码与命令上运行奶蛙。
+设置 `[sandbox].kind = "docker"` 会把*命令执行*移入容器，但 Workspace 是 bind-mount 进去的，
+在容器内依然可以访问。
