@@ -123,3 +123,44 @@ async def test_disabled_when_after_edit_false(tmp_path: Path) -> None:
 
     results = await hub.after_tool("test", event.call, event.result, event.state)
     assert not any(isinstance(r, VerificationNotice) for r in results)
+
+
+@pytest.mark.asyncio
+async def test_verification_uses_sandbox_run_command(tmp_path: Path) -> None:
+    """Commands go through the Sandbox seam, not a raw host subprocess."""
+    from tests.stubs import RecordingCommandSandboxFactory
+
+    _write_config(tmp_path, '[verification]\nafter_edit = true\ncommands = ["echo hello"]\n')
+    recorder = RecordingCommandSandboxFactory()
+    handler = VerificationHandler(recorder)
+    hub = EventHub()
+    handler.register(hub)
+
+    state = _make_state(tmp_path)
+    call = ToolCall("call-1", "edit_file", {"path": "foo.py", "old": "x", "new": "y"})
+    results = await hub.after_tool("test", call, ToolResult("ok", is_error=False), state)
+
+    notices = [r for r in results if isinstance(r, VerificationNotice)]
+    assert recorder.commands == ["echo hello"]
+    assert len(notices) == 1
+    assert notices[0].exit_code_summary == "all pass"
+
+
+@pytest.mark.asyncio
+async def test_verification_reports_timeout_as_failure(tmp_path: Path) -> None:
+    """Timeout is reported as failure, not raised."""
+    from tests.stubs import TimingOutSandboxFactory
+
+    _write_config(tmp_path, '[verification]\nafter_edit = true\ncommands = ["sleep 99"]\n')
+    handler = VerificationHandler(TimingOutSandboxFactory())
+    hub = EventHub()
+    handler.register(hub)
+
+    state = _make_state(tmp_path)
+    call = ToolCall("call-1", "edit_file", {"path": "foo.py", "old": "x", "new": "y"})
+    results = await hub.after_tool("test", call, ToolResult("ok", is_error=False), state)
+
+    notices = [r for r in results if isinstance(r, VerificationNotice)]
+    assert len(notices) == 1
+    assert notices[0].exit_code_summary == "one or more commands FAILED"
+    assert "timed out" in notices[0].summary
