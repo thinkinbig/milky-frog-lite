@@ -2,8 +2,16 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from milky_frog.domain import DEFAULT_MAX_MODEL_CALLS
 
@@ -24,6 +32,7 @@ DEFAULT_READ_OUTPUT_MAX_CHARS = 64000
 DEFAULT_SEARCH_OUTPUT_MAX_CHARS = 32000
 DEFAULT_SUMMARIZATION_TRIGGER_TOKENS = 96000
 DEFAULT_SUMMARIZATION_KEEP_RECENT_TOKENS = 32000
+DEFAULT_WORKSPACE_MOUNT = "/mnt/workspace"
 
 CONFIG_TEMPLATE = (
     f"# Project-level Milky Frog configuration.\n"
@@ -66,7 +75,54 @@ CONFIG_TEMPLATE = (
     f"\n"
     f"# Additional host env var names forwarded to subprocesses (uppercase identifiers).\n"
     f'# env_allowlist_extra = ["MY_BUILD_VAR", "DEPLOY_TOKEN"]\n'
+    f"\n"
+    f"# Execution Sandbox. 'local' runs Tools on the host under the path-deny\n"
+    f"# policy. 'docker' bind-mounts the workspace into a container and runs\n"
+    f"# bash + verification commands there (requires the docker CLI on PATH).\n"
+    f"# [sandbox]\n"
+    f'# kind = "docker"\n'
+    f'# image = "python:3.12-bookworm"\n'
+    f'# workspace_mount = "{DEFAULT_WORKSPACE_MOUNT}"  # must live under /mnt\n'
 )
+
+
+class SandboxConfigError(ValueError):
+    """Raised when the ``[sandbox]`` table is present but invalid.
+
+    Unlike the rest of ``config.toml`` — where a malformed value silently
+    yields defaults so a broken file never blocks a Run — a broken
+    ``[sandbox]`` table must fail loudly. Silently falling back to
+    ``LocalSandbox`` would leave a user who asked for container isolation
+    running unsandboxed on the host with no signal.
+    """
+
+
+class SandboxConfig(BaseModel):
+    """Which Sandbox adapter a Workspace uses, and how to build it.
+
+    ``local`` (the default) runs Tools on the host under the path-deny policy.
+    ``docker`` bind-mounts the Workspace into a container and runs commands
+    there; it requires an ``image``.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["local", "docker"] = "local"
+    image: str | None = None
+    workspace_mount: str = DEFAULT_WORKSPACE_MOUNT
+
+    @field_validator("workspace_mount")
+    @classmethod
+    def _require_mnt_prefix(cls, v: str) -> str:
+        if not v.startswith("/mnt"):
+            raise ValueError(f"workspace_mount must live under /mnt, got {v!r}")
+        return v
+
+    @model_validator(mode="after")
+    def _require_image_for_docker(self) -> SandboxConfig:
+        if self.kind == "docker" and not self.image:
+            raise ValueError("image is required when sandbox.kind = 'docker'")
+        return self
 
 
 class CheckpointConfig(BaseModel):
@@ -126,6 +182,7 @@ class ProjectConfig(BaseModel):
     env_allowlist_extra: tuple[str, ...] = ()
     checkpoint: CheckpointConfig = CheckpointConfig()
     verification: VerificationConfig = VerificationConfig()
+    sandbox: SandboxConfig = SandboxConfig()
 
     # ── Validators ────────────────────────────────────────────────
 
@@ -174,18 +231,41 @@ def project_root(workspace: Path) -> Path:
     return workspace / PROJECT_DIRNAME
 
 
+def _read_config_data(workspace: Path) -> dict[str, object] | None:
+    path = project_root(workspace) / CONFIG_FILENAME
+    try:
+        return tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+
+
 def load_project_config(workspace: Path) -> ProjectConfig:
     """Read ``<workspace>/.milky-frog/config.toml``; fall back to defaults.
 
     A missing or malformed file yields defaults rather than raising, so a
-    broken config never blocks a Run.
+    broken config never blocks a Run. Callers that must not silently accept a
+    broken ``[sandbox]`` table call ``validate_sandbox_config`` first.
     """
-    path = project_root(workspace) / CONFIG_FILENAME
-    try:
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError):
+    data = _read_config_data(workspace)
+    if data is None:
         return ProjectConfig()
     try:
         return ProjectConfig.model_validate(data)
     except ValidationError:
         return ProjectConfig()
+
+
+def validate_sandbox_config(workspace: Path) -> None:
+    """Raise ``SandboxConfigError`` if the ``[sandbox]`` table is invalid.
+
+    Called once at startup (CLI entry, ``doctor``). ``load_project_config`` is
+    deliberately left lenient because it runs on per-step hot paths where
+    raising would abort a Run mid-flight.
+    """
+    data = _read_config_data(workspace)
+    if data is None or "sandbox" not in data:
+        return
+    try:
+        SandboxConfig.model_validate(data["sandbox"])
+    except ValidationError as error:
+        raise SandboxConfigError(f"invalid [sandbox] in {CONFIG_FILENAME}: {error}") from error

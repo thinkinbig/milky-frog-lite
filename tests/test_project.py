@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from milky_frog.domain import DEFAULT_MAX_MODEL_CALLS
 from milky_frog.project import (
     CONFIG_FILENAME,
@@ -9,7 +12,10 @@ from milky_frog.project import (
     DEFAULT_BASH_TIMEOUT_SECONDS,
     DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS,
     PROJECT_DIRNAME,
+    SandboxConfig,
+    SandboxConfigError,
     load_project_config,
+    validate_sandbox_config,
 )
 
 
@@ -167,3 +173,64 @@ def test_verification_generated_template_round_trips(tmp_path: Path) -> None:
         "uv run ruff check .",
         "uv run pytest -q",
     )
+
+
+def test_sandbox_config_defaults_to_local(tmp_path: Path) -> None:
+    config = load_project_config(tmp_path)
+
+    assert config.sandbox.kind == "local"
+    assert config.sandbox.image is None
+    assert config.sandbox.workspace_mount == "/mnt/workspace"
+
+
+def test_sandbox_config_reads_docker_table(tmp_path: Path) -> None:
+    _write_config(
+        tmp_path,
+        '[sandbox]\nkind = "docker"\nimage = "python:3.12-bookworm"\n',
+    )
+
+    config = load_project_config(tmp_path)
+
+    assert config.sandbox.kind == "docker"
+    assert config.sandbox.image == "python:3.12-bookworm"
+    assert config.sandbox.workspace_mount == "/mnt/workspace"
+
+
+def test_sandbox_config_rejects_mount_outside_mnt() -> None:
+    with pytest.raises(ValidationError):
+        SandboxConfig(kind="local", workspace_mount="/workspace")
+
+
+def test_sandbox_config_requires_image_for_docker() -> None:
+    with pytest.raises(ValidationError):
+        SandboxConfig(kind="docker")
+
+
+def test_validate_sandbox_config_raises_on_docker_without_image(tmp_path: Path) -> None:
+    _write_config(tmp_path, '[sandbox]\nkind = "docker"\n')
+
+    with pytest.raises(SandboxConfigError, match="image"):
+        validate_sandbox_config(tmp_path)
+
+
+def test_validate_sandbox_config_raises_on_bad_mount(tmp_path: Path) -> None:
+    _write_config(
+        tmp_path,
+        '[sandbox]\nkind = "docker"\nimage = "python:3.12"\nworkspace_mount = "/workspace"\n',
+    )
+
+    with pytest.raises(SandboxConfigError, match="/mnt"):
+        validate_sandbox_config(tmp_path)
+
+
+def test_validate_sandbox_config_passes_when_absent(tmp_path: Path) -> None:
+    validate_sandbox_config(tmp_path)  # no [sandbox] table: nothing to validate
+
+
+def test_load_project_config_stays_lenient_on_bad_sandbox_table(tmp_path: Path) -> None:
+    """The hot path never raises; validate_sandbox_config() is the loud gate."""
+    _write_config(tmp_path, '[sandbox]\nkind = "docker"\n')
+
+    config = load_project_config(tmp_path)
+
+    assert config.sandbox.kind == "local"
