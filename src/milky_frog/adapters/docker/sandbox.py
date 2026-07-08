@@ -17,7 +17,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
-import logging
 import os
 import uuid
 from pathlib import Path
@@ -32,8 +31,6 @@ from milky_frog.adapters.local import LocalSandbox
 from milky_frog.adapters.process import with_presentation_env
 from milky_frog.core.sandbox import CommandOutcome, CommandPresentation, Sandbox
 from milky_frog.project import ProjectConfig
-
-logger = logging.getLogger(__name__)
 
 _NONINTERACTIVE_ENV: dict[str, str] = {
     "CI": "true",
@@ -102,24 +99,34 @@ class ContainerRegistry:
     async def _start(self, workspace: Path) -> str:
         container_name = _container_name(workspace)
         workspace_digest = _workspace_digest(workspace)
-        result = await self._cli.capture(
-            [
-                DOCKER_BINARY,
-                "run",
-                "-d",
-                "--name",
-                container_name,
-                "--label",
-                f"{WORKSPACE_LABEL}={workspace_digest}",
-                "-v",
-                f"{workspace}:{self._workspace_mount}",
-                "-w",
-                self._workspace_mount,
-                self._image,
-                "sleep",
-                "infinity",
-            ]
-        )
+        try:
+            result = await self._cli.capture(
+                [
+                    DOCKER_BINARY,
+                    "run",
+                    "-d",
+                    "--name",
+                    container_name,
+                    "--label",
+                    f"{WORKSPACE_LABEL}={workspace_digest}",
+                    "-v",
+                    f"{workspace}:{self._workspace_mount}",
+                    "-w",
+                    self._workspace_mount,
+                    self._image,
+                    "sleep",
+                    "infinity",
+                ]
+            )
+        except BaseException:
+            # Cancelled (Ctrl-C) or the client died mid-run: the daemon may have
+            # created the container anyway, and we never learned its id. The name
+            # is unique to this attempt, so removing by name cannot touch another
+            # process's container — and without this the container is orphaned
+            # with nothing left holding a reference to it.
+            with contextlib.suppress(BaseException):
+                await self._cli.capture([DOCKER_BINARY, "rm", "-f", container_name])
+            raise
         if result.exit_code != 0:
             # The name is unique to this start attempt, so it cannot belong to
             # a concurrently running milky-frog process — safe to remove.
@@ -150,14 +157,8 @@ class ContainerRegistry:
         for container_id in containers:
             # One failing removal must not strand the containers after it —
             # `_containers` is already cleared, so nothing else will retry them.
-            # Suppressed, but never silent: a surviving container is exactly the
-            # thing an operator needs told, and `docker ps` will not explain why.
-            try:
+            with contextlib.suppress(Exception):
                 await self._cli.capture([DOCKER_BINARY, "rm", "-f", container_id])
-            except Exception:
-                logger.exception(
-                    "failed to remove container %s; it may be left running", container_id
-                )
 
 
 class DockerSandbox:

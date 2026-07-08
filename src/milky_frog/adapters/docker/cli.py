@@ -57,7 +57,19 @@ class SubprocessDockerCli:
         except OSError as error:
             raise DockerUnavailable(f"cannot run {DOCKER_BINARY}: {error}") from error
 
-        stdout, stderr = await process.communicate()
+        communicate = asyncio.create_task(process.communicate())
+        try:
+            stdout, stderr = await asyncio.shield(communicate)
+        except BaseException:
+            # Killing the client does not remove a container the daemon already
+            # created — `_start` reaps that by name. Here we only make sure the
+            # child process itself is killed and settled, never left unreaped.
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
+            with contextlib.suppress(BaseException):
+                await communicate
+            raise
+
         return DockerCliResult(
             exit_code=process.returncode if process.returncode is not None else 0,
             stdout=stdout.decode("utf-8", errors="replace"),

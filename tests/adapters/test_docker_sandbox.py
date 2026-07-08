@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from pathlib import Path
 
 import pytest
-from stubs import StubDockerCli
+from stubs import (
+    CancellingRunDockerCli,
+    FailingRemoveDockerCli,
+    SlowRunDockerCli,
+    StubDockerCli,
+)
 
 from milky_frog.adapters.docker import DockerSandboxFactory
 from milky_frog.adapters.docker.cli import DockerUnavailable
@@ -255,3 +261,82 @@ async def test_start_cleans_up_container_on_nonzero_exit(tmp_path: Path) -> None
     name_index = run_argv.index("--name")
     used_name = run_argv[name_index + 1]
     assert ["docker", "rm", "-f", used_name] in cli.captured
+
+
+async def test_aclose_removes_a_container_for_every_workspace(tmp_path: Path) -> None:
+    """A single rm -f is not enough: the registry is keyed by Workspace."""
+    cli = StubDockerCli(container_id="c", unique_ids=True)
+    factory = _factory(cli)
+    first = tmp_path / "one"
+    second = tmp_path / "two"
+    first.mkdir()
+    second.mkdir()
+
+    await factory(first).run_command("echo hi", timeout_seconds=5)
+    await factory(second).run_command("echo hi", timeout_seconds=5)
+    assert cli.run_count() == 2
+
+    await factory.aclose()
+
+    assert sorted(cli.removed_ids()) == ["c-1", "c-2"]
+
+
+async def test_aclose_keeps_removing_after_a_removal_fails(tmp_path: Path) -> None:
+    """aclose() exists to clean up under failure; one bad rm must not strand the rest.
+
+    `_containers` is cleared before removal, so a container skipped here is
+    leaked permanently — nothing else holds a reference to retry it.
+    """
+    cli = FailingRemoveDockerCli(container_id="c", unique_ids=True)
+    factory = _factory(cli)
+    first = tmp_path / "one"
+    second = tmp_path / "two"
+    first.mkdir()
+    second.mkdir()
+
+    await factory(first).run_command("echo hi", timeout_seconds=5)
+    await factory(second).run_command("echo hi", timeout_seconds=5)
+
+    await factory.aclose()
+
+    assert sorted(cli.removed_ids()) == ["c-1", "c-2"]
+
+
+async def test_cancelled_docker_run_removes_the_container_by_name(tmp_path: Path) -> None:
+    """Ctrl-C mid-`docker run -d`: the daemon may have created the container
+    while the client never returned an id, so nothing tracks it. `_start` must
+    reap it by name or it is orphaned forever."""
+    cli = CancellingRunDockerCli()
+    factory = _factory(cli)
+    sandbox = factory(tmp_path)
+
+    with pytest.raises(asyncio.CancelledError):
+        await sandbox.run_command("echo hi", timeout_seconds=5)
+
+    removed = cli.removed_ids()
+    assert len(removed) == 1
+    assert removed[0].startswith("milky-frog-")
+    assert removed[0] == _container_name_in(cli)
+
+
+def _container_name_in(cli: StubDockerCli) -> str:
+    run_argv = next(argv for argv in cli.captured if argv[:2] == ["docker", "run"])
+    return run_argv[run_argv.index("--name") + 1]
+
+
+async def test_concurrent_run_commands_start_exactly_one_container(tmp_path: Path) -> None:
+    """acquire() holds the lock across _start. If it ever stops doing so, the
+    second `docker run` overwrites the first id and that container leaks."""
+    cli = SlowRunDockerCli(container_id="c", unique_ids=True)
+    factory = _factory(cli)
+    sandbox = factory(tmp_path)
+
+    await asyncio.gather(
+        sandbox.run_command("echo one", timeout_seconds=5),
+        sandbox.run_command("echo two", timeout_seconds=5),
+    )
+
+    assert cli.run_count() == 1
+
+    await factory.aclose()
+    assert cli.removed_ids() == ["c-1"]
