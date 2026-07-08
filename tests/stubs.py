@@ -9,7 +9,11 @@ from pydantic import BaseModel
 from milky_frog.adapters.local import LocalSandbox
 from milky_frog.checkpoint import CheckpointStore
 from milky_frog.core.runtime.assemble import make_agent_harness
-from milky_frog.core.sandbox import Sandbox
+from milky_frog.core.sandbox import (
+    CommandOutcome,
+    CommandPresentation,
+    Sandbox,
+)
 from milky_frog.domain import (
     ModelChunk,
     ModelRequest,
@@ -264,3 +268,37 @@ class LangfuseClientFactory:
     def __call__(self, **kwargs: object) -> object:
         del kwargs
         return self._client
+
+
+# ── Sandbox stubs ────────────────────────────────────────────────────
+
+
+class FixedOutcomeSandbox:
+    """Sandbox wrapper that returns a canned CommandOutcome from run_command.
+
+    Lets a Tool test exercise every ``CommandOutcome`` branch without spawning
+    a real process. Path resolution and config still come from a real
+    ``LocalSandbox`` so deny-policy behaviour is unchanged.
+    """
+
+    def __init__(self, workspace: Path, outcome: CommandOutcome) -> None:
+        self._inner = LocalSandbox(workspace)
+        self._outcome = outcome
+        self.workspace = self._inner.workspace
+        self.config = self._inner.config
+
+    def resolve(self, relative_path: str, *, allow_sensitive: bool = False) -> Path:
+        return self._inner.resolve(relative_path, allow_sensitive=allow_sensitive)
+
+    def build_env(self) -> dict[str, str]:
+        return self._inner.build_env()
+
+    async def run_command(
+        self,
+        command: str,
+        *,
+        timeout_seconds: float,
+        presentation: CommandPresentation = CommandPresentation.PLAIN,
+    ) -> CommandOutcome:
+        del command, timeout_seconds, presentation
+        return self._outcome

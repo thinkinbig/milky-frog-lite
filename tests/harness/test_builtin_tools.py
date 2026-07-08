@@ -1,8 +1,10 @@
-import asyncio
 import subprocess
 from pathlib import Path
 
+from stubs import FixedOutcomeSandbox
+
 from milky_frog.adapters.local import LocalSandbox
+from milky_frog.core.sandbox import CommandStartError
 from milky_frog.harness.tools import ToolContext
 from milky_frog.harness.tools.builtins import (
     BashTool,
@@ -437,16 +439,18 @@ async def test_bash_grep_subdirectory(tmp_path: Path) -> None:
     assert "root_file.py" not in result.content
 
 
-async def test_bash_os_error(tmp_path: Path, monkeypatch) -> None:
-    async def failing_exec(*args, **kwargs):
-        raise OSError("command not found")
+async def test_bash_start_error(tmp_path: Path) -> None:
+    context = ToolContext(
+        "run-1",
+        tmp_path,
+        sandbox=FixedOutcomeSandbox(tmp_path, CommandStartError("command not found")),
+    )
 
-    monkeypatch.setattr(asyncio, "create_subprocess_shell", failing_exec)
-
-    result = await BashTool().execute(_context(tmp_path), BashTool.input_model(command="echo hi"))
+    result = await BashTool().execute(context, BashTool.input_model(command="echo hi"))
 
     assert result.is_error
     assert "failed to run command" in result.content
+    assert "command not found" in result.content
 
 
 async def test_bash_cwd_is_workspace(tmp_path: Path) -> None:
