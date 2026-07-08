@@ -6,8 +6,11 @@ from pathlib import Path
 
 import pytest
 
+from milky_frog.adapters.docker import DockerSandboxFactory
+from milky_frog.adapters.local import LocalSandbox
 from milky_frog.app.session import AgentSession, InactiveAgentSession, MissingModelConfiguration
 from milky_frog.checkpoint import SqliteCheckpointStore
+from milky_frog.core.runtime.assemble import make_sandbox_factory
 from milky_frog.domain import (
     ApprovalDecision,
     ApprovalVerdict,
@@ -23,6 +26,7 @@ from milky_frog.domain import (
 from milky_frog.events import EventHub, Handler, RunCancelled
 from milky_frog.harness.harness import AgentHarness
 from milky_frog.models import OpenAIModel
+from milky_frog.project import ProjectConfig, SandboxConfig
 from milky_frog.settings import Settings
 from tests.checkpoint_helpers import run_status, seed_interrupted_tool_run, seed_run
 
@@ -369,3 +373,19 @@ async def test_session_respond_approval_rejects_non_waiting_run(tmp_path: Path) 
     async with AgentSession.from_settings(settings) as session:
         with pytest.raises(ResumeError, match="not waiting for tool approval"):
             await session.respond_approval(run_id, ApprovalVerdict(ApprovalDecision.APPROVE))
+
+
+def test_make_sandbox_factory_returns_local_by_default() -> None:
+    factory = make_sandbox_factory(ProjectConfig())
+
+    assert factory is LocalSandbox
+
+
+def test_make_sandbox_factory_returns_docker_when_configured() -> None:
+    config = ProjectConfig(
+        sandbox=SandboxConfig(kind="docker", image="python:3.12", workspace_mount="/mnt/ws")
+    )
+
+    factory = make_sandbox_factory(config)
+
+    assert isinstance(factory, DockerSandboxFactory)

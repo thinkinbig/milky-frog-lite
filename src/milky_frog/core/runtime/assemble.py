@@ -20,8 +20,29 @@ from milky_frog.harness.prompt_context import ContextLoader
 from milky_frog.harness.tools import ToolRegistry
 from milky_frog.harness.tools.builtins import default_tools
 from milky_frog.models import Model, RetryingModel
+from milky_frog.project import ProjectConfig
 from milky_frog.settings import Settings
 from milky_frog.tokens import TokenCounter
+
+
+def make_sandbox_factory(config: ProjectConfig) -> SandboxFactory:
+    """Pick the Sandbox adapter named by ``[sandbox].kind`` in the project config.
+
+    ``local`` (default) returns the ``LocalSandbox`` class itself — it already
+    satisfies ``SandboxFactory`` via its ``(workspace)`` constructor.
+    """
+    if config.sandbox.kind == "docker":
+        from milky_frog.adapters.docker import DockerSandboxFactory
+
+        image = config.sandbox.image
+        if image is None:  # pragma: no cover - SandboxConfig validation guarantees this
+            raise ValueError("sandbox.image is required when sandbox.kind = 'docker'")
+        return DockerSandboxFactory(
+            image=image,
+            workspace_mount=config.sandbox.workspace_mount,
+            config=config,
+        )
+    return LocalSandbox
 
 
 def make_session_handlers(

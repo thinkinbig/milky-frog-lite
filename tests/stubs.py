@@ -352,6 +352,19 @@ class TimingOutSandboxFactory:
         return FixedOutcomeSandbox(workspace, CommandTimeout(seconds=1.0))
 
 
+class ClosingSandboxFactory:
+    """SandboxFactory that records whether aclose() was awaited."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def __call__(self, workspace: Path) -> Sandbox:
+        return LocalSandbox(workspace)
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
 # ── Docker CLI stubs ─────────────────────────────────────────────────
 
 
