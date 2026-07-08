@@ -17,8 +17,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import logging
 import os
 import uuid
+from collections.abc import Sequence
 from pathlib import Path
 
 from milky_frog.adapters.docker.cli import (
@@ -31,6 +33,8 @@ from milky_frog.adapters.local import LocalSandbox
 from milky_frog.adapters.process import with_presentation_env
 from milky_frog.core.sandbox import CommandOutcome, CommandPresentation, Sandbox
 from milky_frog.project import ProjectConfig
+
+logger = logging.getLogger(__name__)
 
 _NONINTERACTIVE_ENV: dict[str, str] = {
     "CI": "true",
@@ -77,13 +81,34 @@ class ContainerRegistry:
     ``docker run`` costs hundreds. ``aclose()`` removes everything it created.
     """
 
-    def __init__(self, *, image: str, workspace_mount: str, cli: DockerCli) -> None:
+    def __init__(
+        self,
+        *,
+        image: str,
+        workspace_mount: str,
+        cli: DockerCli,
+        mask_paths: Sequence[str] = (),
+    ) -> None:
         self._image = image
         self._workspace_mount = workspace_mount
         self._cli = cli
+        self._mask_paths = tuple(mask_paths)
         self._containers: dict[Path, str] = {}
         self._lock = asyncio.Lock()
         self._closed = False
+
+    def _mask_flags(self) -> list[str]:
+        """Anonymous volumes that shadow host-built directories in the mount.
+
+        A `-v` with only a container path gives that path a fresh empty volume,
+        overlaying whatever the bind mount put there. The host's copy is not
+        touched. These volumes are anonymous, so `docker rm` must be given `-v`
+        or they accumulate on the host forever.
+        """
+        flags: list[str] = []
+        for relative in self._mask_paths:
+            flags.extend(("-v", f"{self._workspace_mount}/{relative}"))
+        return flags
 
     async def acquire(self, workspace: Path) -> str:
         async with self._lock:
@@ -111,6 +136,7 @@ class ContainerRegistry:
                     f"{WORKSPACE_LABEL}={workspace_digest}",
                     "-v",
                     f"{workspace}:{self._workspace_mount}",
+                    *self._mask_flags(),
                     "-w",
                     self._workspace_mount,
                     self._image,
@@ -125,13 +151,13 @@ class ContainerRegistry:
             # process's container — and without this the container is orphaned
             # with nothing left holding a reference to it.
             with contextlib.suppress(BaseException):
-                await self._cli.capture([DOCKER_BINARY, "rm", "-f", container_name])
+                await self._cli.capture([DOCKER_BINARY, "rm", "-f", "-v", container_name])
             raise
         if result.exit_code != 0:
             # The name is unique to this start attempt, so it cannot belong to
             # a concurrently running milky-frog process — safe to remove.
             with contextlib.suppress(Exception):
-                await self._cli.capture([DOCKER_BINARY, "rm", "-f", container_name])
+                await self._cli.capture([DOCKER_BINARY, "rm", "-f", "-v", container_name])
             raise DockerUnavailable(
                 f"failed to start container from image {self._image!r}: "
                 f"{result.stderr.strip() or result.stdout.strip()}"
@@ -143,7 +169,7 @@ class ContainerRegistry:
             # cannot use its id — best-effort cleanup by name so the next
             # acquire() for this Workspace doesn't hit "name already in use".
             with contextlib.suppress(Exception):
-                await self._cli.capture([DOCKER_BINARY, "rm", "-f", container_name])
+                await self._cli.capture([DOCKER_BINARY, "rm", "-f", "-v", container_name])
             raise DockerUnavailable("docker run returned no container id")
         return container_id
 
@@ -157,8 +183,14 @@ class ContainerRegistry:
         for container_id in containers:
             # One failing removal must not strand the containers after it —
             # `_containers` is already cleared, so nothing else will retry them.
-            with contextlib.suppress(Exception):
-                await self._cli.capture([DOCKER_BINARY, "rm", "-f", container_id])
+            # Suppressed, but never silent: a surviving container is exactly the
+            # thing an operator needs told, and `docker ps` will not explain why.
+            try:
+                await self._cli.capture([DOCKER_BINARY, "rm", "-f", "-v", container_id])
+            except Exception:
+                logger.exception(
+                    "failed to remove container %s; it may be left running", container_id
+                )
 
 
 class DockerSandbox:
@@ -264,12 +296,16 @@ class DockerSandboxFactory:
         workspace_mount: str,
         cli: DockerCli | None = None,
         config: ProjectConfig | None = None,
+        mask_paths: Sequence[str] = (),
     ) -> None:
         self._cli = cli if cli is not None else SubprocessDockerCli()
         self._workspace_mount = workspace_mount
         self._config = config
         self._containers = ContainerRegistry(
-            image=image, workspace_mount=workspace_mount, cli=self._cli
+            image=image,
+            workspace_mount=workspace_mount,
+            cli=self._cli,
+            mask_paths=mask_paths,
         )
 
     def __call__(self, workspace: Path) -> Sandbox:

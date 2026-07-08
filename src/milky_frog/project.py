@@ -34,6 +34,14 @@ DEFAULT_SUMMARIZATION_TRIGGER_TOKENS = 96000
 DEFAULT_SUMMARIZATION_KEEP_RECENT_TOKENS = 32000
 DEFAULT_WORKSPACE_MOUNT = "/mnt/workspace"
 
+# Host-built, architecture-specific directories that live inside a Workspace.
+# The bind mount would otherwise carry them into the container, where a macOS
+# `.venv/bin/python` or a natively-compiled `node_modules` is worse than absent:
+# a model, finding no toolchain, reaches for them and gets a misleading failure
+# (`ModuleNotFoundError: No module named 'pydantic_core._pydantic_core'`) that
+# looks like a broken sandbox. Masking makes them plainly empty instead.
+DEFAULT_MASK_PATHS: tuple[str, ...] = (".venv", "node_modules")
+
 CONFIG_TEMPLATE = (
     f"# Project-level Milky Frog configuration.\n"
     f"max_model_calls = {DEFAULT_MAX_MODEL_CALLS}\n\n"
@@ -115,6 +123,20 @@ class SandboxConfig(BaseModel):
     kind: Literal["local", "docker"] = "local"
     image: str | None = None
     workspace_mount: str = DEFAULT_WORKSPACE_MOUNT
+    mask_paths: tuple[str, ...] = DEFAULT_MASK_PATHS
+
+    @field_validator("mask_paths")
+    @classmethod
+    def _require_relative_mask_paths(cls, v: tuple[str, ...]) -> tuple[str, ...]:
+        for path in v:
+            if not path or path.startswith("/"):
+                raise ValueError(
+                    f"mask_paths entries must be relative to the workspace, got {path!r}"
+                )
+            normalized = PurePosixPath(path)
+            if ".." in normalized.parts or str(normalized) == ".":
+                raise ValueError(f"mask_paths entries must stay inside the workspace, got {path!r}")
+        return v
 
     @field_validator("workspace_mount")
     @classmethod

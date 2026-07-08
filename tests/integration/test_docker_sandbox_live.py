@@ -226,3 +226,45 @@ async def test_host_env_does_not_reach_the_container(
     assert "sentinel-shell" not in outcome.output
     assert "CI=true" in outcome.output
     assert "GIT_TERMINAL_PROMPT=0" in outcome.output
+
+
+async def test_masked_paths_are_empty_in_the_container_and_intact_on_the_host(
+    tmp_path: Path, image: str
+) -> None:
+    """The bind mount would carry a host-built .venv into the container, where
+    its macOS interpreter is a broken symlink and its native modules will not
+    load. A model that finds no toolchain reaches for it anyway and reports a
+    misleading failure. Masked, it is plainly empty; the host copy is untouched.
+    """
+    venv = tmp_path / ".venv"
+    venv.mkdir()
+    (venv / "pyvenv.cfg").write_text("home = /host/python\n", encoding="utf-8")
+
+    factory = DockerSandboxFactory(
+        image=image, workspace_mount="/mnt/workspace", mask_paths=(".venv",)
+    )
+    try:
+        outcome = await factory(tmp_path).run_command("ls -A .venv | wc -l", timeout_seconds=30)
+    finally:
+        await factory.aclose()
+
+    assert isinstance(outcome, CommandResult)
+    assert outcome.output.strip() == "0", "masked .venv should be empty in the container"
+    assert (venv / "pyvenv.cfg").exists(), "the host's .venv must not be touched"
+
+
+async def test_unmasked_workspace_still_exposes_host_dirs(tmp_path: Path, image: str) -> None:
+    """The other half: without masking the host dir really is visible, so the
+    test above is measuring the mask and not some unrelated emptiness."""
+    venv = tmp_path / ".venv"
+    venv.mkdir()
+    (venv / "pyvenv.cfg").write_text("home = /host/python\n", encoding="utf-8")
+
+    factory = DockerSandboxFactory(image=image, workspace_mount="/mnt/workspace")
+    try:
+        outcome = await factory(tmp_path).run_command("ls -A .venv", timeout_seconds=30)
+    finally:
+        await factory.aclose()
+
+    assert isinstance(outcome, CommandResult)
+    assert "pyvenv.cfg" in outcome.output

@@ -40,6 +40,7 @@ def make_sandbox_factory(config: ProjectConfig) -> SandboxFactory:
         return DockerSandboxFactory(
             image=image,
             workspace_mount=config.sandbox.workspace_mount,
+            mask_paths=config.sandbox.mask_paths,
             config=config,
         )
     return LocalSandbox

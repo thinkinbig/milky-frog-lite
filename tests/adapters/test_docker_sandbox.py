@@ -162,7 +162,7 @@ async def test_aclose_stops_and_removes_started_containers(tmp_path: Path) -> No
 
     await factory.aclose()
 
-    assert ["docker", "rm", "-f", "abc123"] in cli.captured
+    assert ["docker", "rm", "-f", "-v", "abc123"] in cli.captured
 
 
 async def test_aclose_is_idempotent(tmp_path: Path) -> None:
@@ -199,7 +199,7 @@ async def test_start_cleans_up_container_when_id_is_unusable(tmp_path: Path) -> 
     run_argv = cli.captured[0]
     name_index = run_argv.index("--name")
     used_name = run_argv[name_index + 1]
-    assert ["docker", "rm", "-f", used_name] in cli.captured
+    assert ["docker", "rm", "-f", "-v", used_name] in cli.captured
 
 
 async def test_acquire_after_aclose_raises_and_issues_no_new_run(tmp_path: Path) -> None:
@@ -260,7 +260,7 @@ async def test_start_cleans_up_container_on_nonzero_exit(tmp_path: Path) -> None
     assert run_argv[:2] == ["docker", "run"]
     name_index = run_argv.index("--name")
     used_name = run_argv[name_index + 1]
-    assert ["docker", "rm", "-f", used_name] in cli.captured
+    assert ["docker", "rm", "-f", "-v", used_name] in cli.captured
 
 
 async def test_aclose_removes_a_container_for_every_workspace(tmp_path: Path) -> None:
@@ -340,3 +340,51 @@ async def test_concurrent_run_commands_start_exactly_one_container(tmp_path: Pat
 
     await factory.aclose()
     assert cli.removed_ids() == ["c-1"]
+
+
+def _run_argv(cli: StubDockerCli) -> list[str]:
+    return next(argv for argv in cli.captured if argv[:2] == ["docker", "run"])
+
+
+async def test_mask_paths_become_anonymous_volumes_over_the_bind_mount(tmp_path: Path) -> None:
+    """A host-built .venv inside the mount is worse than absent: a model reaches
+    for it and gets a misleading native-module error. Mask it to an empty volume."""
+    cli = StubDockerCli()
+    factory = DockerSandboxFactory(
+        image="python:3.12",
+        workspace_mount="/mnt/workspace",
+        cli=cli,
+        mask_paths=(".venv", "node_modules"),
+    )
+
+    await factory(tmp_path).run_command("echo hi", timeout_seconds=5)
+
+    argv = _run_argv(cli)
+    assert "-v" in argv
+    assert "/mnt/workspace/.venv" in argv
+    assert "/mnt/workspace/node_modules" in argv
+    # the bind mount must still be there, not replaced
+    assert f"{tmp_path}:/mnt/workspace" in argv
+
+
+async def test_no_mask_paths_means_no_extra_volumes(tmp_path: Path) -> None:
+    cli = StubDockerCli()
+    factory = DockerSandboxFactory(image="python:3.12", workspace_mount="/mnt/workspace", cli=cli)
+
+    await factory(tmp_path).run_command("echo hi", timeout_seconds=5)
+
+    argv = _run_argv(cli)
+    assert argv.count("-v") == 1
+
+
+async def test_containers_are_removed_with_their_anonymous_volumes(tmp_path: Path) -> None:
+    """`docker rm -f` without `-v` leaks every masking volume, forever."""
+    cli = StubDockerCli(container_id="abc123")
+    factory = DockerSandboxFactory(
+        image="python:3.12", workspace_mount="/mnt/workspace", cli=cli, mask_paths=(".venv",)
+    )
+    await factory(tmp_path).run_command("echo hi", timeout_seconds=5)
+
+    await factory.aclose()
+
+    assert ["docker", "rm", "-f", "-v", "abc123"] in cli.captured
