@@ -196,6 +196,7 @@ def test_sandbox_config_reads_docker_table(tmp_path: Path) -> None:
     assert config.sandbox.workspace_mount == "/mnt/workspace"
 
 
+
 def test_sandbox_config_rejects_unknown_keys() -> None:
     """`workspace` is not `workspace_mount`. Silently ignoring the typo would
     leave the user believing they configured a mount they did not."""

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-import asyncio
-from pathlib import Path
 from typing import override
 
 from milky_frog.core.handlers import HandlerDeps
-from milky_frog.core.sandbox import SandboxFactory
+from milky_frog.core.sandbox import (
+    CommandResult,
+    CommandStartError,
+    CommandTimeout,
+    SandboxFactory,
+)
 from milky_frog.domain import VerificationNotice
 from milky_frog.events.events import RunAfterTool
 from milky_frog.events.hub import EventHub, Handler
@@ -19,8 +22,12 @@ class VerificationHandler(Handler):
 
     Subscribes to ``RunAfterTool``. When ``call.name`` is ``edit_file`` or
     ``write_file`` and the tool succeeded (``is_error is False``), runs the
-    per-workspace ``[verification].commands`` sequentially and returns a
+    per-workspace ``[verification].commands`` sequentially through the Sandbox
+    seam — so they execute wherever the Tools do — and returns a
     ``VerificationNotice``. The loop injects it as a synthetic tool result.
+
+    Commands that time out or fail to start are reported as failures rather
+    than raised: verification never blocks the loop.
 
     When ``after_edit`` is disabled in the workspace config, this is a no-op.
     """
@@ -45,29 +52,32 @@ class VerificationHandler(Handler):
             return None
 
         sandbox = self._sandbox_factory(event.state.workspace)
-        env = sandbox.build_env()
-        workspace: Path = event.state.workspace
+        timeout_seconds = float(config.bash_timeout_seconds)
 
         outputs: list[str] = []
         all_passed = True
 
         for cmd in config.verification.commands:
-            proc = await asyncio.create_subprocess_shell(
-                cmd,
-                cwd=workspace,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
-            )
-            stdout, stderr = await proc.communicate()
+            outcome = await sandbox.run_command(cmd, timeout_seconds=timeout_seconds)
+            match outcome:
+                case CommandResult(exit_code=exit_code, output=output):
+                    body = output.rstrip()
+                    if exit_code != 0:
+                        all_passed = False
+                case CommandTimeout(seconds=seconds):
+                    body = f"command timed out after {seconds:g}s"
+                    all_passed = False
+                case CommandStartError(message=message):
+                    body = f"failed to run command: {message}"
+                    all_passed = False
+                case _:
+                    body = "unknown command outcome"
+                    all_passed = False
+
             parts = [f"$ {cmd}"]
-            if stdout:
-                parts.append(stdout.decode(errors="replace").rstrip())
-            if stderr:
-                parts.append(stderr.decode(errors="replace").rstrip())
+            if body:
+                parts.append(body)
             outputs.append("\n".join(parts))
-            if proc.returncode != 0:
-                all_passed = False
 
         return VerificationNotice(
             summary="\n\n".join(outputs),

@@ -115,10 +115,12 @@ named class — so alternatives can be swapped without touching the Harness:
 - `handlers/` — lifecycle Handler bundles (checkpoint, Langfuse).
 - `ui/protocols.py` — `RunAdvancer`, `RunCanceller` for the interactive loop.
 - `harness/skills/` — `SkillCatalog`, declarative `SKILL.md` bundles (never executable).
-- `harness/sandbox/` — `Sandbox` protocol + `LocalSandbox`
-  (path deny patterns, subprocess env, `sandbox_factory` injection). Implements the
-  **Local Sandbox** policy; a policy boundary, **not** host isolation.
-  Future `DockerSandbox` swaps this single seam.
+- `adapters/local/`, `adapters/docker/` — `Sandbox` protocol (`core/sandbox.py`)
+  + `LocalSandbox` (path deny patterns, subprocess env, `run_command`) and the
+  opt-in `DockerSandbox` (bind-mount + `docker exec`), selected by
+  `[sandbox].kind`. Implements the **Sandbox** policy; a policy boundary,
+  **not** host isolation. Every shell command in the codebase goes through
+  `Sandbox.run_command()`.
 
 `domain.py` holds the shared frozen dataclasses / enums (`RunStatus`, `Message`,
 `ToolCall`, `RunRequest`, `RunResult`, …) — the vocabulary every layer uses.
@@ -141,9 +143,9 @@ both):
 ## Conventions
 
 - **Domain language is enforced.** Use the exact terms in `CONTEXT.md` (Run,
-  Harness, Workspace, Tool, Handler, Checkpoint, Memory, Skill, Local Sandbox)
-  and avoid the listed synonyms (session, workflow, plugin, middleware, …) in
-  code, names, and docs.
+  Harness, Workspace, Tool, Handler, Checkpoint, Memory, Skill, Local Sandbox,
+  Container Sandbox) and avoid the listed synonyms (session, workflow, plugin,
+  middleware, execution backend, …) in code, names, and docs.
 - Python 3.12+, `from __future__ import annotations` at the top of modules.
 - pyrefly uses the **strict** preset and ruff line length is 100; selected rules: E, F, I, UP,
   B, SIM, RUF.

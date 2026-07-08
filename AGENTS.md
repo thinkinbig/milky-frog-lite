@@ -90,10 +90,12 @@ named class — so alternatives can be swapped without touching the Harness:
 - `events/` — lifecycle signals, `EventHub`, `AgentLoop` (ADR-0012); the Harness publishes.
 - `handlers/` — lifecycle Handler bundles (checkpoint, policy, budget, Langfuse, skills).
 - `harness/skills/` — `SkillCatalog`, declarative `SKILL.md` bundles (never executable).
-- `harness/sandbox/` — `Sandbox` protocol + `LocalSandbox`
-  (path deny patterns, subprocess env, `sandbox_factory` injection). Implements the
-  **Local Sandbox** policy from ADR-0003; a policy boundary, **not** host isolation.
-  Future `DockerSandbox` swaps this single seam (ADR-0016).
+- `adapters/local/`, `adapters/docker/` — `Sandbox` protocol (`core/sandbox.py`)
+  + `LocalSandbox` (path deny patterns, subprocess env, `run_command`) and the
+  opt-in `DockerSandbox` (bind-mount + `docker exec`), selected by
+  `[sandbox].kind`. Implements the **Sandbox** policy from ADR-0003; a policy
+  boundary, **not** host isolation. Every shell command in the codebase goes
+  through `Sandbox.run_command()` (ADR-0016).
 
 `domain.py` holds the shared frozen dataclasses / enums (`RunStatus`, `Message`,
 `ToolCall`, `RunRequest`, `RunResult`, …) — the vocabulary every layer uses.
