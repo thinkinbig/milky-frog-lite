@@ -82,6 +82,21 @@ File Tools (`read_file`, `write_file`, `edit_file`, `grep`, `list_dir`) keep
 reading and writing on the host — the bind mount means both sides see the same
 files.
 
+**Your image must carry your toolchain.** Post-edit verification
+(`[verification].commands`, on by default) runs through the same Sandbox as
+`bash`, so it executes *inside the container*. The default commands are
+`uv run ruff check .` and `uv run pytest -q`; a stock `python:3.12-bookworm`
+has no `uv`, so every edit would report a failure. Either build an image with
+your tools installed, or set `[verification].commands` to commands the image
+can actually run.
+
+**Host build artifacts do not travel.** `.venv`, `node_modules`, `target/` and
+friends live in the workspace, so the bind mount carries them into the
+container — but they were built for your host's OS and architecture. A macOS
+`.venv/bin/python` is a symlink to a macOS interpreter and is simply broken
+inside a Linux container. Build them in the container, or keep them out of the
+workspace.
+
 Caveats:
 
 - **File access is not isolated.** A process in the container can reach every
@@ -183,6 +198,17 @@ workspace_mount = "/mnt/workspace"   # 可选；必须位于 /mnt 之下
 工作方式：Workspace 会以 bind mount 挂载进容器；容器在首次使用时创建，并在整个
 session 内复用，退出时移除。文件类 Tool（`read_file`、`write_file`、`edit_file`、
 `grep`、`list_dir`）仍在宿主机上读写——bind mount 保证两侧看到的是同一批文件。
+
+**镜像必须自带你的工具链。** 编辑后的校验（`[verification].commands`，默认开启）
+与 `bash` 走同一个 Sandbox，因此它**在容器内执行**。默认命令是
+`uv run ruff check .` 和 `uv run pytest -q`；而原版 `python:3.12-bookworm` 里没有 `uv`，
+于是每次编辑都会报失败。要么构建一个装好工具的镜像，要么把 `[verification].commands`
+改成镜像里真的跑得动的命令。
+
+**宿主机构建产物不能直接复用。** `.venv`、`node_modules`、`target/` 都在 Workspace 里，
+bind mount 会把它们带进容器 —— 但它们是为宿主机的操作系统与架构构建的。macOS 的
+`.venv/bin/python` 是一个指向 macOS 解释器的符号链接，在 Linux 容器里就是一条断链。
+请在容器内构建它们，或把它们移出 Workspace。
 
 注意事项：
 
