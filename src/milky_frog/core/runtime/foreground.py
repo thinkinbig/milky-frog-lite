@@ -150,6 +150,36 @@ class ForegroundRun:
             self.busy = False
             self._cancellation = None
 
+    async def respond_approvals(
+        self, run_id: str, verdicts: dict[str, ApprovalVerdict]
+    ) -> RunResult:
+        from milky_frog.domain import RunStatus
+
+        stored = self._resolve_stored_run(run_id)
+        if stored.status is not RunStatus.WAITING_FOR_APPROVAL:
+            raise ResumeError(f"Run {stored.run_id} is not waiting for tool approval")
+        project_cfg = load_project_config(stored.workspace)
+        self.busy = True
+        self._cancellation = RunCancellation()
+        self.run_id = stored.run_id
+        try:
+            max_calls = 0 if self._interactive else project_cfg.max_model_calls
+            try:
+                result = await self._harness.respond_approvals(
+                    stored.run_id,
+                    max_model_calls=max_calls,
+                    cancellation=self._cancellation,
+                    verdicts=verdicts,
+                )
+            except asyncio.CancelledError:
+                self.shutdown()
+                raise
+            self.run_id = result.run_id
+            return result
+        finally:
+            self.busy = False
+            self._cancellation = None
+
     def _resolve_stored_run(self, run_id: str) -> StoredRun:
 
         try:

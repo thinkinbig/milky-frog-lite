@@ -457,7 +457,7 @@ async def test_finish_approval_needed_returns_result_and_notifies(tmp_path: Path
 
     state = RunState(run_id="run-1", workspace=tmp_path, completed_model_calls=1)
     call = ToolCall("call-1", "write", {"path": "main.py"})
-    result = await dispatcher.finish_approval_needed(state, call)
+    result = await dispatcher.finish_approval_needed(state, (call,))
 
     assert result.status is RunStatus.WAITING_FOR_APPROVAL
     assert "write" in result.final_message
@@ -473,7 +473,7 @@ async def test_finish_approval_needed_format_for_bash(tmp_path: Path) -> None:
     dispatcher = EventHub()
 
     call = ToolCall("call-1", "bash", {"command": "rm -rf /"})
-    result = await dispatcher.finish_approval_needed(state, call)
+    result = await dispatcher.finish_approval_needed(state, (call,))
 
     assert result.status is RunStatus.WAITING_FOR_APPROVAL
     assert "bash" in result.final_message
@@ -488,7 +488,7 @@ async def test_finish_approval_needed_format_for_bash_no_command(
     dispatcher = EventHub()
 
     call = ToolCall("call-1", "bash", {})
-    result = await dispatcher.finish_approval_needed(state, call)
+    result = await dispatcher.finish_approval_needed(state, (call,))
 
     assert result.status is RunStatus.WAITING_FOR_APPROVAL
     assert "bash" in result.final_message
@@ -502,7 +502,7 @@ async def test_finish_approval_needed_format_for_read_with_path(
     dispatcher = EventHub()
 
     call = ToolCall("call-1", "read", {"path": "secret.txt"})
-    result = await dispatcher.finish_approval_needed(state, call)
+    result = await dispatcher.finish_approval_needed(state, (call,))
 
     assert result.status is RunStatus.WAITING_FOR_APPROVAL
     assert "read" in result.final_message
@@ -517,7 +517,7 @@ async def test_finish_approval_needed_format_for_read_no_path(
     dispatcher = EventHub()
 
     call = ToolCall("call-1", "read", {})
-    result = await dispatcher.finish_approval_needed(state, call)
+    result = await dispatcher.finish_approval_needed(state, (call,))
 
     assert result.status is RunStatus.WAITING_FOR_APPROVAL
     assert "read" in result.final_message
@@ -531,7 +531,7 @@ async def test_finish_approval_needed_format_for_write_no_path(
     dispatcher = EventHub()
 
     call = ToolCall("call-1", "write", {})
-    result = await dispatcher.finish_approval_needed(state, call)
+    result = await dispatcher.finish_approval_needed(state, (call,))
 
     assert result.status is RunStatus.WAITING_FOR_APPROVAL
     assert "write" in result.final_message
@@ -545,7 +545,7 @@ async def test_finish_approval_needed_format_for_edit_with_path(
     dispatcher = EventHub()
 
     call = ToolCall("call-1", "edit", {"path": "main.py"})
-    result = await dispatcher.finish_approval_needed(state, call)
+    result = await dispatcher.finish_approval_needed(state, (call,))
 
     assert result.status is RunStatus.WAITING_FOR_APPROVAL
     assert "edit" in result.final_message
@@ -560,7 +560,7 @@ async def test_finish_approval_needed_format_for_edit_no_path(
     dispatcher = EventHub()
 
     call = ToolCall("call-1", "edit", {})
-    result = await dispatcher.finish_approval_needed(state, call)
+    result = await dispatcher.finish_approval_needed(state, (call,))
 
     assert result.status is RunStatus.WAITING_FOR_APPROVAL
     assert "edit" in result.final_message
@@ -574,7 +574,7 @@ async def test_finish_approval_needed_format_for_generic_tool_with_preview(
     dispatcher = EventHub()
 
     call = ToolCall("call-1", "my_tool", {"pattern": "def foo", "path": "src/"})
-    result = await dispatcher.finish_approval_needed(state, call)
+    result = await dispatcher.finish_approval_needed(state, (call,))
 
     assert result.status is RunStatus.WAITING_FOR_APPROVAL
     assert "my_tool" in result.final_message
@@ -589,7 +589,7 @@ async def test_finish_approval_needed_format_for_generic_tool_no_preview(
     dispatcher = EventHub()
 
     call = ToolCall("call-1", "my_tool", {"count": 42})
-    result = await dispatcher.finish_approval_needed(state, call)
+    result = await dispatcher.finish_approval_needed(state, (call,))
 
     assert result.status is RunStatus.WAITING_FOR_APPROVAL
     assert "my_tool" in result.final_message
