@@ -30,6 +30,7 @@ class LocalSandbox:
         "*.key",
         "**/.aws/**",
         "**/.ssh/**",
+        ".milky-frog/mcp.json",
     )
 
     def __init__(self, workspace: Path, config: ProjectConfig | None = None) -> None:
