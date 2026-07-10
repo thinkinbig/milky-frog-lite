@@ -63,7 +63,7 @@ milky-frog prune              # remove old runs (add --dry-run to preview)
 ## Containerized execution (opt-in)
 
 By default Milky Frog runs Tools on the host under a path-deny policy. To run
-`bash` and post-edit verification commands inside a container instead, add to
+`bash` inside a container instead, add to
 `.milky-frog/config.toml`:
 
 ```toml

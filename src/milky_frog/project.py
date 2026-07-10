@@ -77,16 +77,12 @@ CONFIG_TEMPLATE = (
     f"retention_days = 30\n"
     f"prune_on_start = true\n"
     f"\n"
-    f"[verification]\n"
-    f"after_edit = true\n"
-    f'commands = ["uv run ruff check .", "uv run pytest -q"]\n'
-    f"\n"
     f"# Additional host env var names forwarded to subprocesses (uppercase identifiers).\n"
     f'# env_allowlist_extra = ["MY_BUILD_VAR", "DEPLOY_TOKEN"]\n'
     f"\n"
     f"# Execution Sandbox. 'local' runs Tools on the host under the path-deny\n"
     f"# policy. 'docker' bind-mounts the workspace into a container and runs\n"
-    f"# bash + verification commands there (requires the docker CLI on PATH).\n"
+    f"# bash there (requires the docker CLI on PATH).\n"
     f"# [sandbox]\n"
     f'# kind = "docker"\n'
     f'# image = "python:3.12-bookworm"\n'
@@ -169,23 +165,6 @@ class CheckpointConfig(BaseModel):
     prune_on_start: bool = True
 
 
-class VerificationConfig(BaseModel):
-    """Post-edit verification policy.
-
-    When ``after_edit`` is true, the Harness runs ``commands`` sequentially
-    after every successful ``edit_file`` / ``write_file`` call. Results are
-    injected into the transcript; failures do not block the loop.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    after_edit: bool = True
-    commands: tuple[str, ...] = (
-        "uv run ruff check .",
-        "uv run pytest -q",
-    )
-
-
 class ProjectConfig(BaseModel):
     """Per-workspace settings read from ``.milky-frog/config.toml``.
 
@@ -216,7 +195,6 @@ class ProjectConfig(BaseModel):
     )
     env_allowlist_extra: tuple[str, ...] = ()
     checkpoint: CheckpointConfig = CheckpointConfig()
-    verification: VerificationConfig = VerificationConfig()
     sandbox: SandboxConfig = SandboxConfig()
 
     # ── Validators ────────────────────────────────────────────────

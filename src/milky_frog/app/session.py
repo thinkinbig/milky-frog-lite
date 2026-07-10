@@ -251,7 +251,6 @@ class AgentSession:
                 self._settings,
                 store,
                 extra=extra,
-                sandbox_factory=sandbox_factory,
             )
             for bundle in self._handlers:
                 bundle.register(self._hub)

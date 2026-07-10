@@ -19,7 +19,6 @@ from milky_frog.domain.run import (
     RunResult,
     RunState,
     ToolRunCancelled,
-    VerificationNotice,
     is_cancelled,
 )
 from milky_frog.domain.status import ResumeError, RunStatus
@@ -54,7 +53,6 @@ __all__ = [
     "ToolDecision",
     "ToolResult",
     "ToolRunCancelled",
-    "VerificationNotice",
     "infer_provider",
     "is_cancelled",
 ]

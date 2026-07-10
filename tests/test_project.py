@@ -140,41 +140,6 @@ def test_invalid_env_allowlist_extra_filtered(tmp_path: Path) -> None:
     assert cfg.env_allowlist_extra == ("VALID_VAR", "ANOTHER")
 
 
-def test_verification_defaults(tmp_path: Path) -> None:
-    cfg = load_project_config(tmp_path)
-    assert cfg.verification.after_edit is True
-    assert cfg.verification.commands == (
-        "uv run ruff check .",
-        "uv run pytest -q",
-    )
-
-
-def test_verification_from_config(tmp_path: Path) -> None:
-    _write_config(
-        tmp_path,
-        '[verification]\nafter_edit = false\ncommands = ["uv run ruff check ."]\n',
-    )
-    cfg = load_project_config(tmp_path)
-    assert cfg.verification.after_edit is False
-    assert cfg.verification.commands == ("uv run ruff check .",)
-
-
-def test_verification_missing_section_uses_defaults(tmp_path: Path) -> None:
-    _write_config(tmp_path, "max_model_calls = 10\n")
-    cfg = load_project_config(tmp_path)
-    assert cfg.verification.after_edit is True
-
-
-def test_verification_generated_template_round_trips(tmp_path: Path) -> None:
-    _write_config(tmp_path, CONFIG_TEMPLATE)
-    cfg = load_project_config(tmp_path)
-    assert cfg.verification.after_edit is True
-    assert cfg.verification.commands == (
-        "uv run ruff check .",
-        "uv run pytest -q",
-    )
-
-
 def test_sandbox_config_defaults_to_local(tmp_path: Path) -> None:
     config = load_project_config(tmp_path)
 
@@ -194,7 +159,6 @@ def test_sandbox_config_reads_docker_table(tmp_path: Path) -> None:
     assert config.sandbox.kind == "docker"
     assert config.sandbox.image == "python:3.12-bookworm"
     assert config.sandbox.workspace_mount == "/mnt/workspace"
-
 
 
 def test_sandbox_config_rejects_unknown_keys() -> None:

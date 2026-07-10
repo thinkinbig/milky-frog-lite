@@ -20,10 +20,7 @@ from milky_frog.domain import (
     RunState,
     StreamDone,
     TextDelta,
-    ToolCall,
-    ToolResult,
     ToolRunCancelled,
-    VerificationNotice,
     is_cancelled,
 )
 from milky_frog.events.hub import EventHub
@@ -43,8 +40,7 @@ def _apply_control(
     """Apply Handler control proposals from ``before_model`` to the ``RunState``.
 
     The loop owns RunState evolution; Handlers only propose. Handles
-    ``Compacted`` (from ``before_model``); ``VerificationNotice`` is applied
-    inline in the tool loop (after ``after_tool``).
+    ``Compacted`` (from ``before_model``).
 
     Returns: (updated state, the applied ``Compacted`` or ``None``) — the loop
     emits ``run_compaction`` from the proposal so the UI can render and bill it.
@@ -164,21 +160,7 @@ class AgentLoop:
                         return outcome
 
                     state = append_tool_result(state, call, outcome)
-                    after_results = await self._hub.after_tool(run_id, call, outcome, state)
-                    for after_result in after_results:
-                        if isinstance(after_result, VerificationNotice):
-                            state = append_tool_result(
-                                state,
-                                ToolCall(
-                                    id="__verification__",
-                                    name="verification",
-                                    arguments={},
-                                ),
-                                ToolResult(
-                                    content=after_result.summary,
-                                    is_error=("FAILED" in after_result.exit_code_summary),
-                                ),
-                            )
+                    await self._hub.after_tool(run_id, call, outcome, state)
 
                 model_call = state.completed_model_calls
                 await self._hub.turn_ended(run_id, model_call=model_call)
