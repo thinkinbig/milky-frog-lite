@@ -44,6 +44,28 @@ def test_bare_resume_opens_picker_for_current_workspace(
     controller.parse_resume_command.assert_not_called()
 
 
+def test_resume_with_run_id_is_rejected_in_tui(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app, controller = _app(tmp_path)
+    rendered: list[tuple[str, str | None]] = []
+
+    def render_error(message: str, *, hint: str | None = None) -> None:
+        rendered.append((message, hint))
+
+    monkeypatch.setattr(app._conv, "render_error", render_error)
+
+    app._handle_resume("/resume run-one")
+
+    assert rendered == [
+        (
+            "Use /resume without a Run ID in the TUI.",
+            "Pick a Run from the list, or use the CLI: milky-frog resume RUN_ID",
+        )
+    ]
+    controller.parse_resume_command.assert_not_called()
+
+
 def test_selected_run_uses_existing_attach_path_with_pending_advance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -81,8 +103,9 @@ def test_cancelled_picker_does_not_attach_a_run(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("command", ["/resume", "/RESUME"])
 async def test_picker_enter_attaches_selected_run_and_escape_cancels(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    command: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     app, controller = _app(tmp_path)
     moment = datetime.now(UTC)
@@ -105,7 +128,7 @@ async def test_picker_enter_attaches_selected_run_and_escape_cancels(
     monkeypatch.setattr(app, "_attach_or_continue_run", attach)
 
     async with app.run_test() as pilot:
-        app._handle_resume("/resume")
+        app._handle_resume(command)
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
@@ -116,3 +139,7 @@ async def test_picker_enter_attaches_selected_run_and_escape_cancels(
         await pilot.press("escape")
         await pilot.pause()
         assert attached == ["selected-run"]
+        prompt = app.query_one("#prompt-input")
+        assert app._run_picker is None
+        assert prompt.disabled is False
+        assert prompt.has_focus

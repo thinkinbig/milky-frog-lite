@@ -28,7 +28,7 @@ dist/
 .claude/
 .superpowers/
 .worktrees/
-docs/superpowers/
+docs/superpowers
 *.swp
 
 # Local secrets

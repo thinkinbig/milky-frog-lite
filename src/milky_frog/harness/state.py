@@ -43,7 +43,9 @@ def with_run_extra(state: RunState, run_extra: tuple[str, ...]) -> RunState:
 
 def append_model_response(state: RunState, response: ModelResponse) -> RunState:
     # Reasoning is intentionally dropped from the transcript: reasoning providers
-    # reject their own reasoning_content on input. It survives in reasoning_log.
+    # only require it to accompany an assistant Tool call on the next request.
+    # Lifecycle Handlers receive all reasoning while streaming, but final-answer
+    # reasoning is not retained in the durable RunState.
     return replace(
         state,
         messages=(
@@ -52,10 +54,10 @@ def append_model_response(state: RunState, response: ModelResponse) -> RunState:
                 MessageRole.ASSISTANT,
                 response.content,
                 response.tool_calls,
+                reasoning=response.reasoning if response.tool_calls else "",
             ),
         ),
         completed_model_calls=state.completed_model_calls + 1,
-        reasoning_log=(*state.reasoning_log, response.reasoning),
         usage=state.usage.record(response.usage),
     )
 

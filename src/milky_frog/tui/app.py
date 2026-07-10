@@ -507,20 +507,12 @@ class MilkyFrogApp(App[None]):
         self._start_run(task, run_id=self.session.run_id)
 
     def _handle_resume(self, task: str) -> None:
-        if task.strip() == "/resume":
+        if task.strip().casefold() == "/resume":
             self._show_run_picker()
             return
-        parsed = self.run_controller.parse_resume_command(task)
-        if isinstance(parsed, str):
-            hint = None
-            if parsed == "No runs found to resume.":
-                hint = "Start a new task to create a run first."
-            self._conv.render_error(parsed, hint=hint)
-            return
-        self._attach_or_continue_run(
-            parsed.run_id,
-            prompt=parsed.prompt,
-            advance_pending=False,
+        self._conv.render_error(
+            "Use /resume without a Run ID in the TUI.",
+            hint="Pick a Run from the list, or use the CLI: milky-frog resume RUN_ID",
         )
 
     def _show_run_picker(self) -> None:
