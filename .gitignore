@@ -27,6 +27,7 @@ dist/
 .vscode/
 .claude/
 .superpowers/
+.worktrees/
 docs/superpowers/
 *.swp
 
