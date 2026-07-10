@@ -5,7 +5,7 @@ import contextlib
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import Any, overload
 
 from pydantic import BaseModel, ConfigDict
 
@@ -118,7 +118,6 @@ class _Shutdown:
 
 
 type _McpCommand = _ConnectServer | _DisconnectServer | _Shutdown
-_ResultT = TypeVar("_ResultT")
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,9 +172,15 @@ class McpClientManager:
         """Disconnect one server and remove its tools."""
         await self._submit(_DisconnectServer(name))
 
-    async def _submit(self, command: _McpCommand) -> _ResultT:
+    @overload
+    async def _submit(self, command: _ConnectServer) -> list[McpTool]: ...
+
+    @overload
+    async def _submit(self, command: _DisconnectServer | _Shutdown) -> None: ...
+
+    async def _submit(self, command: _McpCommand) -> Any:
         self._ensure_supervisor()
-        completion: asyncio.Future[_ResultT] = asyncio.get_running_loop().create_future()
+        completion: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
         self._commands.put_nowait(_QueuedCommand(command, completion))
         return await completion
 
