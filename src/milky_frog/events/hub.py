@@ -204,10 +204,8 @@ class EventHub:
     async def finish_cancelled(self, state: RunState, reason: str = "cancelled") -> RunResult:
         return await self._emitter.finish_cancelled(state, reason)
 
-    async def finish_approval_needed(
-        self, state: RunState, calls: tuple[ToolCall, ...]
-    ) -> RunResult:
-        return await self._emitter.finish_approval_needed(state, calls)
+    async def finish_approval_needed(self, state: RunState, call: ToolCall) -> RunResult:
+        return await self._emitter.finish_approval_needed(state, call)
 
 
 class Handler:
