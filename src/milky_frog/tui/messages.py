@@ -84,6 +84,14 @@ class ApprovalOptionSelected(Message):
         self.action = action
 
 
+class RunOptionSelected(Message):
+    """User selected a Run from the inline resume picker or dismissed it."""
+
+    def __init__(self, run_id: str | None) -> None:
+        super().__init__()
+        self.run_id = run_id
+
+
 class SkillOptionSelected(Message):
     """User confirmed a selection from the inline skill picker."""
 

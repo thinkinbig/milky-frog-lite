@@ -17,6 +17,7 @@ from textual.widgets import Footer, Header, Input, Static
 from textual.worker import Worker
 
 from milky_frog.app.session import AgentSession
+from milky_frog.checkpoint import StoredRun
 from milky_frog.core.controller import RunController
 from milky_frog.domain import ApprovalDecision, ApprovalVerdict, ResumeError, RunStatus, RunUsage
 from milky_frog.project import load_project_config
@@ -36,6 +37,7 @@ from milky_frog.tui.messages import (
     RunError,
     RunFinished,
     RunNoticeMsg,
+    RunOptionSelected,
     SkillOptionSelected,
     ToolCallMsg,
     ToolResultMsg,
@@ -52,6 +54,7 @@ from milky_frog.tui.viewmodels.conversation_vm import ConversationViewModel
 from milky_frog.tui.viewmodels.mcp_vm import McpViewModel
 from milky_frog.tui.viewmodels.skills_vm import SkillsViewModel
 from milky_frog.tui.widgets.prompt import PromptInput
+from milky_frog.tui.widgets.run_picker import RunPicker
 from milky_frog.tui.widgets.status_bar import RunStatusBar
 
 
@@ -171,6 +174,27 @@ class MilkyFrogApp(App[None]):
         background: $accent 20%;
         color: $text;
     }
+
+    .run-picker {
+        height: auto;
+        margin-bottom: 1;
+        border: round cyan;
+        padding: 0 1 1 0;
+    }
+
+    .run-picker OptionList {
+        height: auto;
+        max-height: 10;
+        margin: 0 1;
+        background: transparent;
+        border: none;
+        padding: 0;
+    }
+
+    .run-picker OptionList > .option-list--option-highlighted {
+        background: $accent 20%;
+        color: $text;
+    }
     """
 
     BINDINGS: ClassVar[list[BindingType]] = [
@@ -191,6 +215,7 @@ class MilkyFrogApp(App[None]):
         self._session = session
         self._run_controller = run_controller
         self._worker: Worker[None] | None = None
+        self._resume_picker: RunPicker | None = None
 
         # ViewModels
         self._conv = ConversationViewModel(self)
@@ -380,6 +405,15 @@ class MilkyFrogApp(App[None]):
     def on_mcp_reload_requested(self, _event: McpReloadRequested) -> None:
         self._do_reload_mcp()
 
+    def on_run_option_selected(self, event: RunOptionSelected) -> None:
+        picker = self._resume_picker
+        self._resume_picker = None
+        if picker is not None:
+            picker.remove()
+        self._enable_input_focus()
+        if event.run_id is not None:
+            self._attach_or_continue_run(event.run_id, advance_pending=True)
+
     @work(thread=False, exit_on_error=False)
     async def _do_reload_mcp(self) -> None:
         try:
@@ -478,6 +512,10 @@ class MilkyFrogApp(App[None]):
         self._start_run(task, run_id=self.session.run_id)
 
     def _handle_resume(self, task: str) -> None:
+        if task.strip().casefold() == "/resume":
+            self._show_resume_picker(self.run_controller.workspace_runs(Path.cwd()))
+            return
+
         parsed = self.run_controller.parse_resume_command(task)
         if isinstance(parsed, str):
             hint = None
@@ -490,6 +528,21 @@ class MilkyFrogApp(App[None]):
             prompt=parsed.prompt,
             advance_pending=False,
         )
+
+    def _show_resume_picker(self, runs: tuple[StoredRun, ...]) -> None:
+        if not runs:
+            self._conv.render_error(
+                "No runs found to resume.",
+                hint="Start a new task to create a run first.",
+            )
+            return
+        if self._resume_picker is not None:
+            self._resume_picker.remove()
+        picker = RunPicker(runs)
+        self._resume_picker = picker
+        self._conversation().mount(picker)
+        self._scroll_end()
+        self.query_one("#prompt-input", Input).disabled = True
 
     def _handle_compact(self) -> None:
         """Force-compact the current Run's transcript."""
@@ -684,6 +737,9 @@ class MilkyFrogApp(App[None]):
         self.session.request_shutdown()
 
     def action_cancel_run(self) -> None:
+        if self._resume_picker is not None:
+            self._resume_picker.action_dismiss()
+            return
         if self._skills.has_picker:
             self._skills.dismiss_picker()
             return

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
+from milky_frog.checkpoint import StoredRun
 from milky_frog.core.runtime.checkpoint import RunCheckpointFacade
 from milky_frog.domain import RunStatus
 from milky_frog.harness.state import unmatched_tool_calls
@@ -56,6 +58,15 @@ class RunController:
             run_id = runs[0].run_id
 
         return ResumePlan(run_id=run_id, prompt=tail or None)
+
+    def workspace_runs(self, workspace: Path) -> tuple[StoredRun, ...]:
+        """Return recent Runs belonging to the supplied Workspace."""
+        resolved_workspace = workspace.resolve()
+        return tuple(
+            run
+            for run in self._checkpoints.list_runs()
+            if run.workspace.resolve() == resolved_workspace
+        )
 
     def attach(
         self,
