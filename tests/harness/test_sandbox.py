@@ -20,12 +20,33 @@ def test_sandbox_resolves_workspace_file(tmp_path: Path) -> None:
     assert sandbox.resolve("src/app.py") == tmp_path / "src/app.py"
 
 
-@pytest.mark.parametrize("path", ["../secret", ".env", ".git/config", "private.key"])
+@pytest.mark.parametrize(
+    "path",
+    ["../secret", ".env", ".git/config", "private.key", ".milky-frog/mcp.json"],
+)
 def test_sandbox_rejects_escape_and_sensitive_paths(tmp_path: Path, path: str) -> None:
     sandbox = LocalSandbox(tmp_path)
 
     with pytest.raises(SandboxViolation):
         sandbox.resolve(path)
+
+
+def test_sandbox_allows_committable_milky_frog_paths(tmp_path: Path) -> None:
+    milky_frog = tmp_path / ".milky-frog"
+    milky_frog.mkdir()
+    (milky_frog / "config.toml").write_text("max_model_calls = 10\n", encoding="utf-8")
+    skills = milky_frog / "skills" / "demo"
+    skills.mkdir(parents=True)
+    (skills / "SKILL.md").write_text("---\nname: demo\ndescription: x\n---\n", encoding="utf-8")
+    tool_output = milky_frog / "tool-output"
+    tool_output.mkdir()
+    (tool_output / "spill.txt").write_text("spilled", encoding="utf-8")
+
+    sandbox = LocalSandbox(tmp_path)
+
+    assert sandbox.resolve(".milky-frog/config.toml") == milky_frog / "config.toml"
+    assert sandbox.resolve(".milky-frog/skills/demo/SKILL.md") == skills / "SKILL.md"
+    assert sandbox.resolve(".milky-frog/tool-output/spill.txt") == tool_output / "spill.txt"
 
 
 def test_sandbox_applies_project_ignore_file(tmp_path: Path) -> None:
