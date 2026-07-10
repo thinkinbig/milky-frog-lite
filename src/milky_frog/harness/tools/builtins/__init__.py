@@ -7,6 +7,7 @@ from milky_frog.harness.tools.builtins.fetch import FetchTool
 from milky_frog.harness.tools.builtins.grep import GrepTool
 from milky_frog.harness.tools.builtins.list_dir import ListDirTool
 from milky_frog.harness.tools.builtins.read import ReadFileTool
+from milky_frog.harness.tools.builtins.subagent import SubagentRunner, SubagentTool
 from milky_frog.harness.tools.builtins.web_search import WebSearchTool
 from milky_frog.harness.tools.builtins.write import WriteFileTool
 
@@ -33,6 +34,24 @@ def default_tools(*, jina_api_key: str | None = None) -> tuple[Tool, ...]:
     return tuple(tools)
 
 
+def read_only_tools(*, jina_api_key: str | None = None) -> tuple[Tool, ...]:
+    """The read-only subset of ``default_tools`` for a nested ``subagent`` Run.
+
+    Excludes ``write_file``/``edit_file``/``bash`` (no write surface, so no
+    worktree isolation is needed — see ADR-0018) and ``subagent`` itself (caps
+    nesting at one level by construction).
+    """
+    tools: list[Tool] = [
+        ReadFileTool(),
+        ListDirTool(),
+        GrepTool(),
+        FetchTool(jina_api_key=jina_api_key),
+    ]
+    if jina_api_key:
+        tools.append(WebSearchTool(jina_api_key))
+    return tuple(tools)
+
+
 __all__ = [
     "BashTool",
     "EditFileTool",
@@ -40,7 +59,10 @@ __all__ = [
     "GrepTool",
     "ListDirTool",
     "ReadFileTool",
+    "SubagentRunner",
+    "SubagentTool",
     "WebSearchTool",
     "WriteFileTool",
     "default_tools",
+    "read_only_tools",
 ]

@@ -22,6 +22,8 @@ from milky_frog.core.shutdown import ShutdownManager
 from milky_frog.domain import (
     DEFAULT_MAX_MODEL_CALLS,
     ApprovalVerdict,
+    RunCancellation,
+    RunRequest,
     RunResult,
 )
 from milky_frog.events import EventHub, Handler
@@ -31,7 +33,7 @@ from milky_frog.harness.mcp import McpClientManager, load_mcp_config
 from milky_frog.harness.prompt import make_context_loader
 from milky_frog.harness.skills import SkillCatalog
 from milky_frog.harness.tools import ToolRegistry
-from milky_frog.harness.tools.builtins import default_tools
+from milky_frog.harness.tools.builtins import SubagentTool, default_tools, read_only_tools
 from milky_frog.project import load_project_config, project_root
 from milky_frog.settings import Settings
 from milky_frog.tokens import TokenCounter, make_token_counter
@@ -233,7 +235,44 @@ class AgentSession:
             }
             await mcp_manager.connect_many(enabled_servers)
 
-            registry = ToolRegistry(default_tools(jina_api_key=self._settings.jina_api_key))
+            nested_registry = ToolRegistry(
+                read_only_tools(jina_api_key=self._settings.jina_api_key)
+            )
+            nested_harness = make_agent_harness(
+                model=self._model,
+                checkpoints=store,
+                hub=self._hub,
+                tools=nested_registry,
+                sandbox_factory=sandbox_factory,
+                context_loader=make_context_loader(self._settings.home),
+                token_counter=counter,
+                max_retries=self._settings.max_retries,
+                retry_base_delay=self._settings.retry_base_delay,
+            )
+
+            async def _run_subagent(
+                prompt: str,
+                max_model_calls: int | None,
+                cancellation: RunCancellation | None,
+            ) -> RunResult:
+                return await nested_harness.run(
+                    RunRequest(
+                        prompt=prompt,
+                        workspace=workspace,
+                        max_model_calls=max_model_calls or DEFAULT_MAX_MODEL_CALLS,
+                        cancellation=cancellation,
+                    )
+                )
+
+            # SubagentTool must be part of the constructor tuple (not added via
+            # a later .register() call) so ToolRegistry treats it as a builtin —
+            # otherwise a later reload_mcp()/replace_mcp_tools() would drop it.
+            registry = ToolRegistry(
+                (
+                    *default_tools(jina_api_key=self._settings.jina_api_key),
+                    SubagentTool(_run_subagent),
+                )
+            )
             registry.replace_mcp_tools(tuple(mcp_manager.tools))
             self._registry = registry
 
@@ -418,6 +457,11 @@ class AgentSession:
 
     async def respond_approval(self, run_id: str, verdict: ApprovalVerdict) -> RunResult:
         return await _active(self._foreground).respond_approval(run_id, verdict)
+
+    async def respond_approvals(
+        self, run_id: str, verdicts: dict[str, ApprovalVerdict]
+    ) -> RunResult:
+        return await _active(self._foreground).respond_approvals(run_id, verdicts)
 
     async def compact(self, run_id: str) -> str:
         """Force-compact the transcript of *run_id* into a summary.

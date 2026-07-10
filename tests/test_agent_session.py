@@ -375,6 +375,53 @@ async def test_session_respond_approval_rejects_non_waiting_run(tmp_path: Path) 
             await session.respond_approval(run_id, ApprovalVerdict(ApprovalDecision.APPROVE))
 
 
+@pytest.mark.asyncio
+async def test_session_subagent_tool_runs_nested_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The top-level Run can delegate to `subagent`, which runs an independent nested Run."""
+    requests: list[ModelRequest] = []
+
+    async def fake_stream(self: OpenAIModel, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        del self
+        requests.append(request)
+        call_number = len(requests)
+        if call_number == 1:
+            yield StreamDone(
+                ModelResponse(
+                    tool_calls=(ToolCall("call-1", "subagent", {"prompt": "investigate X"}),)
+                )
+            )
+            return
+        if call_number == 2:
+            yield StreamDone(ModelResponse(content="nested report"))
+            return
+        yield StreamDone(ModelResponse(content="top-level done"))
+
+    monkeypatch.setattr(OpenAIModel, "stream", fake_stream)
+    settings = _settings(tmp_path, base_url="https://example.test")
+
+    async with AgentSession.from_settings(settings) as session:
+        result = await session.start_new("delegate this", tmp_path)
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.final_message == "top-level done"
+
+    store = SqliteCheckpointStore(settings.database_path)
+    state = store.load_state(result.run_id)
+    tool_msgs = [m.content for m in state.messages if m.role.value == "tool"]
+    assert tool_msgs == ["nested report"]
+
+    # The nested Run is its own independent, inspectable Checkpoint record.
+    runs = store.list_runs()
+    assert len(runs) == 2
+    run_ids = {run.run_id for run in runs}
+    assert result.run_id in run_ids
+    nested_run_id = next(rid for rid in run_ids if rid != result.run_id)
+    nested_state = store.load_state(nested_run_id)
+    assert nested_state.messages[0].content == "investigate X"
+
+
 def test_make_sandbox_factory_returns_local_by_default() -> None:
     factory = make_sandbox_factory(ProjectConfig())
 

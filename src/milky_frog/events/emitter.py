@@ -202,11 +202,20 @@ class RunEmitter:
         await self.run_cancelled(state, result)
         return result
 
-    async def finish_approval_needed(self, state: RunState, call: ToolCall) -> RunResult:
+    async def finish_approval_needed(
+        self, state: RunState, calls: tuple[ToolCall, ...]
+    ) -> RunResult:
+        """Halt the Run for approval, exposing every call in ``calls``.
+
+        ``unmatched_tool_calls`` on the persisted transcript is the source of
+        truth for *which* calls are pending; the display message only
+        describes the first one. The Harness resolves calls one at a time
+        via ``respond_approval``, re-halting until the batch is exhausted.
+        """
         result = RunResult(
             state.run_id,
             RunStatus.WAITING_FOR_APPROVAL,
-            format_approval_message(call),
+            format_approval_message(calls[0]),
             state.completed_model_calls,
             state.usage,
         )

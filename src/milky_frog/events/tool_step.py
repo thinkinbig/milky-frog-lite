@@ -9,12 +9,9 @@ from milky_frog.domain import (
     ApprovalDecision,
     ApprovalVerdict,
     RunCancellation,
-    RunResult,
-    RunState,
     ToolCall,
     ToolDecision,
     ToolResult,
-    is_cancelled,
 )
 from milky_frog.events.emitter import RunEmitter
 from milky_frog.harness.budget import TokenBudget
@@ -41,72 +38,71 @@ class ToolStepExecutor:
         self._policy = policy
         self._budget = budget
 
-    async def run_with_policy(
+    def decide(self, call: ToolCall) -> ToolDecision:
+        """Pure, synchronous peek at the policy decision — no execution, no I/O.
+
+        Lets a caller pre-flight a whole batch of calls (e.g. to decide whether
+        the batch is safe to run concurrently) before committing to execution.
+        """
+        return self._policy.decide(call)
+
+    async def execute_decided(
         self,
         run_id: str,
-        state: RunState,
+        workspace: Path,
         sandbox: Sandbox,
         call: ToolCall,
         cancellation: RunCancellation | None,
-    ) -> ToolResult | RunResult:
-        """Notify observers, check policy inline, then execute or pause."""
-        if is_cancelled(cancellation):
-            return await self._emitter.finish_cancelled(state)
+        decision: ToolDecision,
+    ) -> ToolResult:
+        """Execute a call whose policy decision is already known.
 
-        await self._emitter.before_tool(run_id, call)
-
-        decision = self._policy.decide(call)
+        ``decision`` must not be ``NEEDS_APPROVAL`` — callers that batch
+        pre-flight decisions via ``decide()`` filter those out before reaching
+        here (approval is a whole-Run pause, not a per-call one).
+        """
         if decision is ToolDecision.DENY:
             return ToolResult("denied by tool policy", is_error=True)
-        if decision is ToolDecision.NEEDS_APPROVAL:
-            return await self._emitter.finish_approval_needed(state, call)
-
         return await execute_tool(
             self._tools,
             run_id,
-            state.workspace,
+            workspace,
             sandbox,
             call,
             cancellation,
             token_counter=self._token_counter(),
         )
 
-    async def resolve_pending(
+    async def execute_verdict(
         self,
         run_id: str,
-        *,
         workspace: Path,
         sandbox: Sandbox,
         call: ToolCall,
         cancellation: RunCancellation | None,
-        approval: ApprovalVerdict | None,
-        state: RunState,
-        require_verdict: bool = False,
-    ) -> ToolResult | RunResult:
-        """Resolve one pending approval on resume."""
-        if approval is not None and approval.decision is ApprovalDecision.DENY:
+        verdict: ApprovalVerdict,
+    ) -> ToolResult:
+        """Execute a call whose user approval verdict is already known.
+
+        Mirrors ``execute_decided`` (policy-known execution) for the
+        approval-resolution path: ``DENY`` short-circuits to a denial
+        result, ``APPROVE`` runs the Tool. Used by ``AgentHarness._apply_approvals``
+        to resolve a batch of ``respond_approval(s)`` verdicts, including
+        concurrently for the approved subset.
+        """
+        if verdict.decision is ApprovalDecision.DENY:
             msg = "denied by user"
-            if approval.denial_reason:
-                msg += f" (reason: {approval.denial_reason})"
+            if verdict.denial_reason:
+                msg += f" (reason: {verdict.denial_reason})"
             return ToolResult(msg, is_error=True)
-        if approval is not None and approval.decision is ApprovalDecision.APPROVE:
-            return await execute_tool(
-                self._tools,
-                run_id,
-                workspace,
-                sandbox,
-                call,
-                cancellation,
-                token_counter=self._token_counter(),
-            )
-        if require_verdict:
-            return await self._emitter.finish_approval_needed(state, call)
-        return await self.run_with_policy(
+        return await execute_tool(
+            self._tools,
             run_id,
-            state,
+            workspace,
             sandbox,
             call,
             cancellation,
+            token_counter=self._token_counter(),
         )
 
     def _token_counter(self) -> TokenCounter | None:
