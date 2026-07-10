@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
+from milky_frog.checkpoint import StoredRun
 from milky_frog.core.runtime.checkpoint import RunCheckpointFacade
 from milky_frog.domain import RunStatus
 from milky_frog.harness.state import unmatched_tool_calls
@@ -34,6 +36,10 @@ class RunController:
 
     def __init__(self, checkpoints: RunCheckpointFacade) -> None:
         self._checkpoints = checkpoints
+
+    def workspace_runs(self, workspace: Path) -> tuple[StoredRun, ...]:
+        """Return recent Runs for one Workspace in Checkpoint update order."""
+        return self._checkpoints.list_runs(workspace=workspace)
 
     def parse_resume_command(self, task: str) -> ResumePlan | str:
         """Parse ``/resume`` variants. Returns an error message string on failure."""

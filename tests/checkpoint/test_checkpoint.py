@@ -43,6 +43,18 @@ def test_sqlite_store_resolve_run_id_rejects_unknown_and_ambiguous(tmp_path: Pat
         store.resolve_run_id("aaa")
 
 
+def test_sqlite_store_lists_runs_for_one_workspace(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    workspace = tmp_path / "workspace"
+    other_workspace = tmp_path / "other-workspace"
+    workspace.mkdir()
+    other_workspace.mkdir()
+    store.create_run("workspace-run", workspace)
+    store.create_run("other-run", other_workspace)
+
+    assert tuple(run.run_id for run in store.list_runs(workspace=workspace)) == ("workspace-run",)
+
+
 def test_sqlite_store_persists_state_and_projects_status(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
     workspace = tmp_path / "workspace"
