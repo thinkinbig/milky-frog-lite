@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import logging
 import os
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
@@ -88,16 +89,47 @@ class McpTool:
         return ToolResult(text, is_error=bool(result.isError))
 
 
+@dataclass(frozen=True, slots=True)
+class _ConnectedServer:
+    """One server's task-affine transport and its discovered Tools."""
+
+    stack: contextlib.AsyncExitStack
+    tools: list[McpTool]
+
+
+@dataclass(frozen=True, slots=True)
+class _ConnectServer:
+    name: str
+    cfg: McpServerConfig
+    completion: asyncio.Future[list[McpTool]]
+
+
+@dataclass(frozen=True, slots=True)
+class _DisconnectServer:
+    name: str
+    completion: asyncio.Future[None]
+
+
+@dataclass(frozen=True, slots=True)
+class _Shutdown:
+    completion: asyncio.Future[None]
+
+
+type _McpCommand = _ConnectServer | _DisconnectServer | _Shutdown
+
+
 class McpClientManager:
     """Manages per-server MCP connections with independent lifecycles.
 
-    Each server gets its own ``AsyncExitStack`` so individual servers can be
-    connected and disconnected without affecting others.
+    A single supervisor Task owns every stdio context. This ensures anyio
+    cancel scopes created by ``stdio_client()`` are exited by the same Task that
+    entered them, even when a reload or shutdown originates in another Task.
     """
 
     def __init__(self) -> None:
-        # name → (per-server exit stack, tools from that server)
-        self._servers: dict[str, tuple[contextlib.AsyncExitStack, list[McpTool]]] = {}
+        self._servers: dict[str, _ConnectedServer] = {}
+        self._commands: asyncio.Queue[_McpCommand] = asyncio.Queue()
+        self._supervisor: asyncio.Task[None] | None = None
 
     @property
     def running_servers(self) -> frozenset[str]:
@@ -105,48 +137,93 @@ class McpClientManager:
 
     @property
     def tools(self) -> list[McpTool]:
-        return [tool for _, tools in self._servers.values() for tool in tools]
+        return [tool for server in self._servers.values() for tool in server.tools]
 
     async def __aenter__(self) -> McpClientManager:
+        self._ensure_supervisor()
         return self
 
     async def connect_server(self, name: str, cfg: McpServerConfig) -> list[McpTool]:
-        """Connect one server. Disconnects first if it's already running."""
-        if name in self._servers:
-            await self.disconnect_server(name)
-        stack = contextlib.AsyncExitStack()
-        await stack.__aenter__()
-        try:
-            tools = await self._connect(name, cfg, stack)
-        except Exception:
-            await stack.aclose()
-            raise
-        self._servers[name] = (stack, tools)
-        return tools
+        """Connect one server through the task that owns stdio contexts."""
+        self._ensure_supervisor()
+        ready: asyncio.Future[list[McpTool]] = asyncio.get_running_loop().create_future()
+        self._commands.put_nowait(_ConnectServer(name, cfg, ready))
+        return await ready
 
     async def connect_many(self, servers: dict[str, McpServerConfig]) -> None:
-        """Connect several independent servers concurrently.
+        """Connect several independent servers without one failure blocking the rest.
 
-        Each server's failure is caught and logged individually so one bad
-        server never blocks the others from connecting.
+        Connections are deliberately serial: MCP setup is low-frequency, and
+        the supervisor must own every stdio context for its entire lifetime.
         """
-
-        async def _connect_one(name: str, cfg: McpServerConfig) -> None:
+        for name, cfg in servers.items():
             try:
                 await self.connect_server(name, cfg)
             except Exception:
                 logger.warning("failed to connect to MCP server %r; skipping", name, exc_info=True)
 
-        await asyncio.gather(*(_connect_one(name, cfg) for name, cfg in servers.items()))
-
     async def disconnect_server(self, name: str) -> None:
         """Disconnect one server and remove its tools."""
+        self._ensure_supervisor()
+        complete: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        self._commands.put_nowait(_DisconnectServer(name, complete))
+        await complete
+
+    def _ensure_supervisor(self) -> None:
+        if self._supervisor is None:
+            self._supervisor = asyncio.create_task(self._serve())
+
+    async def _serve(self) -> None:
+        """Process lifecycle changes in the Task that owns all stdio contexts."""
+        while True:
+            command = await self._commands.get()
+            if isinstance(command, _ConnectServer):
+                await self._handle_connect(command)
+            elif isinstance(command, _DisconnectServer):
+                await self._handle_disconnect(command)
+            else:
+                await self._handle_shutdown(command)
+                return
+
+    async def _handle_connect(self, command: _ConnectServer) -> None:
+        await self._close_server(command.name)
+        stack = contextlib.AsyncExitStack()
+        try:
+            await stack.__aenter__()
+            tools = await self._connect(command.name, command.cfg, stack)
+        except Exception as error:
+            try:
+                await stack.aclose()
+            except Exception:
+                logger.warning(
+                    "error closing MCP server %r after connection failure",
+                    command.name,
+                    exc_info=True,
+                )
+            if not command.completion.done():
+                command.completion.set_exception(error)
+        else:
+            self._servers[command.name] = _ConnectedServer(stack, tools)
+            if not command.completion.done():
+                command.completion.set_result(tools)
+
+    async def _handle_disconnect(self, command: _DisconnectServer) -> None:
+        await self._close_server(command.name)
+        if not command.completion.done():
+            command.completion.set_result(None)
+
+    async def _handle_shutdown(self, command: _Shutdown) -> None:
+        for name in list(self._servers):
+            await self._close_server(name)
+        if not command.completion.done():
+            command.completion.set_result(None)
+
+    async def _close_server(self, name: str) -> None:
         entry = self._servers.pop(name, None)
         if entry is None:
             return
-        stack, _ = entry
         try:
-            await stack.aclose()
+            await entry.stack.aclose()
         except Exception:
             logger.warning("error closing MCP server %r", name, exc_info=True)
 
@@ -188,5 +265,11 @@ class McpClientManager:
         return tools
 
     async def __aexit__(self, *args: Any) -> None:
-        for name in list(self._servers):
-            await self.disconnect_server(name)
+        supervisor = self._supervisor
+        if supervisor is None:
+            return
+        complete: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        self._commands.put_nowait(_Shutdown(complete))
+        await complete
+        await supervisor
+        self._supervisor = None
