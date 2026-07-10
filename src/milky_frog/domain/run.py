@@ -84,27 +84,9 @@ class Compacted:
     usage: TokenUsage = field(default_factory=TokenUsage)
 
 
-@dataclass(frozen=True, slots=True)
-class VerificationNotice:
-    """Handler proposal after an edit Tool: inject verification output
-    as a synthetic tool result so the model sees the signal in the same
-    turn.
-
-    Raised by ``VerificationHandler`` on ``RunAfterTool`` when
-    ``edit_file`` / ``write_file`` succeeds and ``after_edit`` is enabled.
-    The loop appends a synthetic ``ToolCall(id="__verification__", …)`` +
-    ``ToolResult`` pair, so the verification output appears in the
-    transcript as a tool result before the next model call.
-    """
-
-    summary: str
-    exit_code_summary: str
-
-
-type HandlerResult = Compacted | VerificationNotice
+type HandlerResult = Compacted
 """A control proposal a Handler returns from a lifecycle callback for the loop to
-apply. Variants: ``Compacted`` (from ``RunBeforeModel``), ``VerificationNotice``
-(from ``RunAfterTool`` via ``VerificationHandler``)."""
+apply. Today the only variant is ``Compacted`` (from ``RunBeforeModel``)."""
 
 
 @dataclass(frozen=True, slots=True)

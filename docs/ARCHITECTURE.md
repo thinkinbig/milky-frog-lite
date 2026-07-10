@@ -295,8 +295,8 @@ from *accidentally* touching something sensitive, and to put a human in the loop
 for shell.
 
 Both adapters route **every** shell command through `Sandbox.run_command()` —
-`bash` (`harness/tools/builtins/bash.py`) and the post-edit
-`VerificationHandler`. Nothing else in the codebase spawns a command. (MCP
+the `bash` Tool (`harness/tools/builtins/bash.py`). Nothing else in the codebase
+spawns a command. (MCP
 servers are the one live exception: `McpClientManager` spawns its own stdio
 subprocesses, because a long-lived piped process needs a `spawn()`-shaped seam
 this protocol does not yet have. Tracked separately.)
