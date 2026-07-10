@@ -80,3 +80,34 @@ async def test_failed_connection_closes_stdio_context_from_its_connection_task(
             await manager.connect_server("server", McpServerConfig(command="fake"))
 
     assert context.entered_by is context.exited_by
+
+
+@pytest.mark.asyncio
+async def test_hanging_connection_times_out_and_does_not_block_shutdown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = asyncio.Event()
+
+    async def fake_connect(
+        name: str,
+        cfg: McpServerConfig,
+        stack: contextlib.AsyncExitStack,
+    ) -> list[object]:
+        del name, cfg, stack
+        started.set()
+        await asyncio.Future[None]()
+        return []
+
+    manager = McpClientManager(connect_timeout=0.01)
+    await manager.__aenter__()
+    monkeypatch.setattr(manager, "_connect", fake_connect)
+
+    connecting = asyncio.create_task(
+        manager.connect_server("hanging", McpServerConfig(command="fake"))
+    )
+    await started.wait()
+
+    with pytest.raises(asyncio.TimeoutError):
+        await connecting
+
+    await asyncio.wait_for(manager.__aexit__(None, None, None), timeout=0.1)
