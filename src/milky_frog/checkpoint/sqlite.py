@@ -101,10 +101,15 @@ class SqliteCheckpointStore:
             row = conn.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,)).fetchone()
         return None if row is None else self._row_to_stored_run(row)
 
-    def list_runs(self, limit: int = 20) -> tuple[StoredRun, ...]:
+    def list_runs(self, limit: int = 20, workspace: Path | None = None) -> tuple[StoredRun, ...]:
+        where = ""
+        params: tuple[object, ...] = (limit,)
+        if workspace is not None:
+            where = " WHERE workspace = ?"
+            params = (str(workspace.resolve()), limit)
         with self._db as conn:
             rows = conn.execute(
-                "SELECT * FROM runs ORDER BY updated_at DESC LIMIT ?", (limit,)
+                f"SELECT * FROM runs{where} ORDER BY updated_at DESC LIMIT ?", params
             ).fetchall()
         return tuple(self._row_to_stored_run(row) for row in rows)
 

@@ -28,7 +28,7 @@ COMMANDS: tuple[SlashCommand, ...] = (
     SlashCommand("/skill", "Activate a skill for the next Run", usage="/skill [NAME|off]"),
     SlashCommand("/mcp", "Enable or disable MCP servers"),
     SlashCommand("/clear", "Clear the conversation and start fresh"),
-    SlashCommand("/resume", "Attach to or continue a Run", usage="/resume [RUN_ID] [prompt]"),
+    SlashCommand("/resume", "Attach to or continue a Run", usage="/resume"),
     SlashCommand("/compact", "Force-compress transcript into a summary"),
     SlashCommand("/exit", "Leave Milky Frog"),
 )

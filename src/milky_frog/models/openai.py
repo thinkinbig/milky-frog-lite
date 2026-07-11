@@ -235,6 +235,8 @@ class _ToolFragment:
 
 def _message_payload(message: Message) -> dict[str, Any]:
     payload: dict[str, Any] = {"role": message.role.value, "content": message.content}
+    if message.reasoning:
+        payload["reasoning_content"] = message.reasoning
     if message.tool_calls:
         payload["tool_calls"] = [
             {

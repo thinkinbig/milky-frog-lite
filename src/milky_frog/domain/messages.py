@@ -19,3 +19,5 @@ class Message:
     content: str
     tool_calls: tuple[ToolCall, ...] = ()
     tool_call_id: str | None = None
+    reasoning: str = ""
+    """Provider reasoning required to replay this assistant Tool call."""

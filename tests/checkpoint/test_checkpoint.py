@@ -6,8 +6,8 @@ import pytest
 
 from milky_frog.checkpoint import RunClaimError, SqliteCheckpointStore
 from milky_frog.checkpoint.snapshot import dump_run_state, load_run_state
-from milky_frog.domain import MessageRole, RunState, RunStatus
-from milky_frog.harness.state import append_user_message, start_run
+from milky_frog.domain import MessageRole, ModelResponse, RunState, RunStatus, ToolCall
+from milky_frog.harness.state import append_model_response, append_user_message, start_run
 from tests.checkpoint_helpers import seed_run
 
 
@@ -41,6 +41,18 @@ def test_sqlite_store_resolve_run_id_rejects_unknown_and_ambiguous(tmp_path: Pat
         store.resolve_run_id("missing")
     with pytest.raises(ValueError):
         store.resolve_run_id("aaa")
+
+
+def test_sqlite_store_lists_runs_for_one_workspace(tmp_path: Path) -> None:
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    workspace = tmp_path / "workspace"
+    other_workspace = tmp_path / "other-workspace"
+    workspace.mkdir()
+    other_workspace.mkdir()
+    store.create_run("workspace-run", workspace)
+    store.create_run("other-run", other_workspace)
+
+    assert tuple(run.run_id for run in store.list_runs(workspace=workspace)) == ("workspace-run",)
 
 
 def test_sqlite_store_persists_state_and_projects_status(tmp_path: Path) -> None:
@@ -257,3 +269,19 @@ def test_snapshot_round_trips_run_state(tmp_path: Path) -> None:
     state = start_run(RunState(run_id="run-1", workspace=tmp_path), "hello")
     loaded = load_run_state("run-1", tmp_path, dump_run_state(state))
     assert loaded == state
+
+
+def test_snapshot_migrates_reasoning_log_from_legacy_snapshots(tmp_path: Path) -> None:
+    state = start_run(RunState(run_id="run-1", workspace=tmp_path), "hello")
+    state = append_model_response(
+        state,
+        ModelResponse(tool_calls=(ToolCall("call-1", "echo", {"text": "hi"}),)),
+    )
+    raw = dump_run_state(state)
+    legacy_raw = raw.removesuffix("}") + ',"reasoning_log":["private chain of thought"]}'
+
+    loaded = load_run_state("run-1", tmp_path, legacy_raw)
+
+    assert "reasoning_log" not in raw
+    assert not hasattr(loaded, "reasoning_log")
+    assert loaded.messages[-1].reasoning == "private chain of thought"

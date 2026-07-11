@@ -110,6 +110,14 @@ class McpOptionSelected(Message):
         self.enabled = enabled  # names of servers the user wants enabled
 
 
+class RunOptionSelected(Message):
+    """User selected a Run from the resume picker, or dismissed it."""
+
+    def __init__(self, run_id: str | None) -> None:
+        super().__init__()
+        self.run_id = run_id
+
+
 class McpReloadRequested(Message):
     """Config was written; trigger an async MCP reconnect worker."""
 
