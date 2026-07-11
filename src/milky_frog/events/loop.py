@@ -20,6 +20,7 @@ from milky_frog.domain import (
     RunState,
     StreamDone,
     TextDelta,
+    ToolDecision,
     ToolRunCancelled,
     is_cancelled,
 )
@@ -140,27 +141,53 @@ class AgentLoop:
                     await self._hub.turn_ended(run_id, model_call=model_call)
                     return await self._hub.finish_completed(state, response.content)
 
-                # Execute each tool call with policy check via the bus.
-                for call in response.tool_calls:
-                    if is_cancelled(cancellation):
-                        return await self._hub.finish_cancelled(state)
+                if is_cancelled(cancellation):
+                    return await self._hub.finish_cancelled(state)
 
-                    try:
-                        outcome = await self._tool_step.run_with_policy(
-                            run_id,
-                            state,
-                            sandbox,
+                # Split the batch once: calls that can run right now (ALLOW or
+                # DENY — both resolve without a human) vs. calls that need
+                # approval (a whole-Run pause). The runnable subset always runs
+                # concurrently first and is fully folded into ``state`` before
+                # any halt, so halting on the approval subset never leaves
+                # already-started work with nowhere to go.
+                decisions = [self._tool_step.decide(call) for call in response.tool_calls]
+                runnable = [
+                    (call, decision)
+                    for call, decision in zip(response.tool_calls, decisions, strict=True)
+                    if decision is not ToolDecision.NEEDS_APPROVAL
+                ]
+                needs_approval = tuple(
+                    call
+                    for call, decision in zip(response.tool_calls, decisions, strict=True)
+                    if decision is ToolDecision.NEEDS_APPROVAL
+                )
+
+                if runnable:
+                    for call, _decision in runnable:
+                        await self._hub.before_tool(run_id, call)
+
+                    batch = [
+                        (
                             call,
-                            cancellation,
+                            self._tool_step.execute_decided(
+                                run_id, state.workspace, sandbox, call, cancellation, decision
+                            ),
                         )
-                    except ToolRunCancelled:
+                        for call, decision in runnable
+                    ]
+                    resolved, cancelled = await self._tool_step.resolve_batch(batch)
+
+                    for call, outcome in resolved:
+                        state = append_tool_result(state, call, outcome)
+                        await self._hub.after_tool(run_id, call, outcome, state)
+
+                    if cancelled:
                         return await self._hub.finish_cancelled(state)
 
-                    if isinstance(outcome, RunResult):
-                        return outcome
-
-                    state = append_tool_result(state, call, outcome)
-                    await self._hub.after_tool(run_id, call, outcome, state)
+                if needs_approval:
+                    for call in needs_approval:
+                        await self._hub.before_tool(run_id, call)
+                    return await self._hub.finish_approval_needed(state, needs_approval)
 
                 model_call = state.completed_model_calls
                 await self._hub.turn_ended(run_id, model_call=model_call)

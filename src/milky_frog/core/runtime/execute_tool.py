@@ -22,18 +22,24 @@ async def execute_tool(
     *,
     token_counter: TokenCounter | None = None,
 ) -> ToolResult:
-    """Execute one tool call with cancellation polling."""
-    tool = tools.get(call.name)
-    search_prefix = _extract_search_prefix(call.arguments)
-    context = ToolContext(
-        run_id,
-        workspace,
-        cancellation,
-        sandbox=sandbox,
-        token_counter=token_counter,
-        search_prefix=search_prefix,
-    )
+    """Execute one tool call with cancellation polling.
+
+    Every failure mode — including an unknown Tool name — is converted to an
+    error ``ToolResult`` here; callers (including concurrent batches via
+    ``asyncio.gather(..., return_exceptions=True)``) can rely on this
+    function never raising anything but ``ToolRunCancelled``.
+    """
     try:
+        tool = tools.get(call.name)
+        search_prefix = _extract_search_prefix(call.arguments)
+        context = ToolContext(
+            run_id,
+            workspace,
+            cancellation,
+            sandbox=sandbox,
+            token_counter=token_counter,
+            search_prefix=search_prefix,
+        )
         input_model = tool.input_model.model_validate(call.arguments)
         result: ToolResult = await run_cancellable(tool.execute(context, input_model), cancellation)
     except ToolRunCancelled:

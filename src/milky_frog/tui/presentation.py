@@ -11,6 +11,7 @@ from milky_frog.events.events import (
     RunAfterModel,
     RunAfterTool,
     RunBeforeModel,
+    RunBeforeResume,
     RunBeforeTool,
     RunCancelled,
     RunCompaction,
@@ -23,6 +24,7 @@ from milky_frog.events.events import (
     RunStarted,
 )
 from milky_frog.events.hub import EventHub, Handler
+from milky_frog.harness.state import unmatched_tool_calls
 from milky_frog.tui.messages import (
     AddText,
     AddThinking,
@@ -49,10 +51,17 @@ class TuiPresentationHandler(Handler):
     def __init__(self, emit: Emit) -> None:
         self._emit = emit
         self._running = RunUsage()
+        # The run_id this bundle is currently presenting. A nested ``subagent``
+        # Run shares this hub (see AgentSession) but runs its own model/tool
+        # loop synchronously underneath one of the active Run's own tool
+        # calls; every Handler here ignores events for any other run_id so
+        # those nested signals never get mistaken for the presented Run's own.
+        self._active_run_id: str | None = None
 
     @override
     def register(self, hub: EventHub) -> None:
         hub.on(RunStarted)(self._on_started)
+        hub.on(RunBeforeResume)(self._on_resume)
         hub.on(RunBeforeModel)(self._on_before_model)
         hub.on(RunModelChunk)(self._on_model_chunk)
         hub.on(RunModelReasoning)(self._on_model_reasoning)
@@ -66,31 +75,59 @@ class TuiPresentationHandler(Handler):
         hub.on(RunFailed)(self._on_terminal)
         hub.on(RunCancelled)(self._on_terminal)
 
+    def _is_active(self, run_id: str) -> bool:
+        return self._active_run_id is None or run_id == self._active_run_id
+
     async def _on_started(self, event: RunStarted, deps: HandlerDeps | None = None) -> None:
+        if self._active_run_id is not None:
+            return  # a nested subagent Run starting under the active one
+        self._active_run_id = event.run_id
         self._running = RunUsage()
+
+    async def _on_resume(self, event: RunBeforeResume, deps: HandlerDeps | None = None) -> None:
+        # A continuation turn resumes the foreground Run via ``before_resume``
+        # and never re-fires ``RunStarted``; without re-establishing the active
+        # run_id here it would still be ``None`` after the previous turn's
+        # terminal reset, and the next nested ``subagent`` ``RunStarted`` would
+        # be mistaken for the presented Run. A resumed Run is always the
+        # foreground one (nested Runs use ``run()``), so adopt it unconditionally.
+        # Usage is intentionally not reset — it stays cumulative across turns.
+        self._active_run_id = event.run_id
 
     async def _on_before_model(
         self, event: RunBeforeModel, deps: HandlerDeps | None = None
     ) -> None:
+        if not self._is_active(event.run_id):
+            return
         self._emit(AddThinking(""))
 
     async def _on_model_chunk(self, event: RunModelChunk, deps: HandlerDeps | None = None) -> None:
+        if not self._is_active(event.run_id):
+            return
         self._emit(AddText(event.chunk.content))
 
     async def _on_model_reasoning(
         self, event: RunModelReasoning, deps: HandlerDeps | None = None
     ) -> None:
+        if not self._is_active(event.run_id):
+            return
         self._emit(AddThinking(event.chunk.content))
 
     async def _on_after_model(self, event: RunAfterModel, deps: HandlerDeps | None = None) -> None:
+        if not self._is_active(event.run_id):
+            return
         self._running = self._running.record(event.response.usage)
         self._emit(UpdateUsage(self._running))
 
     async def _on_before_tool(self, event: RunBeforeTool, deps: HandlerDeps | None = None) -> None:
+        if not self._is_active(event.run_id):
+            return
         call = event.call
         self._emit(ToolCallMsg(call.name, call.arguments))
 
     async def _on_after_tool(self, event: RunAfterTool, deps: HandlerDeps | None = None) -> None:
+        if not self._is_active(event.run_id):
+            return
         if event.call.name == "bash":
             return  # BashRenderHandler handles bash results
         call = event.call
@@ -98,6 +135,8 @@ class TuiPresentationHandler(Handler):
         self._emit(ToolResultMsg(call.name, content=result.content, is_error=result.is_error))
 
     async def _on_compaction(self, event: RunCompaction, deps: HandlerDeps | None = None) -> None:
+        if not self._is_active(event.run_id):
+            return
         # The summarization model call never flows through ``after_model``, so fold
         # its token cost into the running total here — otherwise the status bar
         # under-reports what the Run was billed.
@@ -107,19 +146,23 @@ class TuiPresentationHandler(Handler):
         self._emit(CompactionMsg(event.messages_folded))
 
     async def _on_notice(self, event: RunNotice, deps: HandlerDeps | None = None) -> None:
+        if not self._is_active(event.run_id):
+            return
         self._emit(RunNoticeMsg(event.message, level=event.level))
 
     async def _on_paused(self, event: RunPaused, deps: HandlerDeps | None = None) -> None:
+        if not self._is_active(event.run_id):
+            return
         result = event.result
         if result.status is RunStatus.WAITING_FOR_APPROVAL:
-            # Extract tool name from the pending assistant message.
-            tool_name = ""
-            for msg in reversed(event.state.messages):
-                if msg.role.value == "assistant" and msg.tool_calls:
-                    tool_name = msg.tool_calls[0].name
-                    break
+            # The still-pending call, not the first call of the original
+            # batch — a multi-call batch may have already resolved earlier
+            # calls and re-halted exposing only the remaining ones.
+            pending = unmatched_tool_calls(event.state.messages)
+            tool_name = pending[0].name if pending else ""
             self._emit(ApprovalRequired(result.run_id, result.final_message, tool_name))
             return
+        self._active_run_id = None
         self._emit(_run_finished(result))
 
     async def _on_terminal(
@@ -127,6 +170,9 @@ class TuiPresentationHandler(Handler):
         event: RunCompleted | RunFailed | RunCancelled,
         deps: HandlerDeps | None = None,
     ) -> None:
+        if not self._is_active(event.run_id):
+            return
+        self._active_run_id = None
         self._emit(_run_finished(event.result))
 
 

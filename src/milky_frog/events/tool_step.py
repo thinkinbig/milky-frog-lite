@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Awaitable, Sequence
 from pathlib import Path
+from typing import cast
 
 from milky_frog.core.policy import ToolPolicy
 from milky_frog.core.runtime.execute_tool import execute_tool
@@ -9,12 +12,10 @@ from milky_frog.domain import (
     ApprovalDecision,
     ApprovalVerdict,
     RunCancellation,
-    RunResult,
-    RunState,
     ToolCall,
     ToolDecision,
     ToolResult,
-    is_cancelled,
+    ToolRunCancelled,
 )
 from milky_frog.events.emitter import RunEmitter
 from milky_frog.harness.budget import TokenBudget
@@ -41,73 +42,102 @@ class ToolStepExecutor:
         self._policy = policy
         self._budget = budget
 
-    async def run_with_policy(
+    def decide(self, call: ToolCall) -> ToolDecision:
+        """Pure, synchronous peek at the policy decision — no execution, no I/O.
+
+        Lets a caller pre-flight a whole batch of calls (e.g. to decide whether
+        the batch is safe to run concurrently) before committing to execution.
+        """
+        return self._policy.decide(call)
+
+    async def execute_decided(
         self,
         run_id: str,
-        state: RunState,
+        workspace: Path,
         sandbox: Sandbox,
         call: ToolCall,
         cancellation: RunCancellation | None,
-    ) -> ToolResult | RunResult:
-        """Notify observers, check policy inline, then execute or pause."""
-        if is_cancelled(cancellation):
-            return await self._emitter.finish_cancelled(state)
+        decision: ToolDecision,
+    ) -> ToolResult:
+        """Execute a call whose policy decision is already known.
 
-        await self._emitter.before_tool(run_id, call)
-
-        decision = self._policy.decide(call)
+        ``decision`` must not be ``NEEDS_APPROVAL`` — callers that batch
+        pre-flight decisions via ``decide()`` filter those out before reaching
+        here (approval is a whole-Run pause, not a per-call one).
+        """
         if decision is ToolDecision.DENY:
             return ToolResult("denied by tool policy", is_error=True)
-        if decision is ToolDecision.NEEDS_APPROVAL:
-            return await self._emitter.finish_approval_needed(state, call)
-
         return await execute_tool(
             self._tools,
             run_id,
-            state.workspace,
+            workspace,
             sandbox,
             call,
             cancellation,
             token_counter=self._token_counter(),
         )
 
-    async def resolve_pending(
+    async def execute_verdict(
         self,
         run_id: str,
-        *,
         workspace: Path,
         sandbox: Sandbox,
         call: ToolCall,
         cancellation: RunCancellation | None,
-        approval: ApprovalVerdict | None,
-        state: RunState,
-        require_verdict: bool = False,
-    ) -> ToolResult | RunResult:
-        """Resolve one pending approval on resume."""
-        if approval is not None and approval.decision is ApprovalDecision.DENY:
+        verdict: ApprovalVerdict,
+    ) -> ToolResult:
+        """Execute a call whose user approval verdict is already known.
+
+        Mirrors ``execute_decided`` (policy-known execution) for the
+        approval-resolution path: ``DENY`` short-circuits to a denial
+        result, ``APPROVE`` runs the Tool. Used by ``AgentHarness._apply_approvals``
+        to resolve a batch of ``respond_approval(s)`` verdicts, including
+        concurrently for the approved subset.
+        """
+        if verdict.decision is ApprovalDecision.DENY:
             msg = "denied by user"
-            if approval.denial_reason:
-                msg += f" (reason: {approval.denial_reason})"
+            if verdict.denial_reason:
+                msg += f" (reason: {verdict.denial_reason})"
             return ToolResult(msg, is_error=True)
-        if approval is not None and approval.decision is ApprovalDecision.APPROVE:
-            return await execute_tool(
-                self._tools,
-                run_id,
-                workspace,
-                sandbox,
-                call,
-                cancellation,
-                token_counter=self._token_counter(),
-            )
-        if require_verdict:
-            return await self._emitter.finish_approval_needed(state, call)
-        return await self.run_with_policy(
+        return await execute_tool(
+            self._tools,
             run_id,
-            state,
+            workspace,
             sandbox,
             call,
             cancellation,
+            token_counter=self._token_counter(),
         )
+
+    async def resolve_batch(
+        self, batch: Sequence[tuple[ToolCall, Awaitable[ToolResult]]]
+    ) -> tuple[list[tuple[ToolCall, ToolResult]], bool]:
+        """Run a batch of already-started Tool executions concurrently.
+
+        Returns the ``(call, result)`` pairs for every call that actually
+        completed, in request order, plus whether any call in the batch was
+        cancelled. A cancelled sibling never discards a completed one — the
+        caller folds every returned pair into ``state`` (and checkpoints it)
+        before honoring the cancellation, so a Tool that already ran (e.g. a
+        completed ``write_file``) is never silently dropped from the
+        transcript. ``execute_tool`` guarantees each awaitable raises nothing
+        but ``ToolRunCancelled``, so every other result is safe to treat as
+        a ``ToolResult``.
+        """
+        if not batch:
+            return [], False
+        calls = [call for call, _awaitable in batch]
+        results = await asyncio.gather(
+            *(awaitable for _call, awaitable in batch), return_exceptions=True
+        )
+        cancelled = False
+        resolved: list[tuple[ToolCall, ToolResult]] = []
+        for call, result in zip(calls, results, strict=True):
+            if isinstance(result, ToolRunCancelled):
+                cancelled = True
+                continue
+            resolved.append((call, cast(ToolResult, result)))
+        return resolved, cancelled
 
     def _token_counter(self) -> TokenCounter | None:
         if self._budget is None:

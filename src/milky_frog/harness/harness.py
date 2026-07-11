@@ -133,8 +133,7 @@ class AgentHarness:
                     max_model_calls=max_model_calls,
                     cancellation=cancellation,
                     prompt=prompt,
-                    approval=None,
-                    require_verdict=waiting_approval,
+                    verdicts={},
                 )
         except RunClaimError as error:
             raise ResumeError(str(error)) from error
@@ -147,7 +146,51 @@ class AgentHarness:
         approval: ApprovalVerdict,
         cancellation: RunCancellation | None = None,
     ) -> RunResult:
-        """Release a Run paused on ``WAITING_FOR_APPROVAL`` with the user's verdict."""
+        """Release a Run paused on ``WAITING_FOR_APPROVAL`` — one verdict,
+        one tool call.
+
+        ``approval`` applies only to the **first** currently pending call.
+        If more tool calls are still pending after executing (or denying) that
+        one, the Run re-halts with ``WAITING_FOR_APPROVAL`` so the user can
+        decide per call. Use ``respond_approvals`` to give different pending
+        calls different verdicts in a single batch.
+        """
+        try:
+            with self._checkpoints.claim(run_id):
+                stored = self._require_run(run_id)
+                if stored.status is not RunStatus.WAITING_FOR_APPROVAL:
+                    raise ResumeError(f"Run {run_id} is not waiting for tool approval")
+
+                state = self._checkpoints.load_state(run_id)
+                pending = unmatched_tool_calls(state.messages)
+                verdicts = {pending[0].id: approval}
+                return await self._advance_prepared(
+                    run_id,
+                    stored,
+                    state,
+                    max_model_calls=max_model_calls,
+                    cancellation=cancellation,
+                    prompt=None,
+                    verdicts=verdicts,
+                )
+        except RunClaimError as error:
+            raise ResumeError(str(error)) from error
+
+    async def respond_approvals(
+        self,
+        run_id: str,
+        *,
+        max_model_calls: int,
+        verdicts: dict[str, ApprovalVerdict],
+        cancellation: RunCancellation | None = None,
+    ) -> RunResult:
+        """Release a Run paused on ``WAITING_FOR_APPROVAL`` with a verdict per call.
+
+        ``verdicts`` maps ``ToolCall.id`` to its individual ``ApprovalVerdict``.
+        Approved calls execute concurrently; denied calls are skipped without
+        executing. Pending calls with no entry in ``verdicts`` stay pending —
+        the Run re-halts, exposing exactly those.
+        """
         try:
             with self._checkpoints.claim(run_id):
                 stored = self._require_run(run_id)
@@ -162,8 +205,7 @@ class AgentHarness:
                     max_model_calls=max_model_calls,
                     cancellation=cancellation,
                     prompt=None,
-                    approval=approval,
-                    require_verdict=False,
+                    verdicts=verdicts,
                 )
         except RunClaimError as error:
             raise ResumeError(str(error)) from error
@@ -183,8 +225,7 @@ class AgentHarness:
         max_model_calls: int,
         cancellation: RunCancellation | None,
         prompt: str | None,
-        approval: ApprovalVerdict | None,
-        require_verdict: bool,
+        verdicts: dict[str, ApprovalVerdict],
     ) -> RunResult:
         sandbox = self._make_sandbox(stored.workspace)
         await self._hub.before_resume(run_id, prompt, stored.status, stored.workspace)
@@ -193,13 +234,7 @@ class AgentHarness:
         self._checkpoints.prepare_resume(run_id, stored.updated_at, state)
 
         plan = PreparedRun(state=state, sandbox=sandbox)
-        resolved = await self._apply_approvals(
-            plan,
-            run_id,
-            cancellation,
-            approval=approval,
-            require_verdict=require_verdict,
-        )
+        resolved = await self._apply_approvals(plan, run_id, cancellation, verdicts=verdicts)
         if isinstance(resolved, RunResult):
             return resolved
         return await self._agent_loop.advance(
@@ -219,33 +254,48 @@ class AgentHarness:
         plan: PreparedRun,
         run_id: str,
         cancellation: RunCancellation | None,
-        approval: ApprovalVerdict | None,
         *,
-        require_verdict: bool = False,
+        verdicts: dict[str, ApprovalVerdict],
     ) -> PreparedRun | RunResult:
-        """Resolve tool calls that were pending approval on resume."""
+        """Resolve tool calls pending approval, using a verdict per call_id.
+
+        Calls with a verdict run concurrently (approved) or are skipped
+        (denied); calls with no entry in ``verdicts`` stay pending and cause a
+        re-halt exposing exactly those — an empty ``verdicts`` map (the
+        ``resume()`` path) re-halts on everything still pending, matching the
+        Run's own ``WAITING_FOR_APPROVAL`` state.
+        """
         pending = unmatched_tool_calls(plan.state.messages)
         if not pending:
             return plan
-        for call in pending:
-            if cancellation is not None and cancellation.is_cancelled:
+        if cancellation is not None and cancellation.is_cancelled:
+            return await self._hub.finish_cancelled(plan.state)
+
+        decided = [(call, verdicts[call.id]) for call in pending if call.id in verdicts]
+        still_pending = tuple(call for call in pending if call.id not in verdicts)
+
+        if decided:
+            batch = [
+                (
+                    call,
+                    self._tool_step.execute_verdict(
+                        run_id, plan.state.workspace, plan.sandbox, call, cancellation, verdict
+                    ),
+                )
+                for call, verdict in decided
+            ]
+            resolved, cancelled = await self._tool_step.resolve_batch(batch)
+
+            for call, outcome in resolved:
+                plan = PreparedRun(
+                    state=append_tool_result(plan.state, call, outcome),
+                    sandbox=plan.sandbox,
+                )
+                await self._hub.after_tool(run_id, call, outcome, plan.state)
+
+            if cancelled:
                 return await self._hub.finish_cancelled(plan.state)
 
-            resolved = await self._tool_step.resolve_pending(
-                run_id,
-                workspace=plan.state.workspace,
-                sandbox=plan.sandbox,
-                call=call,
-                cancellation=cancellation,
-                approval=approval,
-                state=plan.state,
-                require_verdict=require_verdict,
-            )
-            if isinstance(resolved, RunResult):
-                return resolved
-            plan = PreparedRun(
-                state=append_tool_result(plan.state, call, resolved),
-                sandbox=plan.sandbox,
-            )
-            await self._hub.after_tool(run_id, call, resolved, plan.state)
+        if still_pending:
+            return await self._hub.finish_approval_needed(plan.state, still_pending)
         return plan

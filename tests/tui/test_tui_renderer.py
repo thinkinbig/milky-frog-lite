@@ -5,6 +5,7 @@ from pathlib import Path
 from milky_frog.domain import (
     ModelRequest,
     ModelResponse,
+    RunRequest,
     RunResult,
     RunState,
     RunStatus,
@@ -14,15 +15,19 @@ from milky_frog.domain import (
 from milky_frog.events import EventHub
 from milky_frog.events.events import (
     RunAfterModel,
+    RunBeforeResume,
     RunCompaction,
+    RunCompleted,
     RunModelChunk,
     RunNotice,
     RunPaused,
+    RunStarted,
 )
 from milky_frog.tui.messages import (
     AddText,
     ApprovalRequired,
     CompactionMsg,
+    RunFinished,
     RunNoticeMsg,
     UpdateUsage,
 )
@@ -145,3 +150,143 @@ async def test_presentation_compaction_without_usage_still_emits_line() -> None:
 
     assert not any(isinstance(m, UpdateUsage) for m in sink.messages)
     assert any(isinstance(m, CompactionMsg) for m in sink.messages)
+
+
+async def test_presentation_ignores_nested_run_events() -> None:
+    """A nested ``subagent`` Run shares the hub but must never be mistaken for
+    the Run currently being presented — no spurious usage reset, no spurious
+    RunFinished while the outer Run is still going."""
+    sink = _MessageSink()
+    bus = EventHub()
+    TuiPresentationHandler(sink).register(bus)
+
+    await bus.broadcast(
+        RunStarted(
+            run_id="outer",
+            request=RunRequest("go", _WORKSPACE),
+            state=RunState("outer", _WORKSPACE),
+        )
+    )
+    await bus.broadcast(
+        RunAfterModel(
+            run_id="outer",
+            request=ModelRequest((), ()),
+            response=ModelResponse(usage=TokenUsage(input_tokens=10, output_tokens=10)),
+            state=RunState("outer", _WORKSPACE),
+        )
+    )
+
+    # A nested Run starts (and finishes) synchronously underneath one of the
+    # outer Run's own tool calls, sharing the same hub.
+    await bus.broadcast(
+        RunStarted(
+            run_id="nested",
+            request=RunRequest("investigate", _WORKSPACE),
+            state=RunState("nested", _WORKSPACE),
+        )
+    )
+    await bus.broadcast(
+        RunModelChunk(run_id="nested", request=ModelRequest((), ()), chunk=TextDelta("thinking"))
+    )
+    await bus.broadcast(
+        RunCompleted(
+            run_id="nested",
+            result=RunResult("nested", RunStatus.COMPLETED, "nested report", 1),
+            state=RunState("nested", _WORKSPACE),
+        )
+    )
+
+    # The nested Run's chunk must not have been rendered, and its completion
+    # must not have posted RunFinished for the still-running outer Run.
+    assert not any(isinstance(m, AddText) and m.text == "thinking" for m in sink.messages)
+    assert not any(isinstance(m, RunFinished) for m in sink.messages)
+
+    # The outer Run's own usage survives the nested Run's RunStarted — it was
+    # not reset back to zero.
+    update = next(m for m in sink.messages if isinstance(m, UpdateUsage))
+    assert update.usage.cumulative.input_tokens == 10
+
+    # The outer Run finishing for real still reports normally.
+    await bus.broadcast(
+        RunCompleted(
+            run_id="outer",
+            result=RunResult("outer", RunStatus.COMPLETED, "outer done", 1),
+            state=RunState("outer", _WORKSPACE),
+        )
+    )
+    finished = next(m for m in sink.messages if isinstance(m, RunFinished))
+    assert finished.result.run_id == "outer"
+
+
+async def test_presentation_ignores_nested_run_on_continuation_turn() -> None:
+    """After the first turn completes, a continuation turn resumes via
+    ``before_resume`` (no ``RunStarted``). The resumed Run must be re-adopted as
+    active so a nested ``subagent`` Run started during that turn is still
+    recognized as nested — otherwise its events leak into the presentation."""
+    sink = _MessageSink()
+    bus = EventHub()
+    TuiPresentationHandler(sink).register(bus)
+
+    # Turn 1: a fresh Run starts and completes, resetting the active run_id.
+    await bus.broadcast(
+        RunStarted(
+            run_id="outer",
+            request=RunRequest("go", _WORKSPACE),
+            state=RunState("outer", _WORKSPACE),
+        )
+    )
+    await bus.broadcast(
+        RunCompleted(
+            run_id="outer",
+            result=RunResult("outer", RunStatus.COMPLETED, "turn 1 done", 1),
+            state=RunState("outer", _WORKSPACE),
+        )
+    )
+
+    # Turn 2: the same Run is resumed via ``before_resume`` (never ``RunStarted``).
+    await bus.broadcast(
+        RunBeforeResume(
+            run_id="outer",
+            prompt="keep going",
+            stored_status=RunStatus.COMPLETED,
+            workspace=_WORKSPACE,
+        )
+    )
+
+    # A nested subagent Run starts and finishes under one of turn 2's tool calls.
+    await bus.broadcast(
+        RunStarted(
+            run_id="nested",
+            request=RunRequest("investigate", _WORKSPACE),
+            state=RunState("nested", _WORKSPACE),
+        )
+    )
+    await bus.broadcast(
+        RunModelChunk(run_id="nested", request=ModelRequest((), ()), chunk=TextDelta("thinking"))
+    )
+    await bus.broadcast(
+        RunCompleted(
+            run_id="nested",
+            result=RunResult("nested", RunStatus.COMPLETED, "nested report", 1),
+            state=RunState("nested", _WORKSPACE),
+        )
+    )
+
+    # The nested Run's chunk must not render, and its completion must not post
+    # RunFinished for the still-running (resumed) outer Run.
+    assert not any(isinstance(m, AddText) and m.text == "thinking" for m in sink.messages)
+    assert not any(
+        isinstance(m, RunFinished) and m.result.run_id == "nested" for m in sink.messages
+    )
+
+    # The resumed outer Run finishing for real still reports normally.
+    await bus.broadcast(
+        RunCompleted(
+            run_id="outer",
+            result=RunResult("outer", RunStatus.COMPLETED, "turn 2 done", 2),
+            state=RunState("outer", _WORKSPACE),
+        )
+    )
+    finished = [m for m in sink.messages if isinstance(m, RunFinished)]
+    assert finished[-1].result.run_id == "outer"
+    assert finished[-1].result.final_message == "turn 2 done"
