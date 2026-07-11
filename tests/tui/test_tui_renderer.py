@@ -15,6 +15,7 @@ from milky_frog.domain import (
 from milky_frog.events import EventHub
 from milky_frog.events.events import (
     RunAfterModel,
+    RunBeforeResume,
     RunCompaction,
     RunCompleted,
     RunModelChunk,
@@ -215,3 +216,77 @@ async def test_presentation_ignores_nested_run_events() -> None:
     )
     finished = next(m for m in sink.messages if isinstance(m, RunFinished))
     assert finished.result.run_id == "outer"
+
+
+async def test_presentation_ignores_nested_run_on_continuation_turn() -> None:
+    """After the first turn completes, a continuation turn resumes via
+    ``before_resume`` (no ``RunStarted``). The resumed Run must be re-adopted as
+    active so a nested ``subagent`` Run started during that turn is still
+    recognized as nested — otherwise its events leak into the presentation."""
+    sink = _MessageSink()
+    bus = EventHub()
+    TuiPresentationHandler(sink).register(bus)
+
+    # Turn 1: a fresh Run starts and completes, resetting the active run_id.
+    await bus.broadcast(
+        RunStarted(
+            run_id="outer",
+            request=RunRequest("go", _WORKSPACE),
+            state=RunState("outer", _WORKSPACE),
+        )
+    )
+    await bus.broadcast(
+        RunCompleted(
+            run_id="outer",
+            result=RunResult("outer", RunStatus.COMPLETED, "turn 1 done", 1),
+            state=RunState("outer", _WORKSPACE),
+        )
+    )
+
+    # Turn 2: the same Run is resumed via ``before_resume`` (never ``RunStarted``).
+    await bus.broadcast(
+        RunBeforeResume(
+            run_id="outer",
+            prompt="keep going",
+            stored_status=RunStatus.COMPLETED,
+            workspace=_WORKSPACE,
+        )
+    )
+
+    # A nested subagent Run starts and finishes under one of turn 2's tool calls.
+    await bus.broadcast(
+        RunStarted(
+            run_id="nested",
+            request=RunRequest("investigate", _WORKSPACE),
+            state=RunState("nested", _WORKSPACE),
+        )
+    )
+    await bus.broadcast(
+        RunModelChunk(run_id="nested", request=ModelRequest((), ()), chunk=TextDelta("thinking"))
+    )
+    await bus.broadcast(
+        RunCompleted(
+            run_id="nested",
+            result=RunResult("nested", RunStatus.COMPLETED, "nested report", 1),
+            state=RunState("nested", _WORKSPACE),
+        )
+    )
+
+    # The nested Run's chunk must not render, and its completion must not post
+    # RunFinished for the still-running (resumed) outer Run.
+    assert not any(isinstance(m, AddText) and m.text == "thinking" for m in sink.messages)
+    assert not any(
+        isinstance(m, RunFinished) and m.result.run_id == "nested" for m in sink.messages
+    )
+
+    # The resumed outer Run finishing for real still reports normally.
+    await bus.broadcast(
+        RunCompleted(
+            run_id="outer",
+            result=RunResult("outer", RunStatus.COMPLETED, "turn 2 done", 2),
+            state=RunState("outer", _WORKSPACE),
+        )
+    )
+    finished = [m for m in sink.messages if isinstance(m, RunFinished)]
+    assert finished[-1].result.run_id == "outer"
+    assert finished[-1].result.final_message == "turn 2 done"

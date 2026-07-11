@@ -405,6 +405,9 @@ async def test_session_subagent_tool_runs_nested_run(
     settings = _settings(tmp_path, base_url="https://example.test")
 
     async with AgentSession.from_settings(settings) as session:
+        # subagent is gated (requires_approval=True); allow it at the top level
+        # so this test exercises the nested Run rather than an approval halt.
+        session.policy.allow("subagent")
         result = await session.start_new("delegate this", tmp_path)
 
     assert result.status is RunStatus.COMPLETED
@@ -423,6 +426,35 @@ async def test_session_subagent_tool_runs_nested_run(
     nested_run_id = next(rid for rid in run_ids if rid != result.run_id)
     nested_state = store.load_state(nested_run_id)
     assert nested_state.messages[0].content == "investigate X"
+
+
+@pytest.mark.asyncio
+async def test_session_subagent_requires_approval_by_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """subagent is gated (requires_approval=True): delegation halts for approval
+    instead of silently spawning a network-capable nested Run. Without this, a
+    model could reach fetch/web_search egress with zero approval prompts."""
+    requests: list[ModelRequest] = []
+
+    async def fake_stream(self: OpenAIModel, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        del self
+        requests.append(request)
+        yield StreamDone(
+            ModelResponse(tool_calls=(ToolCall("call-1", "subagent", {"prompt": "investigate X"}),))
+        )
+
+    monkeypatch.setattr(OpenAIModel, "stream", fake_stream)
+    settings = _settings(tmp_path, base_url="https://example.test")
+
+    async with AgentSession.from_settings(settings) as session:
+        result = await session.start_new("delegate this", tmp_path)
+
+    assert result.status is RunStatus.WAITING_FOR_APPROVAL
+    assert "subagent" in result.final_message
+    # The nested Run never started — only the top-level Run exists.
+    store = SqliteCheckpointStore(settings.database_path)
+    assert len(store.list_runs()) == 1
 
 
 @pytest.mark.asyncio
@@ -466,6 +498,9 @@ async def test_session_subagent_fetch_runs_without_approval_pause(
     settings = _settings(tmp_path, base_url="https://example.test")
 
     async with AgentSession.from_settings(settings) as session:
+        # Approve delegation at the boundary; the point of this test is that the
+        # nested fetch does NOT itself pause once inside the subagent.
+        session.policy.allow("subagent")
         result = await session.start_new("delegate this", tmp_path)
 
     assert result.status is RunStatus.COMPLETED
@@ -522,6 +557,7 @@ async def test_session_subagent_shares_hub_but_tui_ignores_nested_run(
             seen_run_ids.append(event.run_id)
 
     async with AgentSession.from_settings(settings, bundles=[SpyHandler()]) as session:
+        session.policy.allow("subagent")  # gated by default; approve at the boundary
         result = await session.start_new("delegate this", tmp_path)
 
     # Both the top-level Run and the nested subagent Run broadcast RunStarted

@@ -39,10 +39,18 @@ class SubagentTool:
     fire-and-forget background task). The nested Run's own ``ToolRegistry``
     never includes ``subagent`` itself, so nesting is capped at one level by
     construction.
+
+    Requires approval at the boundary: the nested Run auto-approves its own
+    read-only Tools (it has no UI to resolve a pause — see ``AgentSession``),
+    and that set includes network-egress Tools (``fetch``/``web_search``) that
+    require approval at the top level. Gating ``subagent`` itself keeps a human
+    in the loop before any nested capability runs, so delegation cannot be used
+    to reach the network without a prompt. Its ``prompt`` argument surfaces in
+    the approval message, so the human sees what is being delegated.
     """
 
     name = "subagent"
-    requires_approval = False
+    requires_approval = True
     description = (
         "Delegate a sub-task (research, investigation, summarization) to a nested Run "
         "limited to read-only Tools (read_file, grep, list_dir, fetch, web_search). "

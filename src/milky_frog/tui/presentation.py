@@ -11,6 +11,7 @@ from milky_frog.events.events import (
     RunAfterModel,
     RunAfterTool,
     RunBeforeModel,
+    RunBeforeResume,
     RunBeforeTool,
     RunCancelled,
     RunCompaction,
@@ -60,6 +61,7 @@ class TuiPresentationHandler(Handler):
     @override
     def register(self, hub: EventHub) -> None:
         hub.on(RunStarted)(self._on_started)
+        hub.on(RunBeforeResume)(self._on_resume)
         hub.on(RunBeforeModel)(self._on_before_model)
         hub.on(RunModelChunk)(self._on_model_chunk)
         hub.on(RunModelReasoning)(self._on_model_reasoning)
@@ -81,6 +83,16 @@ class TuiPresentationHandler(Handler):
             return  # a nested subagent Run starting under the active one
         self._active_run_id = event.run_id
         self._running = RunUsage()
+
+    async def _on_resume(self, event: RunBeforeResume, deps: HandlerDeps | None = None) -> None:
+        # A continuation turn resumes the foreground Run via ``before_resume``
+        # and never re-fires ``RunStarted``; without re-establishing the active
+        # run_id here it would still be ``None`` after the previous turn's
+        # terminal reset, and the next nested ``subagent`` ``RunStarted`` would
+        # be mistaken for the presented Run. A resumed Run is always the
+        # foreground one (nested Runs use ``run()``), so adopt it unconditionally.
+        # Usage is intentionally not reset — it stays cumulative across turns.
+        self._active_run_id = event.run_id
 
     async def _on_before_model(
         self, event: RunBeforeModel, deps: HandlerDeps | None = None

@@ -254,10 +254,12 @@ class AgentSession:
                 max_retries=self._settings.max_retries,
                 retry_base_delay=self._settings.retry_base_delay,
             )
-            # read_only_tools() has no write surface, so every Tool call it can
-            # make is safe to run without a human in the loop — auto-approve so
-            # fetch/web_search (requires_approval=True by default) don't pause
-            # a Run with no way for anyone to ever resolve that pause.
+            # The nested Run has no UI to resolve an approval pause, so it must
+            # not pause: auto-approve so fetch/web_search (requires_approval=True
+            # by default) don't deadlock a Run no one can ever release. The human
+            # gate on that network egress lives one level up — SubagentTool itself
+            # is requires_approval=True, so delegation is approved at the boundary
+            # (via the parent Run's UI) before any nested Tool runs.
             nested_harness.policy.auto_approve()
 
             async def _run_subagent(
