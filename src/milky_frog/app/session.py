@@ -238,6 +238,11 @@ class AgentSession:
             nested_registry = ToolRegistry(
                 read_only_tools(jina_api_key=self._settings.jina_api_key)
             )
+            # Shares the session's own hub — CheckpointHandler and
+            # LangfuseHandler already key everything off event.run_id, so a
+            # nested Run's signals are safe for them. UI-presentation Handlers
+            # are the only ones that assume a single active Run; they filter
+            # out nested-Run events themselves (see TuiPresentationHandler).
             nested_harness = make_agent_harness(
                 model=self._model,
                 checkpoints=store,
@@ -249,6 +254,11 @@ class AgentSession:
                 max_retries=self._settings.max_retries,
                 retry_base_delay=self._settings.retry_base_delay,
             )
+            # read_only_tools() has no write surface, so every Tool call it can
+            # make is safe to run without a human in the loop — auto-approve so
+            # fetch/web_search (requires_approval=True by default) don't pause
+            # a Run with no way for anyone to ever resolve that pause.
+            nested_harness.policy.auto_approve()
 
             async def _run_subagent(
                 prompt: str,
@@ -259,7 +269,9 @@ class AgentSession:
                     RunRequest(
                         prompt=prompt,
                         workspace=workspace,
-                        max_model_calls=max_model_calls or DEFAULT_MAX_MODEL_CALLS,
+                        max_model_calls=(
+                            DEFAULT_MAX_MODEL_CALLS if max_model_calls is None else max_model_calls
+                        ),
                         cancellation=cancellation,
                     )
                 )

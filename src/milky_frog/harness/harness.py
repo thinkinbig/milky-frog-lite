@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
 from uuid import uuid4
 
 from milky_frog.adapters.local import LocalSandbox
@@ -18,8 +16,6 @@ from milky_frog.domain import (
     RunResult,
     RunState,
     RunStatus,
-    ToolResult,
-    ToolRunCancelled,
 )
 from milky_frog.events import EventHub
 from milky_frog.events.loop import AgentLoop
@@ -279,22 +275,26 @@ class AgentHarness:
         still_pending = tuple(call for call in pending if call.id not in verdicts)
 
         if decided:
-            tasks = [
-                self._tool_step.execute_verdict(
-                    run_id, plan.state.workspace, plan.sandbox, call, cancellation, verdict
+            batch = [
+                (
+                    call,
+                    self._tool_step.execute_verdict(
+                        run_id, plan.state.workspace, plan.sandbox, call, cancellation, verdict
+                    ),
                 )
                 for call, verdict in decided
             ]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            if any(isinstance(result, ToolRunCancelled) for result in results):
-                return await self._hub.finish_cancelled(plan.state)
-            for (call, _verdict), result in zip(decided, results, strict=True):
-                outcome = cast(ToolResult, result)
+            resolved, cancelled = await self._tool_step.resolve_batch(batch)
+
+            for call, outcome in resolved:
                 plan = PreparedRun(
                     state=append_tool_result(plan.state, call, outcome),
                     sandbox=plan.sandbox,
                 )
                 await self._hub.after_tool(run_id, call, outcome, plan.state)
+
+            if cancelled:
+                return await self._hub.finish_cancelled(plan.state)
 
         if still_pending:
             return await self._hub.finish_approval_needed(plan.state, still_pending)

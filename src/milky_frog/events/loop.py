@@ -21,7 +21,6 @@ from milky_frog.domain import (
     StreamDone,
     TextDelta,
     ToolDecision,
-    ToolResult,
     ToolRunCancelled,
     is_cancelled,
 )
@@ -167,21 +166,23 @@ class AgentLoop:
                     for call, _decision in runnable:
                         await self._hub.before_tool(run_id, call)
 
-                    tasks = [
-                        self._tool_step.execute_decided(
-                            run_id, state.workspace, sandbox, call, cancellation, decision
+                    batch = [
+                        (
+                            call,
+                            self._tool_step.execute_decided(
+                                run_id, state.workspace, sandbox, call, cancellation, decision
+                            ),
                         )
                         for call, decision in runnable
                     ]
-                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    resolved, cancelled = await self._tool_step.resolve_batch(batch)
 
-                    if any(isinstance(result, ToolRunCancelled) for result in results):
-                        return await self._hub.finish_cancelled(state)
-
-                    for (call, _decision), result in zip(runnable, results, strict=True):
-                        outcome = cast(ToolResult, result)
+                    for call, outcome in resolved:
                         state = append_tool_result(state, call, outcome)
                         await self._hub.after_tool(run_id, call, outcome, state)
+
+                    if cancelled:
+                        return await self._hub.finish_cancelled(state)
 
                 if needs_approval:
                     for call in needs_approval:

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Awaitable, Sequence
 from pathlib import Path
+from typing import cast
 
 from milky_frog.core.policy import ToolPolicy
 from milky_frog.core.runtime.execute_tool import execute_tool
@@ -12,6 +15,7 @@ from milky_frog.domain import (
     ToolCall,
     ToolDecision,
     ToolResult,
+    ToolRunCancelled,
 )
 from milky_frog.events.emitter import RunEmitter
 from milky_frog.harness.budget import TokenBudget
@@ -104,6 +108,36 @@ class ToolStepExecutor:
             cancellation,
             token_counter=self._token_counter(),
         )
+
+    async def resolve_batch(
+        self, batch: Sequence[tuple[ToolCall, Awaitable[ToolResult]]]
+    ) -> tuple[list[tuple[ToolCall, ToolResult]], bool]:
+        """Run a batch of already-started Tool executions concurrently.
+
+        Returns the ``(call, result)`` pairs for every call that actually
+        completed, in request order, plus whether any call in the batch was
+        cancelled. A cancelled sibling never discards a completed one — the
+        caller folds every returned pair into ``state`` (and checkpoints it)
+        before honoring the cancellation, so a Tool that already ran (e.g. a
+        completed ``write_file``) is never silently dropped from the
+        transcript. ``execute_tool`` guarantees each awaitable raises nothing
+        but ``ToolRunCancelled``, so every other result is safe to treat as
+        a ``ToolResult``.
+        """
+        if not batch:
+            return [], False
+        calls = [call for call, _awaitable in batch]
+        results = await asyncio.gather(
+            *(awaitable for _call, awaitable in batch), return_exceptions=True
+        )
+        cancelled = False
+        resolved: list[tuple[ToolCall, ToolResult]] = []
+        for call, result in zip(calls, results, strict=True):
+            if isinstance(result, ToolRunCancelled):
+                cancelled = True
+                continue
+            resolved.append((call, cast(ToolResult, result)))
+        return resolved, cancelled
 
     def _token_counter(self) -> TokenCounter | None:
         if self._budget is None:

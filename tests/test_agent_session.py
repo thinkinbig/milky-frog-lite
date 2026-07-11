@@ -22,9 +22,12 @@ from milky_frog.domain import (
     StreamDone,
     TextDelta,
     ToolCall,
+    ToolResult,
 )
-from milky_frog.events import EventHub, Handler, RunCancelled
+from milky_frog.events import EventHub, Handler, RunCancelled, RunStarted
 from milky_frog.harness.harness import AgentHarness
+from milky_frog.harness.tools import ToolContext
+from milky_frog.harness.tools.builtins.fetch import FetchTool
 from milky_frog.models import OpenAIModel
 from milky_frog.project import ProjectConfig, SandboxConfig
 from milky_frog.settings import Settings
@@ -420,6 +423,111 @@ async def test_session_subagent_tool_runs_nested_run(
     nested_run_id = next(rid for rid in run_ids if rid != result.run_id)
     nested_state = store.load_state(nested_run_id)
     assert nested_state.messages[0].content == "investigate X"
+
+
+@pytest.mark.asyncio
+async def test_session_subagent_fetch_runs_without_approval_pause(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`fetch`/`web_search` require approval by default, but a nested subagent
+    Run has no way for anyone to ever resolve that pause — the nested policy
+    must auto-approve read-only Tools instead of deadlocking on them."""
+    requests: list[ModelRequest] = []
+
+    async def fake_stream(self: OpenAIModel, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        del self
+        requests.append(request)
+        call_number = len(requests)
+        if call_number == 1:
+            yield StreamDone(
+                ModelResponse(tool_calls=(ToolCall("call-1", "subagent", {"prompt": "fetch it"}),))
+            )
+            return
+        if call_number == 2:
+            yield StreamDone(
+                ModelResponse(
+                    tool_calls=(ToolCall("call-2", "fetch", {"url": "https://example.test"}),)
+                )
+            )
+            return
+        if call_number == 3:
+            yield StreamDone(ModelResponse(content="nested done"))
+            return
+        yield StreamDone(ModelResponse(content="top-level done"))
+
+    async def fake_fetch_execute(
+        self: FetchTool, context: ToolContext, input: object
+    ) -> ToolResult:
+        del self, context, input
+        return ToolResult("mocked fetch content")
+
+    monkeypatch.setattr(OpenAIModel, "stream", fake_stream)
+    monkeypatch.setattr(FetchTool, "execute", fake_fetch_execute)
+    settings = _settings(tmp_path, base_url="https://example.test")
+
+    async with AgentSession.from_settings(settings) as session:
+        result = await session.start_new("delegate this", tmp_path)
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.final_message == "top-level done"
+
+    store = SqliteCheckpointStore(settings.database_path)
+    state = store.load_state(result.run_id)
+    tool_msgs = [m.content for m in state.messages if m.role.value == "tool"]
+    # If fetch had paused for approval instead, this would be the
+    # "approval needed for: fetch" message and the Run would never reach
+    # "nested done" (there is no caller who could ever approve it).
+    assert tool_msgs == ["nested done"]
+
+
+@pytest.mark.asyncio
+async def test_session_subagent_shares_hub_but_tui_ignores_nested_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The nested subagent Run intentionally shares the session's one
+    EventHub (CheckpointHandler/LangfuseHandler key everything off run_id, so
+    a second Run on the same hub is safe for them, and it's how the nested
+    Run gets its own Checkpoint record). A run_id-naive Handler (a plain
+    RunStarted spy here, standing in for TuiPresentationHandler's own
+    filtering, tested directly in tests/tui/test_tui_renderer.py) does see
+    both Runs on the shared hub — that's expected, not a leak."""
+    requests: list[ModelRequest] = []
+
+    async def fake_stream(self: OpenAIModel, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        del self
+        requests.append(request)
+        call_number = len(requests)
+        if call_number == 1:
+            yield StreamDone(
+                ModelResponse(
+                    tool_calls=(ToolCall("call-1", "subagent", {"prompt": "investigate X"}),)
+                )
+            )
+            return
+        if call_number == 2:
+            yield StreamDone(ModelResponse(content="nested report"))
+            return
+        yield StreamDone(ModelResponse(content="top-level done"))
+
+    monkeypatch.setattr(OpenAIModel, "stream", fake_stream)
+    settings = _settings(tmp_path, base_url="https://example.test")
+
+    seen_run_ids: list[str] = []
+
+    class SpyHandler(Handler):
+        def register(self, hub: EventHub) -> None:
+            hub.on(RunStarted)(self._record)
+
+        async def _record(self, event: RunStarted, deps: object = None) -> None:
+            seen_run_ids.append(event.run_id)
+
+    async with AgentSession.from_settings(settings, bundles=[SpyHandler()]) as session:
+        result = await session.start_new("delegate this", tmp_path)
+
+    # Both the top-level Run and the nested subagent Run broadcast RunStarted
+    # on the same shared hub.
+    assert result.run_id in seen_run_ids
+    assert len(seen_run_ids) == 2
 
 
 def test_make_sandbox_factory_returns_local_by_default() -> None:

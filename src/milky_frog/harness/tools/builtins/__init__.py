@@ -38,8 +38,8 @@ def read_only_tools(*, jina_api_key: str | None = None) -> tuple[Tool, ...]:
     """The read-only subset of ``default_tools`` for a nested ``subagent`` Run.
 
     Excludes ``write_file``/``edit_file``/``bash`` (no write surface, so no
-    worktree isolation is needed — see ADR-0018) and ``subagent`` itself (caps
-    nesting at one level by construction).
+    worktree isolation is needed) and ``subagent`` itself (caps nesting at one
+    level by construction).
     """
     tools: list[Tool] = [
         ReadFileTool(),

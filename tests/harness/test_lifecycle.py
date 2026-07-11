@@ -617,3 +617,38 @@ async def test_concurrent_batch_cancellation_reports_once(tmp_path: Path) -> Non
 
     assert result.status is RunStatus.CANCELLED
     assert len(cancelled) == 1
+
+
+@pytest.mark.asyncio
+async def test_concurrent_batch_cancellation_keeps_already_completed_results(
+    tmp_path: Path,
+) -> None:
+    """A cancelled sibling must not discard a batch-mate that already finished."""
+    calls = (
+        ToolCall("call-1", "delayed", {"label": "fast", "delay": 0.01}),
+        ToolCall("call-2", "delayed", {"label": "slow", "delay": 1.0}),
+    )
+    cancellation = RunCancellation()
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    harness = make_harness(
+        model=MultiCallModel(calls),
+        tools=ToolRegistry((DelayedTool(),)),
+        checkpoints=store,
+        hub=EventHub(),
+    )
+
+    async def run_and_cancel() -> RunResult:
+        task = asyncio.create_task(
+            harness.run(RunRequest("go", tmp_path, cancellation=cancellation))
+        )
+        await asyncio.sleep(0.1)
+        cancellation.cancel()
+        return await task
+
+    result = await run_and_cancel()
+
+    assert result.status is RunStatus.CANCELLED
+    state = store.load_state(result.run_id)
+    # "fast" finished well before cancellation and must survive in the
+    # transcript even though its batch-mate "slow" was cancelled.
+    assert tool_messages(state) == ("fast",)
