@@ -4,7 +4,7 @@ from rich.text import Text
 from textual.widgets import Input
 
 from milky_frog.domain import ApprovalDecision, ApprovalVerdict
-from milky_frog.tui.messages import ApprovalRequired
+from milky_frog.tui.messages import ApprovalRequired, PendingApproval
 from milky_frog.tui.viewmodels.protocols import TuiHost
 from milky_frog.tui.widgets.approval import ApprovalPrompt
 
@@ -16,6 +16,8 @@ class ApprovalViewModel:
     def __init__(self, app: TuiHost) -> None:
         self._app = app
         self._pending: ApprovalRequired | None = None
+        self._position = 0
+        self._verdicts: dict[str, ApprovalVerdict] = {}
         self._widget: ApprovalPrompt | None = None
         self._deny_reason_mode: bool = False
 
@@ -32,21 +34,64 @@ class ApprovalViewModel:
         return self._widget is not None and not self._deny_reason_mode
 
     def begin(self, event: ApprovalRequired) -> None:
-        """Show the approval menu for a pending tool call."""
+        """Start collecting decisions for every Tool call in a pending batch."""
         self._app._conv.close_phase()
         self._app.session.pending_approval = event.run_id
         self._pending = event
+        self._position = 0
+        self._verdicts = {}
         self._deny_reason_mode = False
-
-        prompt = ApprovalPrompt(tool_name=event.tool_name, reason=event.reason)
-        self._widget = prompt
-        self._app._conversation().mount(prompt)
-        self._app._scroll_end()
+        self._show_current()
 
         self._app.session.busy = False
         prompt_input = self._app.query_one("#prompt-input", Input)
         prompt_input.disabled = True
         prompt_input.placeholder = "Type a task and press Enter..."
+
+    def _current(self) -> PendingApproval | None:
+        event = self._pending
+        if event is None or self._position >= len(event.approvals):
+            return None
+        return event.approvals[self._position]
+
+    def _show_current(self) -> None:
+        current = self._current()
+        event = self._pending
+        if current is None or event is None:
+            self._dispatch_batch()
+            return
+        if self._widget is not None:
+            self._widget.remove()
+        prompt = ApprovalPrompt(
+            tool_name=current.tool_name,
+            reason=current.reason,
+            position=self._position + 1,
+            total=len(event.approvals),
+        )
+        self._widget = prompt
+        self._app._conversation().mount(prompt)
+        self._app._scroll_end()
+        prompt_input = self._app.query_one("#prompt-input", Input)
+        prompt_input.disabled = True
+        prompt_input.placeholder = "Type a task and press Enter..."
+
+    def _record(self, verdict: ApprovalVerdict) -> None:
+        current = self._current()
+        if current is None:
+            return
+        self._verdicts[current.call_id] = verdict
+        self._position += 1
+        self._deny_reason_mode = False
+        self._show_current()
+
+    def _dispatch_batch(self) -> None:
+        event = self._pending
+        if event is None:
+            return
+        run_id = event.run_id
+        verdicts = dict(self._verdicts)
+        self._clear()
+        self._app._start_approvals(run_id, verdicts)
 
     def handle_option(self, action: str) -> None:
         """Apply the highlighted approval choice."""
@@ -84,12 +129,7 @@ class ApprovalViewModel:
                     spaced=False,
                 )
                 return True
-            run_id = self._pending.run_id
-            self._clear()
-            self._app._start_approval(
-                run_id,
-                ApprovalVerdict(ApprovalDecision.DENY, denial_reason=reason),
-            )
+            self._record(ApprovalVerdict(ApprovalDecision.DENY, denial_reason=reason))
             return True
 
         verdict = self._parse(text)
@@ -107,13 +147,13 @@ class ApprovalViewModel:
         if isinstance(verdict, str):
             self._apply_action(verdict)
         else:
-            run_id = self._pending.run_id
-            self._clear()
-            self._app._start_approval(run_id, verdict)
+            self._record(verdict)
         return True
 
     def _clear(self) -> None:
         self._pending = None
+        self._position = 0
+        self._verdicts = {}
         self._app.session.pending_approval = None
         self._deny_reason_mode = False
         if self._widget is not None:
@@ -124,21 +164,33 @@ class ApprovalViewModel:
 
     def _apply_action(self, action: str) -> None:
         event = self._pending
-        if event is None:
+        current = self._current()
+        if event is None or current is None:
             return
-        self._clear()
 
         if action == "approve":
-            self._app._start_approval(event.run_id, ApprovalVerdict(ApprovalDecision.APPROVE))
+            self._record(ApprovalVerdict(ApprovalDecision.APPROVE))
         elif action == "deny":
-            self._app._start_approval(event.run_id, ApprovalVerdict(ApprovalDecision.DENY))
+            self._record(ApprovalVerdict(ApprovalDecision.DENY))
         elif action == "allow_tool":
-            if event.tool_name:
-                self._app.session.policy.allow(event.tool_name)
-            self._app._start_approval(event.run_id, ApprovalVerdict(ApprovalDecision.APPROVE))
+            if current.tool_name:
+                self._app.session.policy.allow(current.tool_name)
+            for approval in event.approvals[self._position :]:
+                if approval.tool_name == current.tool_name:
+                    self._verdicts[approval.call_id] = ApprovalVerdict(ApprovalDecision.APPROVE)
+            self._position += 1
+            while self._position < len(event.approvals):
+                call_id = event.approvals[self._position].call_id
+                if call_id not in self._verdicts:
+                    break
+                self._position += 1
+            self._show_current()
         elif action == "allow_all":
             self._app.session.policy.auto_approve()
-            self._app._start_approval(event.run_id, ApprovalVerdict(ApprovalDecision.APPROVE))
+            for approval in event.approvals[self._position :]:
+                self._verdicts[approval.call_id] = ApprovalVerdict(ApprovalDecision.APPROVE)
+            self._position = len(event.approvals)
+            self._show_current()
 
     @staticmethod
     def _parse(text: str) -> ApprovalVerdict | str | None:

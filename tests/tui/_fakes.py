@@ -86,9 +86,11 @@ class FakeApprovalPrompt:
     shim that records lifecycle calls only.
     """
 
-    def __init__(self, *, tool_name: str, reason: str) -> None:
+    def __init__(self, *, tool_name: str, reason: str, position: int, total: int) -> None:
         self.tool_name = tool_name
         self.reason = reason
+        self.position = position
+        self.total = total
         self.removed = False
         self.options = []  # actions the menu would offer
 
@@ -153,7 +155,7 @@ class FakeTuiHost:
         self.appended: list[tuple[RenderableType, bool]] = []
         self.scroll_calls = 0
         self.intervals: list[tuple[float, Callable[[], object]]] = []
-        self.started_approvals: list[tuple[str, object]] = []
+        self.started_approvals: list[tuple[str, dict[str, object]]] = []
 
     # TuiHost Protocol surface ─────────────────────────────────────
 
@@ -187,5 +189,5 @@ class FakeTuiHost:
             return self._conversation_widget
         raise LookupError(f"No widget matches {selector!r}")
 
-    def _start_approval(self, run_id: str, verdict: object) -> None:
-        self.started_approvals.append((run_id, verdict))
+    def _start_approvals(self, run_id: str, verdicts: dict[str, object]) -> None:
+        self.started_approvals.append((run_id, verdicts))

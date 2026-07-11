@@ -28,14 +28,21 @@ class ApprovalPrompt(Vertical):
         Binding("5", "pick_fifth", "Deny with reason", show=False, priority=True),
     ]
 
-    def __init__(self, *, tool_name: str, reason: str) -> None:
+    def __init__(self, *, tool_name: str, reason: str, position: int, total: int) -> None:
         super().__init__(classes="approval-prompt")
         self._tool_name = tool_name
         self._reason = reason
+        self._position = position
+        self._total = total
 
     @override
     def compose(self):
-        header = f"Run {self._tool_name}?" if self._tool_name else "Tool approval required"
+        prefix = f"[{self._position}/{self._total}] " if self._total > 1 else ""
+        header = (
+            f"{prefix}Run {self._tool_name}?"
+            if self._tool_name
+            else f"{prefix}Tool approval required"
+        )
         yield Static(Text.assemble(("  ⚠ ", "bold yellow"), (header, "bold")), id="approval-header")
         yield Static(Text(f"  {_approval_body(self._reason)}", style="dim"), id="approval-body")
         options: list[Option] = [
