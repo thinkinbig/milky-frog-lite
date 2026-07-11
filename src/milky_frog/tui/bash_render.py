@@ -40,8 +40,8 @@ class BashRenderHandler(Handler):
         is_error = event.result.is_error
 
         if _GIT_RE.match(command):
-            self._emit(GitOutputMsg(command, content=content, is_error=is_error))
+            self._emit(GitOutputMsg(event.call.id, command, content=content, is_error=is_error))
         elif _GREP_RE.match(command):
-            self._emit(GrepOutputMsg(command, content=content, is_error=is_error))
+            self._emit(GrepOutputMsg(event.call.id, command, content=content, is_error=is_error))
         else:
-            self._emit(BashOutputMsg(content=content, is_error=is_error))
+            self._emit(BashOutputMsg(event.call.id, content=content, is_error=is_error))

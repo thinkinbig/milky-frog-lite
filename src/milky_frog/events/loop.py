@@ -185,8 +185,6 @@ class AgentLoop:
                         return await self._hub.finish_cancelled(state)
 
                 if needs_approval:
-                    for call in needs_approval:
-                        await self._hub.before_tool(run_id, call)
                     return await self._hub.finish_approval_needed(state, needs_approval)
 
                 model_call = state.completed_model_calls

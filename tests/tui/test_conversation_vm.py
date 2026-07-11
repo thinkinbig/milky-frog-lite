@@ -8,8 +8,10 @@ decisions, not the widget tree.
 
 from __future__ import annotations
 
+from typing import cast
+
 from milky_frog.tui.viewmodels.conversation_vm import ConversationViewModel
-from tests.tui._fakes import FakeTuiHost
+from tests.tui._fakes import FakeStatic, FakeTuiHost
 
 
 def _vm() -> tuple[ConversationViewModel, FakeTuiHost]:
@@ -160,18 +162,18 @@ def test_close_phase_with_no_open_phase_is_noop() -> None:
 def test_on_tool_call_appends_widget_and_starts_spinner() -> None:
     vm, host = _vm()
 
-    vm.on_tool_call("bash", {"command": "ls"})
+    vm.on_tool_call("call-1", "bash", {"command": "ls"})
 
     assert len(host.appended) == 1  # signature row only (bash has no diff)
-    assert vm._active_tool_widget is not None
-    assert vm._active_tool_signature.startswith("Bash")
+    assert vm._active_tool_widgets["call-1"] is not None
+    assert vm._active_tool_signatures["call-1"].startswith("Bash")
     assert any(interval == 0.1 for interval, _ in host.intervals)
 
 
 def test_on_tool_call_for_edit_appends_signature_plus_diff() -> None:
     vm, host = _vm()
 
-    vm.on_tool_call("edit_file", {"path": "a.py", "old": "foo", "new": "bar"})
+    vm.on_tool_call("call-1", "edit_file", {"path": "a.py", "old": "foo", "new": "bar"})
 
     # signature row + diff row, both unspaced.
     assert len(host.appended) == 2
@@ -180,22 +182,44 @@ def test_on_tool_call_for_edit_appends_signature_plus_diff() -> None:
 
 def test_finalize_tool_call_updates_widget_and_stops_spinner() -> None:
     vm, _ = _vm()
-    vm.on_tool_call("bash", {"command": "ls"})
+    vm.on_tool_call("call-1", "bash", {"command": "ls"})
     timer = vm._tool_spinner_timer
     assert timer is not None
 
-    vm.finalize_tool_call(is_error=False)
+    vm.finalize_tool_call("call-1", is_error=False)
 
     assert timer.stopped is True
     assert vm._tool_spinner_timer is None
-    assert vm._active_tool_widget is None
+    assert vm._active_tool_widgets == {}
+
+
+def test_concurrent_tool_calls_animate_and_finalize_independently() -> None:
+    vm, _ = _vm()
+    vm.on_tool_call("call-1", "subagent", {"prompt": "first"})
+    vm.on_tool_call("call-2", "subagent", {"prompt": "second"})
+    first = cast(FakeStatic, vm._active_tool_widgets["call-1"])
+    second = cast(FakeStatic, vm._active_tool_widgets["call-2"])
+    timer = vm._tool_spinner_timer
+
+    vm._tick_tool_spinner()
+
+    assert first.updates
+    assert second.updates
+    vm.finalize_tool_call("call-1", is_error=False)
+    assert timer is not None
+    assert timer.stopped is False
+    assert "call-2" in vm._active_tool_widgets
+
+    vm.finalize_tool_call("call-2", is_error=False)
+    assert timer.stopped is True
+    assert vm._tool_spinner_timer is None
 
 
 def test_finish_resets_thinking_answer_and_tool_state() -> None:
     vm, _ = _vm()
 
     vm.on_thinking("reasoning...")
-    vm.on_tool_call("bash", {"command": "ls"})
+    vm.on_tool_call("call-1", "bash", {"command": "ls"})
     tool_timer = vm._tool_spinner_timer
     assert tool_timer is not None
 
@@ -204,7 +228,7 @@ def test_finish_resets_thinking_answer_and_tool_state() -> None:
     assert vm.phase is None  # close_phase() ran
     assert tool_timer.stopped is True
     assert vm._tool_spinner_timer is None
-    assert vm._active_tool_widget is None
+    assert vm._active_tool_widgets == {}
 
 
 # ── Static renderers ───────────────────────────────────────────────
@@ -257,11 +281,11 @@ def test_render_command_output_appends_renderable() -> None:
 
 def test_render_tool_result_finalizes_active_call_then_appends_block() -> None:
     vm, _ = _vm()
-    vm.on_tool_call("bash", {"command": "ls"})
+    vm.on_tool_call("call-1", "bash", {"command": "ls"})
 
-    vm.render_tool_result("bash", "file.py", is_error=False)
+    vm.render_tool_result("call-1", "bash", "file.py", is_error=False)
 
-    assert vm._active_tool_widget is None
+    assert vm._active_tool_widgets == {}
     assert vm._tool_spinner_timer is None
 
 

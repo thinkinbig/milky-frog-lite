@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from milky_frog.domain import (
+    Message,
+    MessageRole,
     ModelRequest,
     ModelResponse,
     RunRequest,
@@ -11,6 +13,7 @@ from milky_frog.domain import (
     RunStatus,
     TextDelta,
     TokenUsage,
+    ToolCall,
 )
 from milky_frog.events import EventHub
 from milky_frog.events.events import (
@@ -79,14 +82,24 @@ async def test_presentation_maps_model_chunk_and_approval_pause() -> None:
                 "approval needed for: bash",
                 1,
             ),
-            state=RunState("run-1", _WORKSPACE),
+            state=RunState(
+                "run-1",
+                _WORKSPACE,
+                messages=(
+                    Message(
+                        MessageRole.ASSISTANT,
+                        "",
+                        tool_calls=(ToolCall("call-1", "bash", {"command": "ls"}),),
+                    ),
+                ),
+            ),
         )
     )
 
     assert isinstance(sink.messages[0], AddText)
     assert sink.messages[0].text == "hi"
     assert isinstance(sink.messages[1], ApprovalRequired)
-    assert sink.messages[1].reason == "approval needed for: bash"
+    assert sink.messages[1].approvals[0].reason.startswith("approval needed for: bash")
 
 
 async def test_presentation_accumulates_usage_on_after_model() -> None:

@@ -7,6 +7,7 @@ from textual.message import Message
 
 from milky_frog.core.handlers import HandlerDeps
 from milky_frog.domain import RunResult, RunStatus, RunUsage
+from milky_frog.events.emitter import format_approval_message
 from milky_frog.events.events import (
     RunAfterModel,
     RunAfterTool,
@@ -30,6 +31,7 @@ from milky_frog.tui.messages import (
     AddThinking,
     ApprovalRequired,
     CompactionMsg,
+    PendingApproval,
     RunFinished,
     RunNoticeMsg,
     ToolCallMsg,
@@ -123,7 +125,7 @@ class TuiPresentationHandler(Handler):
         if not self._is_active(event.run_id):
             return
         call = event.call
-        self._emit(ToolCallMsg(call.name, call.arguments))
+        self._emit(ToolCallMsg(call.id, call.name, call.arguments))
 
     async def _on_after_tool(self, event: RunAfterTool, deps: HandlerDeps | None = None) -> None:
         if not self._is_active(event.run_id):
@@ -132,7 +134,9 @@ class TuiPresentationHandler(Handler):
             return  # BashRenderHandler handles bash results
         call = event.call
         result = event.result
-        self._emit(ToolResultMsg(call.name, content=result.content, is_error=result.is_error))
+        self._emit(
+            ToolResultMsg(call.id, call.name, content=result.content, is_error=result.is_error)
+        )
 
     async def _on_compaction(self, event: RunCompaction, deps: HandlerDeps | None = None) -> None:
         if not self._is_active(event.run_id):
@@ -159,8 +163,11 @@ class TuiPresentationHandler(Handler):
             # batch — a multi-call batch may have already resolved earlier
             # calls and re-halted exposing only the remaining ones.
             pending = unmatched_tool_calls(event.state.messages)
-            tool_name = pending[0].name if pending else ""
-            self._emit(ApprovalRequired(result.run_id, result.final_message, tool_name))
+            approvals = tuple(
+                PendingApproval(call.id, call.name, format_approval_message(call))
+                for call in pending
+            )
+            self._emit(ApprovalRequired(result.run_id, approvals))
             return
         self._active_run_id = None
         self._emit(_run_finished(result))

@@ -9,6 +9,7 @@ from milky_frog.checkpoint import CheckpointStore, RunClaimError, StoredRun
 from milky_frog.core.sandbox import Sandbox, SandboxFactory
 from milky_frog.core.session_tool_policy import SessionToolPolicy
 from milky_frog.domain import (
+    ApprovalDecision,
     ApprovalVerdict,
     ResumeError,
     RunCancellation,
@@ -275,6 +276,9 @@ class AgentHarness:
         still_pending = tuple(call for call in pending if call.id not in verdicts)
 
         if decided:
+            for call, verdict in decided:
+                if verdict.decision is ApprovalDecision.APPROVE:
+                    await self._hub.before_tool(run_id, call)
             batch = [
                 (
                     call,
