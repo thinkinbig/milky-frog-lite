@@ -102,7 +102,6 @@ class RunState:
     workspace: Path
     messages: tuple[Message, ...] = ()
     completed_model_calls: int = 0
-    reasoning_log: tuple[str, ...] = ()
     usage: RunUsage = field(default_factory=RunUsage)
     compaction: CompactionState | None = None
     run_extra: tuple[str, ...] = ()

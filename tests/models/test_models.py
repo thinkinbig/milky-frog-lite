@@ -17,6 +17,7 @@ from milky_frog.domain import (
     StreamDone,
     TextDelta,
     TokenUsage,
+    ToolCall,
 )
 from milky_frog.models import OpenAIModel
 
@@ -132,6 +133,33 @@ async def test_stream_surfaces_reasoning_before_answer() -> None:
     assert done is not None
     assert done.response.reasoning == "let me think"
     assert done.response.content == "answer"
+
+
+@pytest.mark.asyncio
+async def test_stream_returns_reasoning_for_an_assistant_tool_call() -> None:
+    client = _FakeClient([_chunk(content="ok")])
+    model = OpenAIModel(api_key="k", model="m", client=client)  # type: ignore[arg-type]
+    tool_call = ToolCall("call-1", "echo", {"text": "hi"})
+    request = ModelRequest(
+        (
+            Message(MessageRole.USER, "hi"),
+            Message(
+                MessageRole.ASSISTANT,
+                "",
+                tool_calls=(tool_call,),
+                reasoning="I need the echo tool.",
+            ),
+            Message(MessageRole.TOOL, "hi", tool_call_id=tool_call.id),
+        ),
+        (),
+    )
+
+    async with model:
+        async for _ in model.stream(request):
+            pass
+
+    assistant = client.captured["messages"][1]
+    assert assistant["reasoning_content"] == "I need the echo tool."
 
 
 @pytest.mark.asyncio

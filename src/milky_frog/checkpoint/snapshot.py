@@ -32,6 +32,7 @@ class MessageSnapshot(BaseModel):
     content: str = ""
     tool_calls: tuple[ToolCallSnapshot, ...] = ()
     tool_call_id: str | None = None
+    reasoning: str | None = None
 
 
 class TokenUsageSnapshot(BaseModel):
@@ -63,7 +64,12 @@ class RunSnapshot(BaseModel):
     version: int = SNAPSHOT_VERSION
     messages: tuple[MessageSnapshot, ...] = ()
     completed_model_calls: int = 0
-    reasoning_log: tuple[str, ...] = ()
+    # Prior snapshot versions stored one reasoning entry per model response at
+    # the root. Read it for migration only; new snapshots keep only reasoning
+    # attached to assistant messages that carry Tool calls.
+    legacy_reasoning_log: tuple[str, ...] = Field(
+        default=(), validation_alias="reasoning_log", exclude=True
+    )
     usage: RunUsageSnapshot = Field(default_factory=RunUsageSnapshot)
     compaction: CompactionSnapshot | None = None
     # ``run_extra`` carries eager system-prompt sections injected at Run start
@@ -76,7 +82,6 @@ def dump_run_state(state: RunState) -> str:
     snapshot = RunSnapshot(
         messages=tuple(_message_to_snapshot(message) for message in state.messages),
         completed_model_calls=state.completed_model_calls,
-        reasoning_log=state.reasoning_log,
         usage=_usage_to_snapshot(state.usage),
         compaction=_compaction_to_snapshot(state.compaction),
         run_extra=state.run_extra,
@@ -91,13 +96,8 @@ def load_run_state(run_id: str, workspace: Path, raw: str) -> RunState:
         workspace=workspace,
         # System prompts are no longer part of the transcript (ContextManager
         # rebuilds them per call); drop any persisted by older snapshots.
-        messages=tuple(
-            _message_from_snapshot(message)
-            for message in snapshot.messages
-            if message.role != MessageRole.SYSTEM.value
-        ),
+        messages=_messages_from_snapshot(snapshot),
         completed_model_calls=snapshot.completed_model_calls,
-        reasoning_log=snapshot.reasoning_log,
         usage=_usage_from_snapshot(snapshot.usage),
         compaction=_compaction_from_snapshot(snapshot.compaction),
         run_extra=snapshot.run_extra,
@@ -116,6 +116,20 @@ def _compaction_from_snapshot(snapshot: CompactionSnapshot | None) -> Compaction
     return CompactionState(summary=snapshot.summary, through_index=snapshot.through_index)
 
 
+def _messages_from_snapshot(snapshot: RunSnapshot) -> tuple[Message, ...]:
+    messages: list[Message] = []
+    assistant_count = 0
+    for message in snapshot.messages:
+        legacy_reasoning = ""
+        if message.role == MessageRole.ASSISTANT.value:
+            if assistant_count < len(snapshot.legacy_reasoning_log):
+                legacy_reasoning = snapshot.legacy_reasoning_log[assistant_count]
+            assistant_count += 1
+        if message.role != MessageRole.SYSTEM.value:
+            messages.append(_message_from_snapshot(message, legacy_reasoning=legacy_reasoning))
+    return tuple(messages)
+
+
 def _message_to_snapshot(message: Message) -> MessageSnapshot:
     return MessageSnapshot(
         role=message.role.value,
@@ -125,10 +139,11 @@ def _message_to_snapshot(message: Message) -> MessageSnapshot:
             for call in message.tool_calls
         ),
         tool_call_id=message.tool_call_id,
+        reasoning=message.reasoning or None,
     )
 
 
-def _message_from_snapshot(message: MessageSnapshot) -> Message:
+def _message_from_snapshot(message: MessageSnapshot, *, legacy_reasoning: str = "") -> Message:
     return Message(
         role=MessageRole(message.role),
         content=message.content,
@@ -137,6 +152,7 @@ def _message_from_snapshot(message: MessageSnapshot) -> Message:
             for call in message.tool_calls
         ),
         tool_call_id=message.tool_call_id,
+        reasoning=message.reasoning or (legacy_reasoning if message.tool_calls else ""),
     )
 
 

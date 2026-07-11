@@ -124,7 +124,7 @@ async def test_stops_model_stream_after_stream_done(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_persists_reasoning_in_checkpoint(tmp_path: Path) -> None:
+async def test_does_not_persist_reasoning_in_checkpoint(tmp_path: Path) -> None:
     store = SqliteCheckpointStore(tmp_path / "state.db")
     harness = make_harness(
         model=ReasoningModel(),
@@ -137,7 +137,8 @@ async def test_persists_reasoning_in_checkpoint(tmp_path: Path) -> None:
 
     assert result.final_message == "the answer"
     loaded = store.load_state(result.run_id)
-    assert loaded.reasoning_log == ("weighing options",)
+    assert not hasattr(loaded, "reasoning_log")
+    assert loaded.messages[-1].reasoning == ""
     assert loaded.messages[-1].content == "the answer"
 
 

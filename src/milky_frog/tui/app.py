@@ -36,6 +36,7 @@ from milky_frog.tui.messages import (
     RunError,
     RunFinished,
     RunNoticeMsg,
+    RunOptionSelected,
     SkillOptionSelected,
     ToolCallMsg,
     ToolResultMsg,
@@ -52,6 +53,7 @@ from milky_frog.tui.viewmodels.conversation_vm import ConversationViewModel
 from milky_frog.tui.viewmodels.mcp_vm import McpViewModel
 from milky_frog.tui.viewmodels.skills_vm import SkillsViewModel
 from milky_frog.tui.widgets.prompt import PromptInput
+from milky_frog.tui.widgets.run_picker import RunPicker
 from milky_frog.tui.widgets.status_bar import RunStatusBar
 
 
@@ -171,6 +173,27 @@ class MilkyFrogApp(App[None]):
         background: $accent 20%;
         color: $text;
     }
+
+    .run-picker {
+        height: auto;
+        margin-bottom: 1;
+        border: round cyan;
+        padding: 0 1 1 0;
+    }
+
+    .run-picker OptionList {
+        height: auto;
+        max-height: 12;
+        margin: 0 1;
+        background: transparent;
+        border: none;
+        padding: 0;
+    }
+
+    .run-picker OptionList > .option-list--option-highlighted {
+        background: $accent 20%;
+        color: $text;
+    }
     """
 
     BINDINGS: ClassVar[list[BindingType]] = [
@@ -197,6 +220,7 @@ class MilkyFrogApp(App[None]):
         self._approval = ApprovalViewModel(self)
         self._skills = SkillsViewModel(self)
         self._mcp = McpViewModel(self)
+        self._run_picker: RunPicker | None = None
 
     @property
     def session(self) -> AgentSession:
@@ -377,6 +401,11 @@ class MilkyFrogApp(App[None]):
     def on_mcp_option_selected(self, event: McpOptionSelected) -> None:
         self._mcp.on_picker_confirmed(event.enabled)
 
+    def on_run_option_selected(self, event: RunOptionSelected) -> None:
+        self._dismiss_run_picker()
+        if event.run_id is not None:
+            self._attach_or_continue_run(event.run_id, advance_pending=True)
+
     def on_mcp_reload_requested(self, _event: McpReloadRequested) -> None:
         self._do_reload_mcp()
 
@@ -478,18 +507,34 @@ class MilkyFrogApp(App[None]):
         self._start_run(task, run_id=self.session.run_id)
 
     def _handle_resume(self, task: str) -> None:
-        parsed = self.run_controller.parse_resume_command(task)
-        if isinstance(parsed, str):
-            hint = None
-            if parsed == "No runs found to resume.":
-                hint = "Start a new task to create a run first."
-            self._conv.render_error(parsed, hint=hint)
+        if task.strip().casefold() == "/resume":
+            self._show_run_picker()
             return
-        self._attach_or_continue_run(
-            parsed.run_id,
-            prompt=parsed.prompt,
-            advance_pending=False,
+        self._conv.render_error(
+            "Use /resume without a Run ID in the TUI.",
+            hint="Pick a Run from the list, or use the CLI: milky-frog resume RUN_ID",
         )
+
+    def _show_run_picker(self) -> None:
+        runs = self.run_controller.workspace_runs(Path.cwd())
+        if not runs:
+            self._conv.render_error(
+                "No runs found to resume.", hint="Start a new task to create a run first."
+            )
+            return
+        if self._run_picker is not None:
+            self._run_picker.remove()
+        picker = RunPicker(runs)
+        self._run_picker = picker
+        self._conversation().mount(picker)
+        self._conversation().scroll_end(animate=False)
+        self.query_one("#prompt-input", Input).disabled = True
+
+    def _dismiss_run_picker(self) -> None:
+        if self._run_picker is not None:
+            self._run_picker.remove()
+            self._run_picker = None
+        self._enable_input_focus()
 
     def _handle_compact(self) -> None:
         """Force-compact the current Run's transcript."""
@@ -684,6 +729,9 @@ class MilkyFrogApp(App[None]):
         self.session.request_shutdown()
 
     def action_cancel_run(self) -> None:
+        if self._run_picker is not None:
+            self._run_picker.action_dismiss()
+            return
         if self._skills.has_picker:
             self._skills.dismiss_picker()
             return

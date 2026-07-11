@@ -27,7 +27,8 @@ dist/
 .vscode/
 .claude/
 .superpowers/
-docs/superpowers/
+.worktrees/
+docs/superpowers
 *.swp
 
 # Local secrets

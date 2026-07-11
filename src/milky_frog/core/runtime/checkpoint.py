@@ -51,8 +51,8 @@ class RunCheckpointFacade:
     def resolve_run_id(self, run_id: str) -> str:
         return self._store.resolve_run_id(run_id)
 
-    def list_runs(self, *, limit: int = 20) -> tuple[StoredRun, ...]:
-        return self._store.list_runs(limit=limit)
+    def list_runs(self, *, limit: int = 20, workspace: Path | None = None) -> tuple[StoredRun, ...]:
+        return self._store.list_runs(limit=limit, workspace=workspace)
 
     def prune(self, before: datetime, workspace: Path | None = None) -> int:
         return self._store.prune(before, workspace)
