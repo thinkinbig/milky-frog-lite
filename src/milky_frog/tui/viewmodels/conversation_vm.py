@@ -56,8 +56,8 @@ class ConversationViewModel:
         self._thinking_frame_idx: int = 0
 
         # Tool call state
-        self._active_tool_widget: Static | None = None
-        self._active_tool_signature: str = ""
+        self._active_tool_widgets: dict[str, Static] = {}
+        self._active_tool_signatures: dict[str, str] = {}
         self._tool_spinner_timer: Timer | None = None
         self._tool_frame_idx: int = 0
 
@@ -156,17 +156,17 @@ class ConversationViewModel:
 
     # ── Tool calls ────────────────────────────────────────────────
 
-    def on_tool_call(self, name: str, arguments: dict[str, JsonValue]) -> None:
+    def on_tool_call(self, call_id: str, name: str, arguments: dict[str, JsonValue]) -> None:
         """Write the tool call signature, plus a colored diff for file edits."""
         self.close_phase()
         signature = format_tool_signature(name, arguments)
-        self._active_tool_signature = signature
-        self._tool_frame_idx = 0
-        self._active_tool_widget = self._append(
+        self._active_tool_signatures[call_id] = signature
+        self._active_tool_widgets[call_id] = self._append(
             tool_call_widget(signature, spinner=self._SPINNER_FRAMES[0]),
             spaced=False,
         )
         if self._tool_spinner_timer is None:
+            self._tool_frame_idx = 0
             self._tool_spinner_timer = self._set_interval(0.1, self._tick_tool_spinner)
 
         diff = tool_call_diff(name, arguments)
@@ -174,23 +174,23 @@ class ConversationViewModel:
             self._append(diff_renderable(diff), spaced=False)
 
     def _tick_tool_spinner(self) -> None:
-        if self._active_tool_widget is not None:
+        if self._active_tool_widgets:
             self._tool_frame_idx = (self._tool_frame_idx + 1) % len(self._SPINNER_FRAMES)
             spinner = self._SPINNER_FRAMES[self._tool_frame_idx]
-            self._active_tool_widget.update(
-                tool_call_widget(self._active_tool_signature, spinner=spinner)
-            )
+            for call_id, widget in self._active_tool_widgets.items():
+                widget.update(
+                    tool_call_widget(self._active_tool_signatures[call_id], spinner=spinner)
+                )
 
-    def finalize_tool_call(self, *, is_error: bool) -> None:
+    def finalize_tool_call(self, call_id: str, *, is_error: bool) -> None:
         """Stop the tool spinner and update the call-site widget with the final mark."""
-        if self._tool_spinner_timer is not None:
+        widget = self._active_tool_widgets.pop(call_id, None)
+        signature = self._active_tool_signatures.pop(call_id, "")
+        if widget is not None:
+            widget.update(tool_call_completed(signature, is_error=is_error))
+        if not self._active_tool_widgets and self._tool_spinner_timer is not None:
             self._tool_spinner_timer.stop()
             self._tool_spinner_timer = None
-        if self._active_tool_widget is not None:
-            self._active_tool_widget.update(
-                tool_call_completed(self._active_tool_signature, is_error=is_error)
-            )
-            self._active_tool_widget = None
 
     def start_compaction(self) -> None:
         """Begin the compaction spinner while a summarization call is in flight.
@@ -262,7 +262,8 @@ class ConversationViewModel:
         if self._tool_spinner_timer is not None:
             self._tool_spinner_timer.stop()
             self._tool_spinner_timer = None
-        self._active_tool_widget = None
+        self._active_tool_widgets.clear()
+        self._active_tool_signatures.clear()
 
     # ── Static rendering helpers ──────────────────────────────────
 
@@ -293,8 +294,8 @@ class ConversationViewModel:
         else:
             self._append(command_summary(content, is_error=is_error), spaced=False)
 
-    def render_tool_result(self, name: str, content: str, *, is_error: bool) -> None:
-        self.finalize_tool_call(is_error=is_error)
+    def render_tool_result(self, call_id: str, name: str, content: str, *, is_error: bool) -> None:
+        self.finalize_tool_call(call_id, is_error=is_error)
         renderable = tool_result_block(name, content, is_error=is_error)
         if renderable is not None:
             self._append(renderable, spaced=False)

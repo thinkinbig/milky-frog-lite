@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from pydantic import JsonValue
 from textual.message import Message
 
@@ -26,8 +28,9 @@ class AddText(Message):
 class ToolCallMsg(Message):
     """Mark a Tool call start, with its arguments for rich rendering."""
 
-    def __init__(self, name: str, arguments: dict[str, JsonValue]) -> None:
+    def __init__(self, call_id: str, name: str, arguments: dict[str, JsonValue]) -> None:
         super().__init__()
+        self.call_id = call_id
         self.name = name
         self.arguments = arguments
 
@@ -35,8 +38,9 @@ class ToolCallMsg(Message):
 class ToolResultMsg(Message):
     """Mark a Tool call result, with its content for a summary line."""
 
-    def __init__(self, name: str, *, content: str, is_error: bool) -> None:
+    def __init__(self, call_id: str, name: str, *, content: str, is_error: bool) -> None:
         super().__init__()
+        self.call_id = call_id
         self.name = name
         self.content = content
         self.is_error = is_error
@@ -66,14 +70,20 @@ class RunFinished(Message):
         self.message = message
 
 
-class ApprovalRequired(Message):
-    """A Run paused waiting for the user to approve a pending tool call."""
+@dataclass(frozen=True, slots=True)
+class PendingApproval:
+    call_id: str
+    tool_name: str
+    reason: str
 
-    def __init__(self, run_id: str, reason: str, tool_name: str = "") -> None:
+
+class ApprovalRequired(Message):
+    """A Run paused while the user decides a batch of pending Tool calls."""
+
+    def __init__(self, run_id: str, approvals: tuple[PendingApproval, ...]) -> None:
         super().__init__()
         self.run_id = run_id
-        self.reason = reason
-        self.tool_name = tool_name
+        self.approvals = approvals
 
 
 class ApprovalOptionSelected(Message):
@@ -132,8 +142,9 @@ class RunNoticeMsg(Message):
 class GitOutputMsg(Message):
     """git command output, routed for ANSI-color rendering."""
 
-    def __init__(self, command: str, *, content: str, is_error: bool) -> None:
+    def __init__(self, call_id: str, command: str, *, content: str, is_error: bool) -> None:
         super().__init__()
+        self.call_id = call_id
         self.command = command
         self.content = content
         self.is_error = is_error
@@ -142,8 +153,9 @@ class GitOutputMsg(Message):
 class GrepOutputMsg(Message):
     """grep/rg output, routed for match-line rendering."""
 
-    def __init__(self, command: str, *, content: str, is_error: bool) -> None:
+    def __init__(self, call_id: str, command: str, *, content: str, is_error: bool) -> None:
         super().__init__()
+        self.call_id = call_id
         self.command = command
         self.content = content
         self.is_error = is_error
@@ -152,8 +164,9 @@ class GrepOutputMsg(Message):
 class BashOutputMsg(Message):
     """Generic bash output fallback."""
 
-    def __init__(self, *, content: str, is_error: bool) -> None:
+    def __init__(self, call_id: str, *, content: str, is_error: bool) -> None:
         super().__init__()
+        self.call_id = call_id
         self.content = content
         self.is_error = is_error
 

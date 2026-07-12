@@ -19,6 +19,7 @@ from textual.worker import Worker
 from milky_frog.app.session import AgentSession
 from milky_frog.core.controller import RunController
 from milky_frog.domain import ApprovalDecision, ApprovalVerdict, ResumeError, RunStatus, RunUsage
+from milky_frog.events.emitter import format_approval_message
 from milky_frog.project import load_project_config
 from milky_frog.tui.cli import runs_table
 from milky_frog.tui.logo import welcome_banner
@@ -33,6 +34,7 @@ from milky_frog.tui.messages import (
     GrepOutputMsg,
     McpOptionSelected,
     McpReloadRequested,
+    PendingApproval,
     RunError,
     RunFinished,
     RunNoticeMsg,
@@ -322,21 +324,23 @@ class MilkyFrogApp(App[None]):
         self._conv.on_text(event.text)
 
     def on_tool_call_msg(self, event: ToolCallMsg) -> None:
-        self._conv.on_tool_call(event.name, event.arguments)
+        self._conv.on_tool_call(event.call_id, event.name, event.arguments)
 
     def on_tool_result_msg(self, event: ToolResultMsg) -> None:
-        self._conv.render_tool_result(event.name, event.content, is_error=event.is_error)
+        self._conv.render_tool_result(
+            event.call_id, event.name, event.content, is_error=event.is_error
+        )
 
     def on_git_output_msg(self, event: GitOutputMsg) -> None:
-        self._conv.finalize_tool_call(is_error=event.is_error)
+        self._conv.finalize_tool_call(event.call_id, is_error=event.is_error)
         self._conv.render_command_output(event.content, is_error=event.is_error)
 
     def on_grep_output_msg(self, event: GrepOutputMsg) -> None:
-        self._conv.finalize_tool_call(is_error=event.is_error)
+        self._conv.finalize_tool_call(event.call_id, is_error=event.is_error)
         self._conv.render_command_output(event.content, is_error=event.is_error)
 
     def on_bash_output_msg(self, event: BashOutputMsg) -> None:
-        self._conv.finalize_tool_call(is_error=event.is_error)
+        self._conv.finalize_tool_call(event.call_id, is_error=event.is_error)
         self._conv.render_command_output(event.content, is_error=event.is_error)
 
     def on_update_usage(self, event: UpdateUsage) -> None:
@@ -404,6 +408,10 @@ class MilkyFrogApp(App[None]):
     def on_run_option_selected(self, event: RunOptionSelected) -> None:
         self._dismiss_run_picker()
         if event.run_id is not None:
+            # ``advance_pending=True``: picking a Run resumes it. A Run waiting on
+            # approval takes the approval path; an interrupted Run repairs and
+            # continues; a Run that already finished is advanced for one more
+            # turn (its transcript is the new prompt). See ``RunController.attach``.
             self._attach_or_continue_run(event.run_id, advance_pending=True)
 
     def on_mcp_reload_requested(self, _event: McpReloadRequested) -> None:
@@ -573,9 +581,11 @@ class MilkyFrogApp(App[None]):
         self.query_one(RunStatusBar).set_run_id(outcome.run_id)
 
         if outcome.kind == "approval_pending":
-            self.post_message(
-                ApprovalRequired(outcome.run_id, outcome.approval_reason, outcome.tool_name)
+            approvals = tuple(
+                PendingApproval(call.id, call.name, format_approval_message(call))
+                for call in outcome.pending_calls
             )
+            self.post_message(ApprovalRequired(outcome.run_id, approvals))
             self._append(
                 Text(
                     f"Attached to run {outcome.run_id[:8]} · pending tool approval",
@@ -621,18 +631,22 @@ class MilkyFrogApp(App[None]):
         self._worker = self._do_continue(run_id)
         self.session.attach_worker(self._worker.cancel)
 
-    def _start_approval(self, run_id: str, verdict: ApprovalVerdict) -> None:
+    def _start_approvals(self, run_id: str, verdicts: dict[str, ApprovalVerdict]) -> None:
         self.session.busy = True
         self._conv.close_phase()
 
-        verb = "Approved" if verdict.decision is ApprovalDecision.APPROVE else "Denied"
-        if verdict.denial_reason:
-            verb += f" (reason: {verdict.denial_reason})"
-        self._append(conversation_row(Text("▸", style="bold cyan"), Text(verb, style="dim")))
+        approved = sum(
+            verdict.decision is ApprovalDecision.APPROVE for verdict in verdicts.values()
+        )
+        denied = len(verdicts) - approved
+        summary = f"Approval batch complete · {approved} approved"
+        if denied:
+            summary += f", {denied} denied"
+        self._append(conversation_row(Text("▸", style="bold cyan"), Text(summary, style="dim")))
         self.query_one(RunStatusBar).set_working()
         self.query_one("#prompt-input", PromptInput).disabled = True
 
-        self._worker = self._do_approve(run_id, verdict)
+        self._worker = self._do_approve(run_id, verdicts)
         self.session.attach_worker(self._worker.cancel)
 
     @work(thread=False, exit_on_error=False)
@@ -700,9 +714,9 @@ class MilkyFrogApp(App[None]):
             raise
 
     @work(thread=False, exit_on_error=False)
-    async def _do_approve(self, run_id: str, verdict: ApprovalVerdict) -> None:
+    async def _do_approve(self, run_id: str, verdicts: dict[str, ApprovalVerdict]) -> None:
         try:
-            await self.session.respond_approval(run_id, verdict)
+            await self.session.respond_approvals(run_id, verdicts)
         except ResumeError as error:
             self.post_message(RunError(str(error)))
         except asyncio.CancelledError:

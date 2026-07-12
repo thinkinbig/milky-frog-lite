@@ -5,7 +5,7 @@ from pathlib import Path
 
 from milky_frog.checkpoint import StoredRun
 from milky_frog.core.runtime.checkpoint import RunCheckpointFacade
-from milky_frog.domain import RunStatus
+from milky_frog.domain import RunStatus, ToolCall
 from milky_frog.harness.state import unmatched_tool_calls
 
 
@@ -17,6 +17,7 @@ class AttachOutcome:
     kind: str  # "prompt_continue" | "approval_pending" | "advance" | "attached"
     tool_name: str = ""
     approval_reason: str = ""
+    pending_calls: tuple[ToolCall, ...] = ()
 
 
 class RunController:
@@ -53,6 +54,7 @@ class RunController:
                 kind="approval_pending",
                 tool_name=tool_name,
                 approval_reason=reason,
+                pending_calls=pending,
             )
 
         if advance_pending:

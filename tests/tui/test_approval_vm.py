@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from milky_frog.domain import ApprovalDecision, ApprovalVerdict
-from milky_frog.tui.messages import ApprovalRequired
+from milky_frog.tui.messages import ApprovalRequired, PendingApproval
 from milky_frog.tui.viewmodels import approval_vm
 from milky_frog.tui.viewmodels.approval_vm import ApprovalViewModel
 from tests.tui._fakes import FakeApprovalPrompt, FakeTuiHost
@@ -29,7 +29,21 @@ def _vm() -> tuple[ApprovalViewModel, FakeTuiHost]:
 def _event(
     *, run_id: str = "run-1", tool: str = "bash", reason: str = "approve?"
 ) -> ApprovalRequired:
-    return ApprovalRequired(run_id=run_id, reason=reason, tool_name=tool)
+    return ApprovalRequired(
+        run_id=run_id,
+        approvals=(PendingApproval("call-1", tool, reason),),
+    )
+
+
+def _batch_event() -> ApprovalRequired:
+    return ApprovalRequired(
+        run_id="run-1",
+        approvals=(
+            PendingApproval("call-1", "subagent", "first?"),
+            PendingApproval("call-2", "subagent", "second?"),
+            PendingApproval("call-3", "fetch", "third?"),
+        ),
+    )
 
 
 # ── Static shorthand parser ────────────────────────────────────────
@@ -133,7 +147,9 @@ def test_handle_option_approve_dispatches_verdict_and_clears() -> None:
 
     vm.handle_option("approve")
 
-    assert host.started_approvals == [("run-1", ApprovalVerdict(ApprovalDecision.APPROVE))]
+    assert host.started_approvals == [
+        ("run-1", {"call-1": ApprovalVerdict(ApprovalDecision.APPROVE)})
+    ]
     assert vm.is_pending is False
 
 
@@ -143,7 +159,7 @@ def test_handle_option_deny_dispatches_verdict_and_clears() -> None:
 
     vm.handle_option("deny")
 
-    assert host.started_approvals == [("run-1", ApprovalVerdict(ApprovalDecision.DENY))]
+    assert host.started_approvals == [("run-1", {"call-1": ApprovalVerdict(ApprovalDecision.DENY)})]
     assert vm.is_pending is False
 
 
@@ -154,7 +170,9 @@ def test_handle_option_allow_tool_sets_policy_override_then_dispatches_approve()
     vm.handle_option("allow_tool")
 
     assert host.session.policy.allowed == ["bash"]
-    assert host.started_approvals == [("run-1", ApprovalVerdict(ApprovalDecision.APPROVE))]
+    assert host.started_approvals == [
+        ("run-1", {"call-1": ApprovalVerdict(ApprovalDecision.APPROVE)})
+    ]
 
 
 def test_handle_option_allow_all_auto_approves_then_dispatches_approve() -> None:
@@ -164,7 +182,9 @@ def test_handle_option_allow_all_auto_approves_then_dispatches_approve() -> None
     vm.handle_option("allow_all")
 
     assert host.session.policy.auto_approve_calls == 1
-    assert host.started_approvals == [("run-1", ApprovalVerdict(ApprovalDecision.APPROVE))]
+    assert host.started_approvals == [
+        ("run-1", {"call-1": ApprovalVerdict(ApprovalDecision.APPROVE)})
+    ]
 
 
 def test_handle_option_deny_reason_switches_into_reason_mode() -> None:
@@ -215,7 +235,9 @@ def test_handle_text_input_yes_dispatches_approve() -> None:
     consumed = vm.handle_text_input("y")
 
     assert consumed is True
-    assert host.started_approvals == [("run-1", ApprovalVerdict(ApprovalDecision.APPROVE))]
+    assert host.started_approvals == [
+        ("run-1", {"call-1": ApprovalVerdict(ApprovalDecision.APPROVE)})
+    ]
 
 
 def test_handle_text_input_no_with_reason_dispatches_deny_with_reason() -> None:
@@ -226,7 +248,10 @@ def test_handle_text_input_no_with_reason_dispatches_deny_with_reason() -> None:
 
     assert consumed is True
     assert host.started_approvals == [
-        ("run-1", ApprovalVerdict(ApprovalDecision.DENY, denial_reason="too risky"))
+        (
+            "run-1",
+            {"call-1": ApprovalVerdict(ApprovalDecision.DENY, denial_reason="too risky")},
+        )
     ]
 
 
@@ -253,7 +278,10 @@ def test_deny_reason_with_text_dispatches_deny_with_reason_and_clears() -> None:
     vm.handle_text_input("explains policies")
 
     assert host.started_approvals == [
-        ("run-1", ApprovalVerdict(ApprovalDecision.DENY, denial_reason="explains policies"))
+        (
+            "run-1",
+            {"call-1": ApprovalVerdict(ApprovalDecision.DENY, denial_reason="explains policies")},
+        )
     ]
     assert vm.deny_reason_mode is False
     assert vm.is_pending is False
@@ -267,5 +295,47 @@ def test_deny_reason_input_strips_surrounding_whitespace() -> None:
     vm.handle_text_input("   safety first  ")
 
     assert host.started_approvals == [
-        ("run-1", ApprovalVerdict(ApprovalDecision.DENY, denial_reason="safety first"))
+        (
+            "run-1",
+            {"call-1": ApprovalVerdict(ApprovalDecision.DENY, denial_reason="safety first")},
+        )
     ]
+
+
+def test_batch_collects_every_decision_before_dispatch() -> None:
+    vm, host = _vm()
+    vm.begin(_batch_event())
+
+    vm.handle_option("approve")
+    assert host.started_approvals == []
+    assert host._conversation_widget.mounted_widgets[-1].position == 2
+
+    vm.handle_option("deny")
+    assert host.started_approvals == []
+    assert host._conversation_widget.mounted_widgets[-1].position == 3
+
+    vm.handle_option("approve")
+
+    assert host.started_approvals == [
+        (
+            "run-1",
+            {
+                "call-1": ApprovalVerdict(ApprovalDecision.APPROVE),
+                "call-2": ApprovalVerdict(ApprovalDecision.DENY),
+                "call-3": ApprovalVerdict(ApprovalDecision.APPROVE),
+            },
+        )
+    ]
+
+
+def test_always_allow_tool_approves_matching_calls_then_prompts_next_tool() -> None:
+    vm, host = _vm()
+    vm.begin(_batch_event())
+
+    vm.handle_option("allow_tool")
+
+    assert host.started_approvals == []
+    assert host.session.policy.allowed == ["subagent"]
+    prompt = host._conversation_widget.mounted_widgets[-1]
+    assert prompt.position == 3
+    assert prompt.tool_name == "fetch"
