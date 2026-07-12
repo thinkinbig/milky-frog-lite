@@ -408,6 +408,10 @@ class MilkyFrogApp(App[None]):
     def on_run_option_selected(self, event: RunOptionSelected) -> None:
         self._dismiss_run_picker()
         if event.run_id is not None:
+            # ``advance_pending=True``: picking a Run resumes it. A Run waiting on
+            # approval takes the approval path; an interrupted Run repairs and
+            # continues; a Run that already finished is advanced for one more
+            # turn (its transcript is the new prompt). See ``RunController.attach``.
             self._attach_or_continue_run(event.run_id, advance_pending=True)
 
     def on_mcp_reload_requested(self, _event: McpReloadRequested) -> None:
