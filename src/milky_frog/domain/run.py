@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from milky_frog.domain.messages import Message
 from milky_frog.domain.status import RunStatus
 from milky_frog.domain.usage import RunUsage, TokenUsage
 
 DEFAULT_MAX_MODEL_CALLS = 30
+type RunKind = Literal["foreground", "subagent"]
 
 
 @dataclass(slots=True)
@@ -39,6 +41,9 @@ class RunRequest:
     max_model_calls: int = DEFAULT_MAX_MODEL_CALLS
     cancellation: RunCancellation | None = None
     skill_content: str | None = None
+    selected_skills: tuple[str, ...] = ()
+    run_kind: RunKind = "foreground"
+    parent_run_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,3 +116,7 @@ class RunState:
     every model call. Persisted in the snapshot so skill injection survives
     ``resume`` / ``continue_with`` (see ADR-0014).
     """
+    selected_skills: tuple[str, ...] = ()
+    """Names of the Skills explicitly activated for this Run."""
+    run_kind: RunKind = "foreground"
+    parent_run_id: str | None = None

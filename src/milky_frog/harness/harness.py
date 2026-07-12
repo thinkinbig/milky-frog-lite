@@ -28,7 +28,7 @@ from milky_frog.harness.state import (
     seal,
     start_run,
     unmatched_tool_calls,
-    with_run_extra,
+    with_run_skills,
 )
 
 
@@ -79,7 +79,14 @@ class AgentHarness:
             await self._hub.run_before_start(run_id, run_request, workspace)
             run_extra = (run_request.skill_content,) if run_request.skill_content else ()
             state = start_run(
-                RunState(run_id=run_id, workspace=workspace, run_extra=run_extra),
+                RunState(
+                    run_id=run_id,
+                    workspace=workspace,
+                    run_extra=run_extra,
+                    selected_skills=run_request.selected_skills,
+                    run_kind=run_request.run_kind,
+                    parent_run_id=run_request.parent_run_id,
+                ),
                 run_request.prompt,
             )
             await self._hub.run_started(run_id, run_request, state)
@@ -102,13 +109,18 @@ class AgentHarness:
         cancellation: RunCancellation | None = None,
         prompt: str | None = None,
         run_extra: tuple[str, ...] | None = None,
+        selected_skills: tuple[str, ...] | None = None,
     ) -> RunResult:
         """Advance an existing Run: load snapshot, repair, then advance.
 
         ``run_extra is None`` preserves the persisted eager system-prompt
         sections (skills survive resume); a tuple — including ``()`` — replaces
         them, so a caller can re-apply or clear activated Skills mid-run.
+        ``run_extra`` and ``selected_skills`` must be supplied together, so
+        the injected instructions and observable metadata cannot diverge.
         """
+        if (run_extra is None) != (selected_skills is None):
+            raise ResumeError("run_extra and selected_skills must be supplied together")
         try:
             with self._checkpoints.claim(run_id):
                 stored = self._require_run(run_id)
@@ -120,8 +132,8 @@ class AgentHarness:
                     )
 
                 state = self._checkpoints.load_state(run_id)
-                if run_extra is not None:
-                    state = with_run_extra(state, run_extra)
+                if run_extra is not None and selected_skills is not None:
+                    state = with_run_skills(state, run_extra, selected_skills)
                 if not waiting_approval:
                     state, _ = seal(state)
                     if prompt is not None:
@@ -229,7 +241,7 @@ class AgentHarness:
         verdicts: dict[str, ApprovalVerdict],
     ) -> RunResult:
         sandbox = self._make_sandbox(stored.workspace)
-        await self._hub.before_resume(run_id, prompt, stored.status, stored.workspace)
+        await self._hub.before_resume(run_id, prompt, stored.status, state)
         if self._budget is not None:
             self._budget.init_for_workspace(stored.workspace)
         self._checkpoints.prepare_resume(run_id, stored.updated_at, state)

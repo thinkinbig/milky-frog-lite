@@ -8,6 +8,7 @@ from milky_frog.domain import (
     CompactionState,
     Message,
     MessageRole,
+    RunKind,
     RunState,
     RunUsage,
     TokenUsage,
@@ -76,6 +77,9 @@ class RunSnapshot(BaseModel):
     # (e.g. activated skill instructions). It is durable so that ``resume`` /
     # ``continue_with`` see the same prompts across every turn (see ADR-0014).
     run_extra: tuple[str, ...] = ()
+    selected_skills: tuple[str, ...] = ()
+    run_kind: RunKind = "foreground"
+    parent_run_id: str | None = None
 
 
 def dump_run_state(state: RunState) -> str:
@@ -85,6 +89,9 @@ def dump_run_state(state: RunState) -> str:
         usage=_usage_to_snapshot(state.usage),
         compaction=_compaction_to_snapshot(state.compaction),
         run_extra=state.run_extra,
+        selected_skills=state.selected_skills,
+        run_kind=state.run_kind,
+        parent_run_id=state.parent_run_id,
     )
     return snapshot.model_dump_json()
 
@@ -101,6 +108,9 @@ def load_run_state(run_id: str, workspace: Path, raw: str) -> RunState:
         usage=_usage_from_snapshot(snapshot.usage),
         compaction=_compaction_from_snapshot(snapshot.compaction),
         run_extra=snapshot.run_extra,
+        selected_skills=snapshot.selected_skills,
+        run_kind=snapshot.run_kind,
+        parent_run_id=snapshot.parent_run_id,
     )
 
 

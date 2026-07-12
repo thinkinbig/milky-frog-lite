@@ -8,6 +8,7 @@ from milky_frog.domain import (
     ModelRequest,
     ModelResponse,
     ReasoningDelta,
+    RunKind,
     RunRequest,
     RunResult,
     RunState,
@@ -58,6 +59,9 @@ class RunBeforeResume(BaseEvent):
     prompt: str | None
     stored_status: RunStatus
     workspace: Path
+    selected_skills: tuple[str, ...] = ()
+    run_kind: RunKind = "foreground"
+    parent_run_id: str | None = None
 
 
 @dataclass(frozen=True)

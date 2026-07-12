@@ -29,6 +29,7 @@ class SubagentRunner(Protocol):
         prompt: str,
         max_model_calls: int | None,
         cancellation: RunCancellation | None,
+        parent_run_id: str,
     ) -> RunResult: ...
 
 
@@ -64,7 +65,9 @@ class SubagentTool:
 
     async def execute(self, context: ToolContext, input: BaseModel) -> ToolResult:
         params = SubagentInput.model_validate(input)
-        result = await self._runner(params.prompt, params.max_model_calls, context.cancellation)
+        result = await self._runner(
+            params.prompt, params.max_model_calls, context.cancellation, context.run_id
+        )
         return ToolResult(
             content=result.final_message,
             is_error=result.status is not RunStatus.COMPLETED,

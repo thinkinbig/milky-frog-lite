@@ -15,12 +15,16 @@ class RecordingRunner:
 
     def __init__(self, result: RunResult) -> None:
         self.result = result
-        self.calls: list[tuple[str, int | None, RunCancellation | None]] = []
+        self.calls: list[tuple[str, int | None, RunCancellation | None, str]] = []
 
     async def __call__(
-        self, prompt: str, max_model_calls: int | None, cancellation: RunCancellation | None
+        self,
+        prompt: str,
+        max_model_calls: int | None,
+        cancellation: RunCancellation | None,
+        parent_run_id: str,
     ) -> RunResult:
-        self.calls.append((prompt, max_model_calls, cancellation))
+        self.calls.append((prompt, max_model_calls, cancellation, parent_run_id))
         return self.result
 
 
@@ -38,7 +42,7 @@ async def test_execute_maps_completed_result_to_success() -> None:
 
     assert result.content == "report"
     assert result.is_error is False
-    assert runner.calls == [("investigate X", None, None)]
+    assert runner.calls == [("investigate X", None, None, "run-1")]
 
 
 @pytest.mark.asyncio
@@ -66,7 +70,7 @@ async def test_execute_forwards_max_model_calls_and_cancellation() -> None:
 
     await tool.execute(context, SubagentInput(prompt="go", max_model_calls=5))
 
-    assert runner.calls == [("go", 5, cancellation)]
+    assert runner.calls == [("go", 5, cancellation, "run-1")]
 
 
 def test_read_only_tools_excludes_write_bash_and_subagent() -> None:
