@@ -214,7 +214,10 @@ async def test_before_resume_notifies_handlers(tmp_path: Path) -> None:
         seen.append(event)
 
     await dispatcher.before_resume(
-        "run-1", prompt="continue", status=RunStatus.PAUSED_LIMIT, workspace=tmp_path
+        "run-1",
+        prompt="continue",
+        status=RunStatus.PAUSED_LIMIT,
+        state=RunState("run-1", tmp_path),
     )
 
     assert len(seen) == 1

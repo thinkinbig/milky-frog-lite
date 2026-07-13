@@ -73,6 +73,34 @@ async def test_session_runs_through_configured_runtime(
 
 
 @pytest.mark.asyncio
+async def test_session_start_new_drops_unresolvable_skill_from_metadata(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A selected Skill that fails to load is recorded in neither injection nor metadata."""
+    requests: list[ModelRequest] = []
+
+    async def fake_stream(self: OpenAIModel, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        del self
+        requests.append(request)
+        yield StreamDone(ModelResponse(content="done"))
+
+    monkeypatch.setattr(OpenAIModel, "stream", fake_stream)
+    settings = _settings(tmp_path, base_url="https://example.test")
+
+    async with AgentSession.from_settings(settings) as session:
+        # No skills catalog exists under this home, so the name cannot resolve.
+        result = await session.start_new("build it", tmp_path, selected_skills=("does-not-exist",))
+
+    assert result.status is RunStatus.COMPLETED
+    state = SqliteCheckpointStore(settings.database_path).load_state(result.run_id)
+    # The unresolved Skill must not leave a trace: no injected instructions and no
+    # recorded name, so observability never claims a Skill that was not injected.
+    assert state.run_extra == ()
+    assert state.selected_skills == ()
+    assert "does-not-exist" not in requests[0].messages[0].content
+
+
+@pytest.mark.asyncio
 async def test_session_cancel_stops_foreground_run(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -426,6 +454,8 @@ async def test_session_subagent_tool_runs_nested_run(
     nested_run_id = next(rid for rid in run_ids if rid != result.run_id)
     nested_state = store.load_state(nested_run_id)
     assert nested_state.messages[0].content == "investigate X"
+    assert nested_state.run_kind == "subagent"
+    assert nested_state.parent_run_id == result.run_id
 
 
 @pytest.mark.asyncio

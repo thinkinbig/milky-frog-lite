@@ -43,6 +43,19 @@ _NOTICE_LEVELS: dict[NoticeLevel, LangfuseLevel] = {
 }
 
 
+def _run_metadata(
+    selected_skills: tuple[str, ...], run_kind: str, parent_run_id: str | None
+) -> dict[str, object]:
+    """Build stable Langfuse dimensions from Harness lifecycle data."""
+    metadata: dict[str, object] = {
+        "selected_skills": list(selected_skills),
+        "run_kind": run_kind,
+    }
+    if parent_run_id is not None:
+        metadata["parent_run_id"] = parent_run_id
+    return metadata
+
+
 class LangfuseHandler(Handler):
     """Records each Run as a Langfuse trace with generation and tool spans."""
 
@@ -157,6 +170,11 @@ class LangfuseHandler(Handler):
                     "prompt": event.request.prompt,
                     "workspace": str(event.workspace),
                 },
+                metadata=_run_metadata(
+                    event.request.selected_skills,
+                    event.request.run_kind,
+                    event.request.parent_run_id,
+                ),
             ).end()
         except Exception:
             logger.exception("Langfuse before_start error")
@@ -174,6 +192,11 @@ class LangfuseHandler(Handler):
                     "prompt": event.prompt,
                     "stored_status": event.stored_status.value,
                 },
+                metadata=_run_metadata(
+                    event.selected_skills,
+                    event.run_kind,
+                    event.parent_run_id,
+                ),
             ).end()
         except Exception:
             logger.exception("Langfuse before_resume error")

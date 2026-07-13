@@ -266,6 +266,7 @@ class AgentSession:
                 prompt: str,
                 max_model_calls: int | None,
                 cancellation: RunCancellation | None,
+                parent_run_id: str,
             ) -> RunResult:
                 return await nested_harness.run(
                     RunRequest(
@@ -275,6 +276,8 @@ class AgentSession:
                             DEFAULT_MAX_MODEL_CALLS if max_model_calls is None else max_model_calls
                         ),
                         cancellation=cancellation,
+                        run_kind="subagent",
+                        parent_run_id=parent_run_id,
                     )
                 )
 
@@ -429,9 +432,9 @@ class AgentSession:
         *,
         selected_skills: tuple[str, ...] = (),
     ) -> RunResult:
-        skill_content = self._skill_injection(selected_skills, workspace)
+        skill_content, injected_skills = self._skill_injection(selected_skills, workspace)
         return await _active(self._foreground).start_new(
-            task, workspace, skill_content=skill_content
+            task, workspace, skill_content=skill_content, selected_skills=injected_skills
         )
 
     async def continue_with(
@@ -449,19 +452,25 @@ class AgentSession:
         ``/skill off`` both take effect on the next turn.
         """
         run_extra: tuple[str, ...] | None = None
+        injected_skills = selected_skills
         if selected_skills is not None:
-            content = self._skill_injection(selected_skills, None)
+            content, injected_skills = self._skill_injection(selected_skills, None)
             run_extra = (content,) if content is not None else ()
         return await _active(self._foreground).continue_with(
-            run_id, prompt=prompt, run_extra=run_extra
+            run_id, prompt=prompt, run_extra=run_extra, selected_skills=injected_skills
         )
 
     def _skill_injection(
         self, selected_skills: tuple[str, ...], workspace: Path | None
-    ) -> str | None:
-        """Build the eager system-prompt injection for the named Skills, if any."""
+    ) -> tuple[str | None, tuple[str, ...]]:
+        """Build the eager system-prompt injection for the named Skills, if any.
+
+        Returns the injection text (``None`` when nothing resolved) together with
+        the names that actually loaded, so the recorded ``selected_skills`` never
+        claims a Skill that was not injected.
+        """
         if not selected_skills:
-            return None
+            return None, ()
         resolved = (workspace or Path.cwd()).resolve()
         catalog = SkillCatalog(
             self._settings.home / "skills",
@@ -522,21 +531,30 @@ class AgentSession:
         return ForegroundRun.cancelled_result(run_id)
 
 
-def _format_skill_injection(catalog: SkillCatalog, names: tuple[str, ...]) -> str | None:
-    """Load named skills and format them for eager system-prompt injection."""
+def _format_skill_injection(
+    catalog: SkillCatalog, names: tuple[str, ...]
+) -> tuple[str | None, tuple[str, ...]]:
+    """Load named skills and format them for eager system-prompt injection.
+
+    Returns the injection text (``None`` when nothing resolved) and the names
+    that loaded successfully, so callers record exactly what was injected.
+    """
     parts: list[str] = []
+    loaded: list[str] = []
     for name in names:
         try:
             skill = catalog.load(name)
         except KeyError:
             logger.warning("selected skill %r not found; skipping", name)
             continue
+        loaded.append(name)
         parts.append(f'<active_skill name="{name}">\n{skill.instructions.strip()}\n</active_skill>')
     if not parts:
-        return None
+        return None, ()
     intro = (
         "The following skill has been activated for this Run."
         if len(parts) == 1
         else "The following skills have been activated for this Run."
     )
-    return intro + " Follow these instructions throughout the task.\n\n" + "\n\n".join(parts)
+    body = intro + " Follow these instructions throughout the task.\n\n" + "\n\n".join(parts)
+    return body, tuple(loaded)

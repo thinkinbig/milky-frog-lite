@@ -275,13 +275,25 @@ async def test_langfuse_before_start_registers_trace_and_span(
     handler.register(registry)
 
     await registry.broadcast(
-        RunBeforeStart(run_id="run-1", request=_run_request(), workspace=Path("/workspace"))
+        RunBeforeStart(
+            run_id="run-1",
+            request=RunRequest(
+                "hello",
+                Path("/workspace"),
+                selected_skills=("tdd", "review"),
+            ),
+            workspace=Path("/workspace"),
+        )
     )
 
     assert handler._trace_ids["run-1"] == "trace-0"
     span = client.observations[-1]
     assert span.start_kwargs["name"] == "run_before_start"
     assert span.start_kwargs["input"] == {"prompt": "hello", "workspace": "/workspace"}
+    assert span.start_kwargs["metadata"] == {
+        "selected_skills": ["tdd", "review"],
+        "run_kind": "foreground",
+    }
     assert span.ended is True
 
 
@@ -299,6 +311,9 @@ async def test_langfuse_before_resume_registers_trace_and_span(
             prompt="continue",
             stored_status=RunStatus.WAITING_FOR_INPUT,
             workspace=Path("."),
+            selected_skills=("review",),
+            run_kind="subagent",
+            parent_run_id="parent-1",
         )
     )
 
@@ -308,6 +323,11 @@ async def test_langfuse_before_resume_registers_trace_and_span(
     assert span.start_kwargs["input"] == {
         "prompt": "continue",
         "stored_status": "waiting_for_input",
+    }
+    assert span.start_kwargs["metadata"] == {
+        "selected_skills": ["review"],
+        "run_kind": "subagent",
+        "parent_run_id": "parent-1",
     }
     assert span.ended is True
 
