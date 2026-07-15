@@ -7,7 +7,11 @@ import pytest
 from milky_frog.domain import RunCancellation, RunResult, RunStatus
 from milky_frog.harness.tools import ToolContext
 from milky_frog.harness.tools.builtins import read_only_tools
-from milky_frog.harness.tools.builtins.subagent import SubagentInput, SubagentTool
+from milky_frog.harness.tools.builtins.subagent import (
+    SubagentInput,
+    SubagentOutcome,
+    SubagentTool,
+)
 
 
 class RecordingRunner:
@@ -15,13 +19,18 @@ class RecordingRunner:
 
     def __init__(self, result: RunResult) -> None:
         self.result = result
-        self.calls: list[tuple[str, int | None, RunCancellation | None]] = []
+        self.calls: list[tuple[str, str, int | None, RunCancellation | None, Path]] = []
 
     async def __call__(
-        self, prompt: str, max_model_calls: int | None, cancellation: RunCancellation | None
-    ) -> RunResult:
-        self.calls.append((prompt, max_model_calls, cancellation))
-        return self.result
+        self,
+        prompt: str,
+        capability: str,
+        max_model_calls: int | None,
+        cancellation: RunCancellation | None,
+        workspace: Path,
+    ) -> SubagentOutcome:
+        self.calls.append((prompt, capability, max_model_calls, cancellation, workspace))
+        return SubagentOutcome(self.result)
 
 
 @pytest.mark.asyncio
@@ -32,13 +41,14 @@ async def test_execute_maps_completed_result_to_success() -> None:
         )
     )
     tool = SubagentTool(runner)
-    context = ToolContext("run-1", Path("."))
+    workspace = Path(".")
+    context = ToolContext("run-1", workspace)
 
     result = await tool.execute(context, SubagentInput(prompt="investigate X"))
 
     assert result.content == "report"
     assert result.is_error is False
-    assert runner.calls == [("investigate X", None, None)]
+    assert runner.calls == [("investigate X", "read_only", None, None, workspace)]
 
 
 @pytest.mark.asyncio
@@ -62,11 +72,92 @@ async def test_execute_forwards_max_model_calls_and_cancellation() -> None:
     )
     tool = SubagentTool(runner)
     cancellation = RunCancellation()
-    context = ToolContext("run-1", Path("."), cancellation)
+    workspace = Path(".")
+    context = ToolContext("run-1", workspace, cancellation)
 
     await tool.execute(context, SubagentInput(prompt="go", max_model_calls=5))
 
-    assert runner.calls == [("go", 5, cancellation)]
+    assert runner.calls == [("go", "read_only", 5, cancellation, workspace)]
+
+
+@pytest.mark.asyncio
+async def test_execute_forwards_write_capability_and_reports_worktree(tmp_path: Path) -> None:
+    result = RunResult(
+        run_id="nested-4", status=RunStatus.COMPLETED, final_message="implemented", model_calls=2
+    )
+
+    class WriteRunner(RecordingRunner):
+        async def __call__(
+            self,
+            prompt: str,
+            capability: str,
+            max_model_calls: int | None,
+            cancellation: RunCancellation | None,
+            workspace: Path,
+        ) -> SubagentOutcome:
+            self.calls.append((prompt, capability, max_model_calls, cancellation, workspace))
+            return SubagentOutcome(
+                self.result,
+                worktree=tmp_path / "worktree",
+                branch="subagent/nested-4",
+                worktree_kept=True,
+            )
+
+    runner = WriteRunner(result)
+    tool = SubagentTool(runner)
+    context = ToolContext("run-1", tmp_path)
+
+    tool_result = await tool.execute(
+        context,
+        SubagentInput(prompt="implement it", capability="write"),
+    )
+
+    assert "worktree=" in tool_result.content
+    assert "branch=subagent/nested-4" in tool_result.content
+    assert runner.calls == [("implement it", "write", None, None, tmp_path)]
+    # A kept worktree must deterministically pause the Run for a merge
+    # decision — see AgentLoop.advance — not just mention it in the text.
+    assert tool_result.follow_up is not None
+    assert tool_result.follow_up.tool_name == "merge_worktree"
+    assert tool_result.follow_up.arguments == {
+        "worktree": str(tmp_path / "worktree"),
+        "branch": "subagent/nested-4",
+    }
+
+
+@pytest.mark.asyncio
+async def test_execute_sets_no_follow_up_when_worktree_is_clean(tmp_path: Path) -> None:
+    result = RunResult(
+        run_id="nested-5", status=RunStatus.COMPLETED, final_message="implemented", model_calls=2
+    )
+
+    class CleanWriteRunner(RecordingRunner):
+        async def __call__(
+            self,
+            prompt: str,
+            capability: str,
+            max_model_calls: int | None,
+            cancellation: RunCancellation | None,
+            workspace: Path,
+        ) -> SubagentOutcome:
+            self.calls.append((prompt, capability, max_model_calls, cancellation, workspace))
+            return SubagentOutcome(
+                self.result,
+                worktree=tmp_path / "worktree",
+                branch="subagent/nested-5",
+                worktree_kept=False,
+            )
+
+    runner = CleanWriteRunner(result)
+    tool = SubagentTool(runner)
+    context = ToolContext("run-1", tmp_path)
+
+    tool_result = await tool.execute(
+        context,
+        SubagentInput(prompt="implement it", capability="write"),
+    )
+
+    assert tool_result.follow_up is None
 
 
 def test_read_only_tools_excludes_write_bash_and_subagent() -> None:

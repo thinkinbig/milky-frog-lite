@@ -8,9 +8,15 @@ import pytest
 
 from milky_frog.adapters.docker import DockerSandboxFactory
 from milky_frog.adapters.local import LocalSandbox
-from milky_frog.app.session import AgentSession, InactiveAgentSession, MissingModelConfiguration
+from milky_frog.app.session import (
+    AgentSession,
+    AgentSessionConfig,
+    InactiveAgentSession,
+    MissingModelConfiguration,
+)
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.core.runtime.assemble import make_sandbox_factory
+from milky_frog.core.sandbox import CommandResult, Sandbox
 from milky_frog.domain import (
     ApprovalDecision,
     ApprovalVerdict,
@@ -26,6 +32,7 @@ from milky_frog.domain import (
 )
 from milky_frog.events import EventHub, Handler, RunCancelled, RunStarted
 from milky_frog.harness.harness import AgentHarness
+from milky_frog.harness.state import unmatched_tool_calls
 from milky_frog.harness.tools import ToolContext
 from milky_frog.harness.tools.builtins.fetch import FetchTool
 from milky_frog.models import OpenAIModel
@@ -455,6 +462,139 @@ async def test_session_subagent_requires_approval_by_default(
     # The nested Run never started — only the top-level Run exists.
     store = SqliteCheckpointStore(settings.database_path)
     assert len(store.list_runs()) == 1
+
+
+@pytest.mark.asyncio
+async def test_session_subagent_write_requires_docker(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    requests: list[ModelRequest] = []
+
+    async def fake_stream(self: OpenAIModel, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        del self
+        requests.append(request)
+        if len(requests) == 1:
+            yield StreamDone(
+                ModelResponse(
+                    tool_calls=(
+                        ToolCall(
+                            "call-1",
+                            "subagent",
+                            {"prompt": "implement X", "capability": "write"},
+                        ),
+                    )
+                )
+            )
+            return
+        tool_messages = [message for message in request.messages if message.role.value == "tool"]
+        assert '[sandbox].kind = "docker"' in tool_messages[-1].content
+        yield StreamDone(ModelResponse(content="write delegation rejected safely"))
+
+    monkeypatch.setattr(OpenAIModel, "stream", fake_stream)
+    settings = _settings(tmp_path, base_url="https://example.test")
+
+    async with AgentSession.from_settings(settings) as session:
+        session.policy.allow("subagent")
+        result = await session.start_new("delegate a write", tmp_path)
+
+    assert result.status is RunStatus.COMPLETED
+    assert result.final_message == "write delegation rejected safely"
+    assert len(SqliteCheckpointStore(settings.database_path).list_runs()) == 1
+
+
+@pytest.mark.asyncio
+async def test_session_subagent_write_uses_isolated_worktree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config_dir = tmp_path / ".milky-frog"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        '[sandbox]\nkind = "docker"\nimage = "python:3.12"\n',
+        encoding="utf-8",
+    )
+    local = LocalSandbox(tmp_path)
+    initialized = await local.run_command(
+        "git init && git add .milky-frog/config.toml && "
+        "git -c user.name=test -c user.email=test@example.com commit -m init",
+        timeout_seconds=10,
+    )
+    assert isinstance(initialized, CommandResult)
+    assert initialized.exit_code == 0, initialized.output
+
+    class RecordingFactory:
+        def __init__(self) -> None:
+            self.calls: list[Path] = []
+
+        def __call__(self, workspace: Path) -> Sandbox:
+            self.calls.append(workspace)
+            return LocalSandbox(workspace)
+
+    factory = RecordingFactory()
+    requests: list[ModelRequest] = []
+
+    async def fake_stream(self: OpenAIModel, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        del self
+        requests.append(request)
+        match len(requests):
+            case 1:
+                yield StreamDone(
+                    ModelResponse(
+                        tool_calls=(
+                            ToolCall(
+                                "call-1",
+                                "subagent",
+                                {"prompt": "implement X", "capability": "write"},
+                            ),
+                        )
+                    )
+                )
+            case 2:
+                yield StreamDone(
+                    ModelResponse(
+                        tool_calls=(
+                            ToolCall(
+                                "call-2",
+                                "write_file",
+                                {"path": "feature.txt", "content": "isolated"},
+                            ),
+                        )
+                    )
+                )
+            case 3:
+                yield StreamDone(ModelResponse(content="implemented"))
+            case _:
+                raise AssertionError("model should not be called again before merge approval")
+
+    monkeypatch.setattr(OpenAIModel, "stream", fake_stream)
+    settings = _settings(tmp_path, base_url="https://example.test")
+    session_config = AgentSessionConfig(sandbox_factory=factory)
+
+    async with AgentSession.from_settings(settings, config=session_config) as session:
+        session.policy.allow("subagent")
+        result = await session.start_new("delegate a write", tmp_path)
+
+    # A dirty worktree deterministically pauses the Run for a merge decision
+    # (see AgentLoop.advance / MergeWorktreeTool) instead of letting the model
+    # finish without anyone reviewing it.
+    assert result.status is RunStatus.WAITING_FOR_APPROVAL
+    state = SqliteCheckpointStore(settings.database_path).load_state(result.run_id)
+    subagent_result = next(
+        message.content for message in state.messages if "worktree=" in message.content
+    )
+    worktree_text = subagent_result.split("worktree=", 1)[1].split(", branch=", 1)[0]
+    worktree = Path(worktree_text)
+    assert (worktree / "feature.txt").read_text(encoding="utf-8") == "isolated"
+    assert not (tmp_path / "feature.txt").exists()
+
+    pending = unmatched_tool_calls(state.messages)
+    assert [call.name for call in pending] == ["merge_worktree"]
+
+    cleanup = await local.run_command(
+        f"git worktree remove --force {worktree}",
+        timeout_seconds=10,
+    )
+    assert isinstance(cleanup, CommandResult)
+    assert cleanup.exit_code == 0, cleanup.output
 
 
 @pytest.mark.asyncio

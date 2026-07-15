@@ -46,7 +46,16 @@ def test_tool_context_make_output_path_without_prefix(tmp_path: Path) -> None:
 def test_default_tools_exposes_all_builtin_tools() -> None:
     names = {tool.name for tool in default_tools()}
 
-    assert names == {"read_file", "write_file", "edit_file", "list_dir", "grep", "bash", "fetch"}
+    assert names == {
+        "read_file",
+        "write_file",
+        "edit_file",
+        "list_dir",
+        "grep",
+        "bash",
+        "fetch",
+        "merge_worktree",
+    }
 
 
 def test_default_tools_omits_web_search_without_jina_key() -> None:

@@ -14,6 +14,7 @@ INTERRUPTED_TOOL_RESULT = (
 __all__ = [
     "INTERRUPTED_TOOL_RESULT",
     "append_model_response",
+    "append_synthetic_tool_call",
     "append_tool_result",
     "append_user_message",
     "seal",
@@ -59,6 +60,20 @@ def append_model_response(state: RunState, response: ModelResponse) -> RunState:
         ),
         completed_model_calls=state.completed_model_calls + 1,
         usage=state.usage.record(response.usage),
+    )
+
+
+def append_synthetic_tool_call(state: RunState, call: ToolCall) -> RunState:
+    """Append a harness-synthesized tool call as its own assistant message.
+
+    Not tied to a ``ModelResponse``: no model turn happened, so this does not
+    bump ``completed_model_calls`` or record usage. ``unmatched_tool_calls``
+    only inspects the last assistant message's ``tool_calls``, so this call
+    is discovered by the existing approval-halt/resume path unchanged.
+    """
+    return replace(
+        state,
+        messages=(*state.messages, Message(MessageRole.ASSISTANT, "", (call,))),
     )
 
 

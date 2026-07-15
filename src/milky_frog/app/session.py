@@ -7,7 +7,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import TracebackType
+from typing import Literal
+from uuid import uuid4
 
+from milky_frog.adapters.local import LocalSandbox
 from milky_frog.adapters.models import OpenAIModel
 from milky_frog.core.runtime.assemble import (
     make_agent_harness,
@@ -32,8 +35,15 @@ from milky_frog.harness.harness import AgentHarness
 from milky_frog.harness.mcp import McpClientManager, load_mcp_config
 from milky_frog.harness.prompt import make_context_loader
 from milky_frog.harness.skills import SkillCatalog
+from milky_frog.harness.subagent_worktree import create_worktree, finalize_worktree
 from milky_frog.harness.tools import ToolRegistry
-from milky_frog.harness.tools.builtins import SubagentTool, default_tools, read_only_tools
+from milky_frog.harness.tools.builtins import (
+    SubagentOutcome,
+    SubagentRejected,
+    SubagentTool,
+    default_tools,
+    read_only_tools,
+)
 from milky_frog.project import load_project_config, project_root
 from milky_frog.settings import Settings
 from milky_frog.tokens import TokenCounter, make_token_counter
@@ -264,18 +274,66 @@ class AgentSession:
 
             async def _run_subagent(
                 prompt: str,
+                capability: Literal["read_only", "write"],
                 max_model_calls: int | None,
                 cancellation: RunCancellation | None,
-            ) -> RunResult:
-                return await nested_harness.run(
-                    RunRequest(
-                        prompt=prompt,
-                        workspace=workspace,
-                        max_model_calls=(
-                            DEFAULT_MAX_MODEL_CALLS if max_model_calls is None else max_model_calls
-                        ),
-                        cancellation=cancellation,
+                workspace: Path,
+            ) -> SubagentOutcome:
+                calls = DEFAULT_MAX_MODEL_CALLS if max_model_calls is None else max_model_calls
+                if capability == "read_only":
+                    result = await nested_harness.run(
+                        RunRequest(
+                            prompt=prompt,
+                            workspace=workspace,
+                            max_model_calls=calls,
+                            cancellation=cancellation,
+                        )
                     )
+                    return SubagentOutcome(result)
+
+                parent_config = load_project_config(workspace)
+                if parent_config.sandbox.kind != "docker":
+                    raise SubagentRejected(
+                        'subagent write capability requires [sandbox].kind = "docker"'
+                    )
+                management_sandbox = LocalSandbox(workspace, parent_config)
+                worktree = await create_worktree(
+                    management_sandbox,
+                    workspace,
+                    uuid4().hex,
+                )
+                write_sandbox_factory = make_sandbox_factory(parent_config)
+                nested_write_harness = make_agent_harness(
+                    model=_active(self._model),
+                    checkpoints=store,
+                    hub=_active(self._hub),
+                    tools=ToolRegistry(default_tools(jina_api_key=self._settings.jina_api_key)),
+                    sandbox_factory=write_sandbox_factory,
+                    context_loader=make_context_loader(self._settings.home),
+                    token_counter=counter,
+                    max_retries=self._settings.max_retries,
+                    retry_base_delay=self._settings.retry_base_delay,
+                )
+                nested_write_harness.policy.auto_approve()
+                try:
+                    result = await nested_write_harness.run(
+                        RunRequest(
+                            prompt=prompt,
+                            workspace=worktree.path,
+                            max_model_calls=calls,
+                            cancellation=cancellation,
+                        )
+                    )
+                finally:
+                    aclose = getattr(write_sandbox_factory, "aclose", None)
+                    if aclose is not None:
+                        await aclose()
+                worktree_outcome = await finalize_worktree(management_sandbox, worktree)
+                return SubagentOutcome(
+                    result,
+                    worktree=worktree.path,
+                    branch=worktree.branch,
+                    worktree_kept=worktree_outcome.kept,
                 )
 
             # SubagentTool must be part of the constructor tuple (not added via

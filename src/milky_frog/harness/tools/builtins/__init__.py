@@ -6,8 +6,14 @@ from milky_frog.harness.tools.builtins.edit import EditFileTool
 from milky_frog.harness.tools.builtins.fetch import FetchTool
 from milky_frog.harness.tools.builtins.grep import GrepTool
 from milky_frog.harness.tools.builtins.list_dir import ListDirTool
+from milky_frog.harness.tools.builtins.merge_worktree import MergeWorktreeTool
 from milky_frog.harness.tools.builtins.read import ReadFileTool
-from milky_frog.harness.tools.builtins.subagent import SubagentRunner, SubagentTool
+from milky_frog.harness.tools.builtins.subagent import (
+    SubagentOutcome,
+    SubagentRejected,
+    SubagentRunner,
+    SubagentTool,
+)
 from milky_frog.harness.tools.builtins.web_search import WebSearchTool
 from milky_frog.harness.tools.builtins.write import WriteFileTool
 
@@ -28,6 +34,7 @@ def default_tools(*, jina_api_key: str | None = None) -> tuple[Tool, ...]:
         GrepTool(),
         BashTool(),
         FetchTool(jina_api_key=jina_api_key),
+        MergeWorktreeTool(),
     ]
     if jina_api_key:
         tools.append(WebSearchTool(jina_api_key))
@@ -58,7 +65,10 @@ __all__ = [
     "FetchTool",
     "GrepTool",
     "ListDirTool",
+    "MergeWorktreeTool",
     "ReadFileTool",
+    "SubagentOutcome",
+    "SubagentRejected",
     "SubagentRunner",
     "SubagentTool",
     "WebSearchTool",

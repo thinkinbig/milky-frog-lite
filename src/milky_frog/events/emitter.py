@@ -263,6 +263,15 @@ def format_approval_message(call: ToolCall) -> str:
             )
         return "approval needed for: edit\n\nAllow this edit?"
 
+    if tool_name == "merge_worktree":
+        branch = call.arguments.get("branch", "")
+        worktree = call.arguments.get("worktree", "")
+        return (
+            "approval needed for: merge_worktree"
+            f"\n\nA subagent left changes on branch '{branch}' at '{worktree}'."
+            " Merge them into your workspace and remove the worktree?"
+        )
+
     preview = _tool_arg_preview(call.arguments)
     if preview:
         return (
@@ -277,7 +286,7 @@ def format_approval_message(call: ToolCall) -> str:
 
 def _tool_arg_preview(arguments: dict[str, JsonValue]) -> str:
     parts: list[str] = []
-    for key in ("path", "pattern", "target", "url", "command"):
+    for key in ("path", "pattern", "target", "url", "command", "prompt"):
         value = arguments.get(key)
         if isinstance(value, str) and value:
             parts.append(f"{key}: '{value}'")

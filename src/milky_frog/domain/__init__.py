@@ -22,7 +22,7 @@ from milky_frog.domain.run import (
     is_cancelled,
 )
 from milky_frog.domain.status import ResumeError, RunStatus
-from milky_frog.domain.tools import ToolCall, ToolDecision, ToolResult
+from milky_frog.domain.tools import FollowUpCall, ToolCall, ToolDecision, ToolResult
 from milky_frog.domain.usage import RunUsage, TokenUsage
 
 __all__ = [
@@ -31,6 +31,7 @@ __all__ = [
     "ApprovalVerdict",
     "Compacted",
     "CompactionState",
+    "FollowUpCall",
     "HandlerResult",
     "Message",
     "MessageRole",
