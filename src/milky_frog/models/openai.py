@@ -236,6 +236,11 @@ class _ToolFragment:
 def _message_payload(message: Message) -> dict[str, Any]:
     payload: dict[str, Any] = {"role": message.role.value, "content": message.content}
     if message.reasoning:
+        # Only ever set on an assistant message that carries Tool calls (see
+        # ``append_model_response``): some reasoning Providers require the
+        # reasoning to accompany the replayed Tool call. Final-answer reasoning
+        # — which Providers reject on input — is never persisted, so it never
+        # reaches here.
         payload["reasoning_content"] = message.reasoning
     if message.tool_calls:
         payload["tool_calls"] = [

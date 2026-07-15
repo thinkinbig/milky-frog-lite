@@ -214,6 +214,11 @@ class AgentLoop:
                             return await self._hub.finish_cancelled(state)
 
                 if needs_approval:
+                    # No ``before_tool`` here: it fires when the approved call
+                    # actually executes (``AgentHarness._apply_approvals``), the
+                    # one emission point that also covers cross-process resume.
+                    # Emitting it at pause time too would double every subscriber
+                    # — duplicate TUI tool cards, orphaned Langfuse spans.
                     return await self._hub.finish_approval_needed(state, needs_approval)
 
                 model_call = state.completed_model_calls
