@@ -132,9 +132,9 @@ class EventHub:
         return await self._emitter.run_started(run_id, request, state)
 
     async def before_resume(
-        self, run_id: str, prompt: str | None, status: RunStatus, workspace: Path
+        self, run_id: str, prompt: str | None, status: RunStatus, state: RunState
     ) -> list[HandlerResult]:
-        return await self._emitter.before_resume(run_id, prompt, status, workspace)
+        return await self._emitter.before_resume(run_id, prompt, status, state)
 
     async def before_model(
         self, run_id: str, request: ModelRequest, state: RunState

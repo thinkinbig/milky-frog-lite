@@ -52,6 +52,7 @@ class SubagentRunner(Protocol):
         max_model_calls: int | None,
         cancellation: RunCancellation | None,
         workspace: Path,
+        parent_run_id: str,
     ) -> SubagentOutcome: ...
 
 
@@ -94,6 +95,7 @@ class SubagentTool:
                 params.max_model_calls,
                 context.cancellation,
                 context.workspace,
+                context.run_id,
             )
         except SubagentRejected as error:
             return ToolResult(str(error), is_error=True)

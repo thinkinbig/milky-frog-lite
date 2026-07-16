@@ -17,7 +17,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 
 from milky_frog.core.handlers import HandlerDeps
-from milky_frog.events import EventHub, ObserverHandler, RunAfterTool
+from milky_frog.events import EventHub, Handler, RunAfterTool
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,7 +26,7 @@ class ReadRecord:
     is_error: bool
 
 
-class ReadCollector(ObserverHandler):
+class ReadCollector(Handler):
     """Records read_file / edit_file paths per ``run_id`` for later scoring."""
 
     READ_TOOL = "read_file"

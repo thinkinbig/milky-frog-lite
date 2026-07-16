@@ -68,10 +68,18 @@ class RunEmitter:
         )
 
     async def before_resume(
-        self, run_id: str, prompt: str | None, status: RunStatus, workspace: Path
+        self, run_id: str, prompt: str | None, status: RunStatus, state: RunState
     ) -> list[HandlerResult]:
         return await self._broadcast(
-            RunBeforeResume(run_id=run_id, prompt=prompt, stored_status=status, workspace=workspace)
+            RunBeforeResume(
+                run_id=run_id,
+                prompt=prompt,
+                stored_status=status,
+                workspace=state.workspace,
+                selected_skills=state.selected_skills,
+                run_kind=state.run_kind,
+                parent_run_id=state.parent_run_id,
+            )
         )
 
     async def before_model(

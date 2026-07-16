@@ -65,6 +65,7 @@ class ForegroundRun:
         workspace: Path | None = None,
         *,
         skill_content: str | None = None,
+        selected_skills: tuple[str, ...] = (),
     ) -> RunResult:
         workspace = (workspace or Path.cwd()).resolve(strict=True)
         project_cfg = load_project_config(workspace)
@@ -80,6 +81,7 @@ class ForegroundRun:
                         max_model_calls=max_calls,
                         cancellation=self._cancellation,
                         skill_content=skill_content,
+                        selected_skills=selected_skills,
                     )
                 )
             except asyncio.CancelledError:
@@ -97,6 +99,7 @@ class ForegroundRun:
         *,
         prompt: str | None = None,
         run_extra: tuple[str, ...] | None = None,
+        selected_skills: tuple[str, ...] | None = None,
     ) -> RunResult:
         stored = self._resolve_stored_run(run_id)
         project_cfg = load_project_config(stored.workspace)
@@ -112,6 +115,7 @@ class ForegroundRun:
                     cancellation=self._cancellation,
                     prompt=prompt,
                     run_extra=run_extra,
+                    selected_skills=selected_skills,
                 )
             except asyncio.CancelledError:
                 self.shutdown()

@@ -11,11 +11,13 @@ from milky_frog.domain import (
     ModelChunk,
     ModelRequest,
     ModelResponse,
+    ResumeError,
     RunRequest,
     RunStatus,
     StreamDone,
 )
 from milky_frog.events import EventHub
+from milky_frog.events.events import RunBeforeResume
 from milky_frog.harness.context import ContextManager
 from milky_frog.harness.prompt import make_context_loader
 from milky_frog.harness.skills import SkillCatalog
@@ -251,7 +253,7 @@ async def test_run_extra_survives_checkpoint_reload(tmp_path: Path) -> None:
     harness = make_harness(model, ToolRegistry(), store, EventHub())
 
     first = await harness.run(
-        RunRequest("hello", workspace, skill_content=skill_text),
+        RunRequest("hello", workspace, skill_content=skill_text, selected_skills=("review",)),
     )
     assert first.status is RunStatus.COMPLETED
     assert skill_text in model.system_prompts[-1]
@@ -259,12 +261,14 @@ async def test_run_extra_survives_checkpoint_reload(tmp_path: Path) -> None:
     # Snapshot must persist the activated skill instructions (ADR-0014).
     state_before = store.load_state(first.run_id)
     assert state_before.run_extra == (skill_text,)
+    assert state_before.selected_skills == ("review",)
 
     # Resume fires another model call — the skill prompt must still be there.
     continued = await harness.resume(first.run_id, max_model_calls=5, prompt="again")
     assert continued.status is RunStatus.COMPLETED
     state_after = store.load_state(first.run_id)
     assert state_after.run_extra == (skill_text,)
+    assert state_after.selected_skills == ("review",)
     assert skill_text in model.system_prompts[-1]  # last model call after resume
 
 
@@ -319,8 +323,15 @@ async def test_resume_run_extra_re_applies_and_clears(tmp_path: Path) -> None:
     assert activated not in model.system_prompts[-1]
 
     # Activate a skill mid-run: resume with an explicit run_extra.
-    await harness.resume(first.run_id, max_model_calls=5, prompt="again", run_extra=(activated,))
+    await harness.resume(
+        first.run_id,
+        max_model_calls=5,
+        prompt="again",
+        run_extra=(activated,),
+        selected_skills=("review",),
+    )
     assert store.load_state(first.run_id).run_extra == (activated,)
+    assert store.load_state(first.run_id).selected_skills == ("review",)
     assert activated in model.system_prompts[-1]
 
     # A subsequent resume without run_extra preserves it (skills survive resume).
@@ -329,6 +340,63 @@ async def test_resume_run_extra_re_applies_and_clears(tmp_path: Path) -> None:
     assert activated in model.system_prompts[-1]
 
     # Deactivate mid-run: resume with an empty run_extra clears it.
-    await harness.resume(first.run_id, max_model_calls=5, prompt="done", run_extra=())
+    await harness.resume(
+        first.run_id,
+        max_model_calls=5,
+        prompt="done",
+        run_extra=(),
+        selected_skills=(),
+    )
     assert store.load_state(first.run_id).run_extra == ()
+    assert store.load_state(first.run_id).selected_skills == ()
     assert activated not in model.system_prompts[-1]
+
+
+@pytest.mark.asyncio
+async def test_resume_emits_changed_selected_skills(tmp_path: Path) -> None:
+    """A changed Skill selection reaches observability before the next model call."""
+
+    class NoOpModel:
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            del request
+            yield StreamDone(ModelResponse(content="done"))
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    hub = EventHub()
+    seen: list[RunBeforeResume] = []
+
+    @hub.on(RunBeforeResume)
+    async def record(event: RunBeforeResume, _deps: object = None) -> None:
+        seen.append(event)
+
+    harness = make_harness(NoOpModel(), ToolRegistry(), store, hub)
+    first = await harness.run(RunRequest("hello", workspace))
+
+    await harness.resume(
+        first.run_id,
+        max_model_calls=5,
+        prompt="again",
+        run_extra=('<active_skill name="review" />',),
+        selected_skills=("review",),
+    )
+
+    assert seen[-1].selected_skills == ("review",)
+
+
+@pytest.mark.asyncio
+async def test_resume_rejects_unpaired_skill_metadata(tmp_path: Path) -> None:
+    class NoOpModel:
+        async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+            del request
+            yield StreamDone(ModelResponse(content="done"))
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    harness = make_harness(NoOpModel(), ToolRegistry(), store, EventHub())
+    first = await harness.run(RunRequest("hello", workspace))
+
+    with pytest.raises(ResumeError, match="run_extra and selected_skills"):
+        await harness.resume(first.run_id, max_model_calls=5, selected_skills=("review",))

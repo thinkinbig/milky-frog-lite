@@ -19,7 +19,7 @@ class RecordingRunner:
 
     def __init__(self, result: RunResult) -> None:
         self.result = result
-        self.calls: list[tuple[str, str, int | None, RunCancellation | None, Path]] = []
+        self.calls: list[tuple[str, str, int | None, RunCancellation | None, Path, str]] = []
 
     async def __call__(
         self,
@@ -28,8 +28,11 @@ class RecordingRunner:
         max_model_calls: int | None,
         cancellation: RunCancellation | None,
         workspace: Path,
+        parent_run_id: str,
     ) -> SubagentOutcome:
-        self.calls.append((prompt, capability, max_model_calls, cancellation, workspace))
+        self.calls.append(
+            (prompt, capability, max_model_calls, cancellation, workspace, parent_run_id)
+        )
         return SubagentOutcome(self.result)
 
 
@@ -48,7 +51,7 @@ async def test_execute_maps_completed_result_to_success() -> None:
 
     assert result.content == "report"
     assert result.is_error is False
-    assert runner.calls == [("investigate X", "read_only", None, None, workspace)]
+    assert runner.calls == [("investigate X", "read_only", None, None, workspace, "run-1")]
 
 
 @pytest.mark.asyncio
@@ -77,7 +80,7 @@ async def test_execute_forwards_max_model_calls_and_cancellation() -> None:
 
     await tool.execute(context, SubagentInput(prompt="go", max_model_calls=5))
 
-    assert runner.calls == [("go", "read_only", 5, cancellation, workspace)]
+    assert runner.calls == [("go", "read_only", 5, cancellation, workspace, "run-1")]
 
 
 @pytest.mark.asyncio
@@ -94,8 +97,11 @@ async def test_execute_forwards_write_capability_and_reports_worktree(tmp_path: 
             max_model_calls: int | None,
             cancellation: RunCancellation | None,
             workspace: Path,
+            parent_run_id: str,
         ) -> SubagentOutcome:
-            self.calls.append((prompt, capability, max_model_calls, cancellation, workspace))
+            self.calls.append(
+                (prompt, capability, max_model_calls, cancellation, workspace, parent_run_id)
+            )
             return SubagentOutcome(
                 self.result,
                 worktree=tmp_path / "worktree",
@@ -114,7 +120,7 @@ async def test_execute_forwards_write_capability_and_reports_worktree(tmp_path: 
 
     assert "worktree=" in tool_result.content
     assert "branch=subagent/nested-4" in tool_result.content
-    assert runner.calls == [("implement it", "write", None, None, tmp_path)]
+    assert runner.calls == [("implement it", "write", None, None, tmp_path, "run-1")]
     # A kept worktree must deterministically pause the Run for a merge
     # decision — see AgentLoop.advance — not just mention it in the text.
     assert tool_result.follow_up is not None
@@ -139,8 +145,11 @@ async def test_execute_sets_no_follow_up_when_worktree_is_clean(tmp_path: Path) 
             max_model_calls: int | None,
             cancellation: RunCancellation | None,
             workspace: Path,
+            parent_run_id: str,
         ) -> SubagentOutcome:
-            self.calls.append((prompt, capability, max_model_calls, cancellation, workspace))
+            self.calls.append(
+                (prompt, capability, max_model_calls, cancellation, workspace, parent_run_id)
+            )
             return SubagentOutcome(
                 self.result,
                 worktree=tmp_path / "worktree",

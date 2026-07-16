@@ -20,6 +20,7 @@ __all__ = [
     "seal",
     "start_run",
     "unmatched_tool_calls",
+    "with_run_skills",
 ]
 
 
@@ -33,13 +34,16 @@ def append_user_message(state: RunState, content: str) -> RunState:
     return replace(state, messages=(*state.messages, Message(MessageRole.USER, content)))
 
 
-def with_run_extra(state: RunState, run_extra: tuple[str, ...]) -> RunState:
-    """Replace the eager system-prompt sections (e.g. activated-skill instructions).
+def with_run_skills(
+    state: RunState, run_extra: tuple[str, ...], selected_skills: tuple[str, ...]
+) -> RunState:
+    """Replace eager Skill instructions and their observable names together.
 
     Used on resume/continue to re-apply the caller's current Skill selection over
-    the persisted value, so mid-run activation and deactivation both take effect.
+    the persisted value, so mid-run activation and deactivation both take effect —
+    and so the injected instructions never diverge from the recorded names.
     """
-    return replace(state, run_extra=run_extra)
+    return replace(state, run_extra=run_extra, selected_skills=selected_skills)
 
 
 def append_model_response(state: RunState, response: ModelResponse) -> RunState:
