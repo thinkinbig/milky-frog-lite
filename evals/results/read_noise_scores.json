@@ -1,0 +1,285 @@
+{
+  "summary": {
+    "tasks": 5,
+    "runs_total": 15,
+    "runs_completed": 10,
+    "runs_capped": 5,
+    "runs_failed": 0,
+    "runs_scored": 10,
+    "footprint_over_task_medians": {
+      "median": 2.0,
+      "min": 2.0,
+      "max": 3.0,
+      "spread": 1.0
+    },
+    "failed_read_runs": 3,
+    "duplicate_read_runs_scored": 10,
+    "construct_validity": {
+      "waste_measurable_nonzero": true,
+      "footprint_spread_present": true,
+      "footprint_median_above_one": true
+    }
+  },
+  "tasks": [
+    {
+      "task_id": "pallets__flask-5014",
+      "repo": "pallets/flask",
+      "gold_source_n": 1,
+      "completed": 3,
+      "capped": 0,
+      "failed": 0,
+      "scored": 3,
+      "footprint_median": 2.0,
+      "recall_median": 1.0,
+      "runs": [
+        {
+          "run_index": 0,
+          "termination": "completed",
+          "distinct_reads": 3,
+          "duplicate_reads": 3,
+          "failed_reads": 1,
+          "relevant_hit": 1,
+          "recall": 1.0,
+          "right_file_edit": 1,
+          "gate_pass": true,
+          "footprint": 3.0,
+          "scored": true
+        },
+        {
+          "run_index": 1,
+          "termination": "completed",
+          "distinct_reads": 2,
+          "duplicate_reads": 2,
+          "failed_reads": 0,
+          "relevant_hit": 1,
+          "recall": 1.0,
+          "right_file_edit": 1,
+          "gate_pass": true,
+          "footprint": 2.0,
+          "scored": true
+        },
+        {
+          "run_index": 2,
+          "termination": "completed",
+          "distinct_reads": 2,
+          "duplicate_reads": 4,
+          "failed_reads": 0,
+          "relevant_hit": 1,
+          "recall": 1.0,
+          "right_file_edit": 1,
+          "gate_pass": true,
+          "footprint": 2.0,
+          "scored": true
+        }
+      ]
+    },
+    {
+      "task_id": "psf__requests-2317",
+      "repo": "psf/requests",
+      "gold_source_n": 1,
+      "completed": 3,
+      "capped": 0,
+      "failed": 0,
+      "scored": 3,
+      "footprint_median": 3.0,
+      "recall_median": 1.0,
+      "runs": [
+        {
+          "run_index": 0,
+          "termination": "completed",
+          "distinct_reads": 1,
+          "duplicate_reads": 1,
+          "failed_reads": 0,
+          "relevant_hit": 1,
+          "recall": 1.0,
+          "right_file_edit": 1,
+          "gate_pass": true,
+          "footprint": 1.0,
+          "scored": true
+        },
+        {
+          "run_index": 1,
+          "termination": "completed",
+          "distinct_reads": 4,
+          "duplicate_reads": 3,
+          "failed_reads": 0,
+          "relevant_hit": 1,
+          "recall": 1.0,
+          "right_file_edit": 1,
+          "gate_pass": true,
+          "footprint": 4.0,
+          "scored": true
+        },
+        {
+          "run_index": 2,
+          "termination": "completed",
+          "distinct_reads": 3,
+          "duplicate_reads": 2,
+          "failed_reads": 0,
+          "relevant_hit": 1,
+          "recall": 1.0,
+          "right_file_edit": 1,
+          "gate_pass": true,
+          "footprint": 3.0,
+          "scored": true
+        }
+      ]
+    },
+    {
+      "task_id": "pylint-dev__pylint-4970",
+      "repo": "pylint-dev/pylint",
+      "gold_source_n": 1,
+      "completed": 1,
+      "capped": 2,
+      "failed": 0,
+      "scored": 1,
+      "footprint_median": 2.0,
+      "recall_median": 1.0,
+      "runs": [
+        {
+          "run_index": 0,
+          "termination": "capped",
+          "distinct_reads": 2,
+          "duplicate_reads": 4,
+          "failed_reads": 1,
+          "relevant_hit": 1,
+          "recall": 1.0,
+          "right_file_edit": 1,
+          "gate_pass": true,
+          "footprint": null,
+          "scored": false
+        },
+        {
+          "run_index": 1,
+          "termination": "capped",
+          "distinct_reads": 3,
+          "duplicate_reads": 6,
+          "failed_reads": 3,
+          "relevant_hit": 1,
+          "recall": 1.0,
+          "right_file_edit": 1,
+          "gate_pass": true,
+          "footprint": null,
+          "scored": false
+        },
+        {
+          "run_index": 2,
+          "termination": "completed",
+          "distinct_reads": 2,
+          "duplicate_reads": 3,
+          "failed_reads": 0,
+          "relevant_hit": 1,
+          "recall": 1.0,
+          "right_file_edit": 1,
+          "gate_pass": true,
+          "footprint": 2.0,
+          "scored": true
+        }
+      ]
+    },
+    {
+      "task_id": "mwaskom__seaborn-3069",
+      "repo": "mwaskom/seaborn",
+      "gold_source_n": 1,
+      "completed": 0,
+      "capped": 3,
+      "failed": 0,
+      "scored": 0,
+      "footprint_median": null,
+      "recall_median": null,
+      "runs": [
+        {
+          "run_index": 0,
+          "termination": "capped",
+          "distinct_reads": 2,
+          "duplicate_reads": 7,
+          "failed_reads": 0,
+          "relevant_hit": 1,
+          "recall": 1.0,
+          "right_file_edit": 1,
+          "gate_pass": true,
+          "footprint": null,
+          "scored": false
+        },
+        {
+          "run_index": 1,
+          "termination": "capped",
+          "distinct_reads": 3,
+          "duplicate_reads": 9,
+          "failed_reads": 0,
+          "relevant_hit": 1,
+          "recall": 1.0,
+          "right_file_edit": 1,
+          "gate_pass": true,
+          "footprint": null,
+          "scored": false
+        },
+        {
+          "run_index": 2,
+          "termination": "capped",
+          "distinct_reads": 6,
+          "duplicate_reads": 7,
+          "failed_reads": 0,
+          "relevant_hit": 1,
+          "recall": 1.0,
+          "right_file_edit": 1,
+          "gate_pass": true,
+          "footprint": null,
+          "scored": false
+        }
+      ]
+    },
+    {
+      "task_id": "pytest-dev__pytest-5631",
+      "repo": "pytest-dev/pytest",
+      "gold_source_n": 1,
+      "completed": 3,
+      "capped": 0,
+      "failed": 0,
+      "scored": 3,
+      "footprint_median": 2.0,
+      "recall_median": 1.0,
+      "runs": [
+        {
+          "run_index": 0,
+          "termination": "completed",
+          "distinct_reads": 2,
+          "duplicate_reads": 2,
+          "failed_reads": 0,
+          "relevant_hit": 1,
+          "recall": 1.0,
+          "right_file_edit": 1,
+          "gate_pass": true,
+          "footprint": 2.0,
+          "scored": true
+        },
+        {
+          "run_index": 1,
+          "termination": "completed",
+          "distinct_reads": 1,
+          "duplicate_reads": 1,
+          "failed_reads": 0,
+          "relevant_hit": 1,
+          "recall": 1.0,
+          "right_file_edit": 1,
+          "gate_pass": true,
+          "footprint": 1.0,
+          "scored": true
+        },
+        {
+          "run_index": 2,
+          "termination": "completed",
+          "distinct_reads": 2,
+          "duplicate_reads": 1,
+          "failed_reads": 0,
+          "relevant_hit": 1,
+          "recall": 1.0,
+          "right_file_edit": 1,
+          "gate_pass": true,
+          "footprint": 2.0,
+          "scored": true
+        }
+      ]
+    }
+  ]
+}
