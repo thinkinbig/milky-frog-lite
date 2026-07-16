@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from milky_frog.core.handlers import HandlerDeps
-from milky_frog.events import EventHub, ObserverHandler, RunAfterTool
+from milky_frog.events import EventHub, Handler, RunAfterTool
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,7 +39,7 @@ def summarize_tool_call(record: ToolCallRecord) -> str:
     return f"{record.name}: {record.arguments}"
 
 
-class ToolCallCollector(ObserverHandler):
+class ToolCallCollector(Handler):
     """Records every tool call per ``run_id`` for later scoring or review."""
 
     def __init__(self) -> None:
