@@ -4,8 +4,7 @@ import asyncio
 import contextlib
 import logging
 import os
-from dataclasses import dataclass
-from typing import Any, overload
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -101,44 +100,33 @@ class _McpConnection:
         await self._resources.aclose()
 
 
-@dataclass(frozen=True, slots=True)
-class _ConnectServer:
-    name: str
-    cfg: McpServerConfig
+class _McpServerOwner:
+    """Keeps one server's connection resources in their owning Task."""
 
-
-@dataclass(frozen=True, slots=True)
-class _DisconnectServer:
-    name: str
-
-
-@dataclass(frozen=True, slots=True)
-class _Shutdown:
-    pass
-
-
-type _McpCommand = _ConnectServer | _DisconnectServer | _Shutdown
-
-
-@dataclass(frozen=True, slots=True)
-class _QueuedCommand:
-    command: _McpCommand
-    completion: asyncio.Future[Any]
+    def __init__(self) -> None:
+        loop = asyncio.get_running_loop()
+        self.ready: asyncio.Future[list[McpTool]] = loop.create_future()
+        self.stop = asyncio.Event()
+        self.connection: _McpConnection | None = None
+        self.task: asyncio.Task[None] | None = None
 
 
 class McpClientManager:
     """Manages per-server MCP connections with independent lifecycles.
 
-    A single supervisor Task owns every stdio context. This ensures anyio
-    cancel scopes created by ``stdio_client()`` are exited by the same Task that
-    entered them, even when a reload or shutdown originates in another Task.
+    Each server has an owner Task that opens, serves, and closes its stdio
+    contexts. This preserves anyio cancel-scope task affinity while allowing
+    independent servers to connect concurrently.
     """
 
     def __init__(self, *, connect_timeout: float = 30.0) -> None:
         self._servers: dict[str, _McpConnection] = {}
-        self._commands: asyncio.Queue[_QueuedCommand] = asyncio.Queue()
-        self._supervisor: asyncio.Task[None] | None = None
+        self._owners: dict[str, _McpServerOwner] = {}
+        self._server_order: list[str] = []
+        self._server_locks: dict[str, asyncio.Lock] = {}
+        self._lifecycle_lock = asyncio.Lock()
         self._connect_timeout = connect_timeout
+        self._closed = False
 
     @property
     def running_servers(self) -> frozenset[str]:
@@ -146,77 +134,128 @@ class McpClientManager:
 
     @property
     def tools(self) -> list[McpTool]:
-        return [tool for server in self._servers.values() for tool in server.tools]
+        return [
+            tool
+            for name in self._server_order
+            if (server := self._servers.get(name)) is not None
+            for tool in server.tools
+        ]
 
     async def __aenter__(self) -> McpClientManager:
-        self._ensure_supervisor()
+        async with self._lifecycle_lock:
+            self._closed = False
         return self
 
     async def connect_server(self, name: str, cfg: McpServerConfig) -> list[McpTool]:
-        """Connect one server through the task that owns stdio contexts."""
-        return await self._submit(_ConnectServer(name, cfg))
+        """Connect one server through a Task that owns its stdio contexts."""
+        lock = self._server_locks.setdefault(name, asyncio.Lock())
+        async with lock:
+            await self._stop_server(name)
+            async with self._lifecycle_lock:
+                if self._closed:
+                    raise RuntimeError("MCP client manager is closed")
+                owner = _McpServerOwner()
+                self._owners[name] = owner
+                self._server_order.append(name)
+                owner.task = asyncio.create_task(self._own_server(name, cfg, owner))
+            try:
+                return await asyncio.shield(owner.ready)
+            except asyncio.CancelledError:
+                await self._stop_server(name)
+                raise
 
     async def connect_many(self, servers: dict[str, McpServerConfig]) -> None:
         """Connect several independent servers without one failure blocking the rest.
 
-        Connections are deliberately serial: MCP setup is low-frequency, and
-        the supervisor must own every stdio context for its entire lifetime.
+        Each server retains its own timeout and failure handling, while the
+        connections overlap so startup is bounded by roughly one timeout.
         """
-        for name, cfg in servers.items():
+
+        async def _connect_one(name: str, cfg: McpServerConfig) -> None:
             try:
                 await self.connect_server(name, cfg)
             except Exception:
                 logger.warning("failed to connect to MCP server %r; skipping", name, exc_info=True)
 
+        await asyncio.gather(*(_connect_one(name, cfg) for name, cfg in servers.items()))
+
     async def disconnect_server(self, name: str) -> None:
         """Disconnect one server and remove its tools."""
-        await self._submit(_DisconnectServer(name))
+        lock = self._server_locks.setdefault(name, asyncio.Lock())
+        async with lock:
+            await self._stop_server(name)
 
-    @overload
-    async def _submit(self, command: _ConnectServer) -> list[McpTool]: ...
+    async def _own_server(
+        self,
+        name: str,
+        cfg: McpServerConfig,
+        owner: _McpServerOwner,
+    ) -> None:
+        """Open and close one connection entirely within its owner Task."""
+        try:
+            connection = await self._open_connection(name, cfg)
+        except asyncio.CancelledError:
+            self._forget_owner(name, owner)
+            if not owner.ready.done():
+                owner.ready.cancel()
+            return
+        except Exception as error:
+            self._forget_owner(name, owner)
+            if not owner.ready.done():
+                owner.ready.set_exception(error)
+            return
 
-    @overload
-    async def _submit(self, command: _DisconnectServer | _Shutdown) -> None: ...
+        owner.connection = connection
+        if self._owners.get(name) is owner:
+            self._servers[name] = connection
+        if not owner.ready.done():
+            owner.ready.set_result(connection.tools)
 
-    async def _submit(self, command: _McpCommand) -> Any:
-        self._ensure_supervisor()
-        completion: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
-        self._commands.put_nowait(_QueuedCommand(command, completion))
-        return await completion
-
-    def _ensure_supervisor(self) -> None:
-        if self._supervisor is None:
-            self._supervisor = asyncio.create_task(self._serve())
-
-    async def _serve(self) -> None:
-        """Process lifecycle changes in the Task that owns all stdio contexts."""
-        while True:
-            queued = await self._commands.get()
+        try:
+            await owner.stop.wait()
+        finally:
+            if self._servers.get(name) is connection:
+                self._servers.pop(name)
             try:
-                result = await self._execute(queued.command)
-            except Exception as error:
-                if not queued.completion.done():
-                    queued.completion.set_exception(error)
-            else:
-                if not queued.completion.done():
-                    queued.completion.set_result(result)
-            if isinstance(queued.command, _Shutdown):
-                return
+                await connection.close()
+            except Exception:
+                logger.warning("error closing MCP server %r", name, exc_info=True)
+            finally:
+                self._forget_owner(name, owner)
 
-    async def _execute(self, command: _McpCommand) -> Any:
-        match command:
-            case _ConnectServer(name, cfg):
-                return await self._connect_server(name, cfg)
-            case _DisconnectServer(name):
-                return await self._disconnect_server(name)
-            case _Shutdown():
-                return await self._shutdown()
+    async def _stop_server(self, name: str) -> None:
+        owner = self._owners.get(name)
+        if owner is None:
+            return
 
-    async def _connect_server(self, name: str, cfg: McpServerConfig) -> list[McpTool]:
-        await self._close_server(name)
-        connection = await self._open_connection(name, cfg)
-        self._servers[name] = connection
-        return connection.tools
+        task = owner.task
+        if task is None:
+            self._forget_owner(name, owner)
+            return
+        cancelled_by_manager = owner.connection is None
+        if cancelled_by_manager:
+            task.cancel()
+        else:
+            owner.stop.set()
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            caller = asyncio.current_task()
+            caller_is_cancelled = caller is not None and caller.cancelling() > 0
+            expected_owner_cancel = (
+                cancelled_by_manager and task.cancelled() and not caller_is_cancelled
+            )
+            if not expected_owner_cancel:
+                raise
+
+    def _forget_owner(self, name: str, owner: _McpServerOwner) -> None:
+        if self._owners.get(name) is not owner:
+            return
+        self._owners.pop(name)
+        connection = owner.connection
+        if connection is not None and self._servers.get(name) is connection:
+            self._servers.pop(name)
+        self._server_order.remove(name)
 
     async def _open_connection(self, name: str, cfg: McpServerConfig) -> _McpConnection:
         stack = contextlib.AsyncExitStack()
@@ -224,7 +263,7 @@ class McpClientManager:
             async with asyncio.timeout(self._connect_timeout):
                 await stack.__aenter__()
                 tools = await self._connect(name, cfg, stack)
-        except Exception:
+        except BaseException:
             try:
                 await stack.aclose()
             except Exception:
@@ -235,22 +274,6 @@ class McpClientManager:
                 )
             raise
         return _McpConnection(tools, stack)
-
-    async def _disconnect_server(self, name: str) -> None:
-        await self._close_server(name)
-
-    async def _shutdown(self) -> None:
-        for name in list(self._servers):
-            await self._close_server(name)
-
-    async def _close_server(self, name: str) -> None:
-        entry = self._servers.pop(name, None)
-        if entry is None:
-            return
-        try:
-            await entry.close()
-        except Exception:
-            logger.warning("error closing MCP server %r", name, exc_info=True)
 
     async def _connect(
         self, server_name: str, cfg: McpServerConfig, stack: contextlib.AsyncExitStack
@@ -290,11 +313,6 @@ class McpClientManager:
         return tools
 
     async def __aexit__(self, *args: Any) -> None:
-        supervisor = self._supervisor
-        if supervisor is None:
-            return
-        complete: asyncio.Future[None] = asyncio.get_running_loop().create_future()
-        self._commands.put_nowait(_QueuedCommand(_Shutdown(), complete))
-        await complete
-        await supervisor
-        self._supervisor = None
+        async with self._lifecycle_lock:
+            self._closed = True
+            await asyncio.gather(*(self._stop_server(name) for name in tuple(self._owners)))
