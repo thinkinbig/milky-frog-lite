@@ -73,6 +73,46 @@ async def test_session_runs_through_configured_runtime(
 
 
 @pytest.mark.asyncio
+async def test_session_loads_mcp_config_from_first_run_workspace(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Opening a Session must not bind project config to the launch directory."""
+    launch_workspace = tmp_path / "launch"
+    run_workspace = tmp_path / "run"
+    launch_workspace.mkdir()
+    (run_workspace / ".milky-frog").mkdir(parents=True)
+    (launch_workspace / ".milky-frog").mkdir()
+    (launch_workspace / ".milky-frog" / "mcp.json").write_text(
+        '{"mcpServers": {"launch": {"command": "launch-server"}}}', encoding="utf-8"
+    )
+    (run_workspace / ".milky-frog" / "mcp.json").write_text(
+        '{"mcpServers": {"run": {"command": "run-server"}}}', encoding="utf-8"
+    )
+    monkeypatch.chdir(launch_workspace)
+
+    connected: list[set[str]] = []
+
+    async def fake_connect_many(self: object, servers: dict[str, object]) -> None:
+        del self
+        connected.append(set(servers))
+
+    async def fake_stream(self: OpenAIModel, request: ModelRequest) -> AsyncIterator[ModelChunk]:
+        del self, request
+        yield StreamDone(ModelResponse(content="done"))
+
+    monkeypatch.setattr("milky_frog.app.session.McpClientManager.connect_many", fake_connect_many)
+    monkeypatch.setattr(OpenAIModel, "stream", fake_stream)
+
+    settings = _settings(tmp_path, base_url="https://example.test")
+    async with AgentSession.from_settings(settings) as session:
+        assert connected == []
+        result = await session.start_new("build it", run_workspace)
+
+    assert result.status is RunStatus.COMPLETED
+    assert connected == [{"run"}]
+
+
+@pytest.mark.asyncio
 async def test_session_start_new_drops_unresolvable_skill_from_metadata(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
