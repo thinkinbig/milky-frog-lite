@@ -16,7 +16,7 @@ from milky_frog.core.runtime.assemble import (
 )
 from milky_frog.core.runtime.checkpoint import RunCheckpointFacade
 from milky_frog.core.runtime.foreground import ForegroundRun
-from milky_frog.core.sandbox import SandboxFactory
+from milky_frog.core.sandbox import Sandbox, SandboxFactory
 from milky_frog.core.session_tool_policy import SessionToolPolicy
 from milky_frog.core.shutdown import ShutdownManager
 from milky_frog.domain import (
@@ -65,6 +65,15 @@ class AgentSessionConfig:
     sandbox_factory: SandboxFactory | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class _WorkspaceSandboxFactory:
+    """Select the project Sandbox configuration for the Run's Workspace."""
+
+    def __call__(self, workspace: Path) -> Sandbox:
+        factory = make_sandbox_factory(load_project_config(workspace))
+        return factory(workspace)
+
+
 class AgentSession:
     """Thin composition root: wires adapters, delegates Run orchestration to ``ForegroundRun``."""
 
@@ -97,6 +106,8 @@ class AgentSession:
         self._counter: TokenCounter | None = None
         self._mcp_manager: McpClientManager | None = None
         self._registry: ToolRegistry | None = None
+        self._workspace: Path | None = None
+        self._nested_harness: AgentHarness | None = None
         self._mcp_reload_lock: asyncio.Lock = asyncio.Lock()
 
     @property
@@ -194,20 +205,6 @@ class AgentSession:
         store = SqliteCheckpointStore(self._settings.database_path)
         self._checkpoints = RunCheckpointFacade(store)
 
-        workspace = Path.cwd()
-
-        project_cfg = load_project_config(workspace)
-        sandbox_factory = self._config.sandbox_factory or make_sandbox_factory(project_cfg)
-        if project_cfg.checkpoint.prune_on_start and project_cfg.checkpoint.retention_days > 0:
-            cutoff = datetime.now(UTC) - timedelta(days=project_cfg.checkpoint.retention_days)
-            pruned = self._checkpoints.prune(cutoff, workspace)
-            if pruned:
-                logger.info(
-                    "Pruned %d stale checkpoint(s) (retention: %d days)",
-                    pruned,
-                    project_cfg.checkpoint.retention_days,
-                )
-
         self._hub = self._hub_override or EventHub()
 
         # Model and token counter are built first: the (optional) CompactionHandler
@@ -225,42 +222,11 @@ class AgentSession:
         )
         self._counter = counter
 
-        mcp_cfg = load_mcp_config(self._settings.home, workspace)
         mcp_manager = McpClientManager()
         await mcp_manager.__aenter__()
         self._mcp_manager = mcp_manager
         try:
-            enabled_servers = {
-                name: srv_cfg for name, srv_cfg in mcp_cfg.mcpServers.items() if srv_cfg.enabled
-            }
-            await mcp_manager.connect_many(enabled_servers)
-
-            nested_registry = ToolRegistry(
-                read_only_tools(jina_api_key=self._settings.jina_api_key)
-            )
-            # Shares the session's own hub — CheckpointHandler and
-            # LangfuseHandler already key everything off event.run_id, so a
-            # nested Run's signals are safe for them. UI-presentation Handlers
-            # are the only ones that assume a single active Run; they filter
-            # out nested-Run events themselves (see TuiPresentationHandler).
-            nested_harness = make_agent_harness(
-                model=self._model,
-                checkpoints=store,
-                hub=self._hub,
-                tools=nested_registry,
-                sandbox_factory=sandbox_factory,
-                context_loader=make_context_loader(self._settings.home),
-                token_counter=counter,
-                max_retries=self._settings.max_retries,
-                retry_base_delay=self._settings.retry_base_delay,
-            )
-            # The nested Run has no UI to resolve an approval pause, so it must
-            # not pause: auto-approve so fetch/web_search (requires_approval=True
-            # by default) don't deadlock a Run no one can ever release. The human
-            # gate on that network egress lives one level up — SubagentTool itself
-            # is requires_approval=True, so delegation is approved at the boundary
-            # (via the parent Run's UI) before any nested Tool runs.
-            nested_harness.policy.auto_approve()
+            sandbox_factory = self._config.sandbox_factory or _WorkspaceSandboxFactory()
 
             async def _run_subagent(
                 prompt: str,
@@ -268,6 +234,8 @@ class AgentSession:
                 cancellation: RunCancellation | None,
                 parent_run_id: str,
             ) -> RunResult:
+                nested_harness = _active(self._nested_harness)
+                workspace = _active(self._workspace)
                 return await nested_harness.run(
                     RunRequest(
                         prompt=prompt,
@@ -290,23 +258,12 @@ class AgentSession:
                     SubagentTool(_run_subagent),
                 )
             )
-            registry.replace_mcp_tools(tuple(mcp_manager.tools))
             self._registry = registry
 
-            extra: list[Handler] = list(self._extra_bundles)
-            if project_cfg.summarization_enabled:
-                extra.append(
-                    CompactionHandler(
-                        self._model,
-                        counter,
-                        trigger_tokens=project_cfg.summarization_trigger_tokens,
-                        keep_recent_tokens=project_cfg.summarization_keep_recent_tokens,
-                    )
-                )
             self._handlers = make_session_handlers(
                 self._settings,
                 store,
-                extra=extra,
+                extra=self._extra_bundles,
             )
             for bundle in self._handlers:
                 bundle.register(self._hub)
@@ -322,6 +279,25 @@ class AgentSession:
                 max_retries=self._settings.max_retries,
                 retry_base_delay=self._settings.retry_base_delay,
             )
+
+            # Shares the session hub: handlers key their work by run_id, while
+            # presentation handlers filter nested Runs themselves.
+            nested_registry = ToolRegistry(
+                read_only_tools(jina_api_key=self._settings.jina_api_key)
+            )
+            nested_harness = make_agent_harness(
+                model=self._model,
+                checkpoints=store,
+                hub=self._hub,
+                tools=nested_registry,
+                sandbox_factory=sandbox_factory,
+                context_loader=make_context_loader(self._settings.home),
+                token_counter=counter,
+                max_retries=self._settings.max_retries,
+                retry_base_delay=self._settings.retry_base_delay,
+            )
+            nested_harness.policy.auto_approve()
+            self._nested_harness = nested_harness
 
             self._foreground = ForegroundRun(
                 self._harness,
@@ -372,6 +348,8 @@ class AgentSession:
         self._checkpoints = None
         self._hub = None
         self._registry = None
+        self._workspace = None
+        self._nested_harness = None
 
     async def reload_mcp(self) -> int:
         """Diff the new config against running servers and connect/disconnect only what changed.
@@ -383,11 +361,13 @@ class AgentSession:
 
         Returns the number of MCP tools now active.
         """
+        workspace = self._workspace or Path.cwd().resolve(strict=True)
+        await self._configure_workspace(workspace)
         manager = _active(self._mcp_manager)
         registry = _active(self._registry)
 
         async with self._mcp_reload_lock:
-            new_cfg = load_mcp_config(self._settings.home, Path.cwd())
+            new_cfg = load_mcp_config(self._settings.home, workspace)
             new_enabled = {name for name, srv in new_cfg.mcpServers.items() if srv.enabled}
             currently_running = manager.running_servers
 
@@ -432,9 +412,11 @@ class AgentSession:
         *,
         selected_skills: tuple[str, ...] = (),
     ) -> RunResult:
+        resolved_workspace = (workspace or Path.cwd()).resolve(strict=True)
+        await self._configure_workspace(resolved_workspace)
         skill_content, injected_skills = self._skill_injection(selected_skills, workspace)
         return await _active(self._foreground).start_new(
-            task, workspace, skill_content=skill_content, selected_skills=injected_skills
+            task, resolved_workspace, skill_content=skill_content, selected_skills=injected_skills
         )
 
     async def continue_with(
@@ -451,6 +433,7 @@ class AgentSession:
         current selection over the persisted value, so mid-run activation and
         ``/skill off`` both take effect on the next turn.
         """
+        await self._configure_workspace(self._stored_workspace(run_id))
         run_extra: tuple[str, ...] | None = None
         injected_skills = selected_skills
         if selected_skills is not None:
@@ -459,6 +442,68 @@ class AgentSession:
         return await _active(self._foreground).continue_with(
             run_id, prompt=prompt, run_extra=run_extra, selected_skills=injected_skills
         )
+
+    async def _configure_workspace(self, workspace: Path) -> None:
+        """Bind per-project resources to the Workspace of the first foreground Run."""
+        workspace = workspace.resolve(strict=True)
+        if self._workspace is not None:
+            if self._workspace != workspace:
+                raise ValueError(
+                    "AgentSession is already bound to a different Workspace; "
+                    "create a new AgentSession for that Run"
+                )
+            return
+
+        project_cfg = load_project_config(workspace)
+        checkpoints = _active(self._checkpoints)
+        if project_cfg.checkpoint.prune_on_start and project_cfg.checkpoint.retention_days > 0:
+            cutoff = datetime.now(UTC) - timedelta(days=project_cfg.checkpoint.retention_days)
+            pruned = checkpoints.prune(cutoff, workspace)
+            if pruned:
+                logger.info(
+                    "Pruned %d stale checkpoint(s) (retention: %d days)",
+                    pruned,
+                    project_cfg.checkpoint.retention_days,
+                )
+
+        manager = _active(self._mcp_manager)
+        mcp_cfg = load_mcp_config(self._settings.home, workspace)
+        enabled_servers = {
+            name: server for name, server in mcp_cfg.mcpServers.items() if server.enabled
+        }
+        await manager.connect_many(enabled_servers)
+        _active(self._registry).replace_mcp_tools(tuple(manager.tools))
+
+        if project_cfg.summarization_enabled:
+            handler = CompactionHandler(
+                _active(self._model),
+                _active(self._counter),
+                trigger_tokens=project_cfg.summarization_trigger_tokens,
+                keep_recent_tokens=project_cfg.summarization_keep_recent_tokens,
+            )
+            handler.register(_active(self._hub))
+            await handler.__aenter__()
+            self._handlers.append(handler)
+        self._workspace = workspace
+
+    def _stored_workspace(self, run_id: str) -> Path:
+        checkpoints = _active(self._checkpoints)
+        try:
+            resolved_run_id = checkpoints.resolve_run_id(run_id)
+        except LookupError as error:
+            from milky_frog.domain import ResumeError
+
+            raise ResumeError(f"unknown Run: {run_id}") from error
+        except ValueError as error:
+            from milky_frog.domain import ResumeError
+
+            raise ResumeError(f"ambiguous Run prefix: {run_id}") from error
+        stored = checkpoints.get_run(resolved_run_id)
+        if stored is None:
+            from milky_frog.domain import ResumeError
+
+            raise ResumeError(f"unknown Run: {resolved_run_id}")
+        return stored.workspace
 
     def _skill_injection(
         self, selected_skills: tuple[str, ...], workspace: Path | None
@@ -479,11 +524,13 @@ class AgentSession:
         return _format_skill_injection(catalog, selected_skills)
 
     async def respond_approval(self, run_id: str, verdict: ApprovalVerdict) -> RunResult:
+        await self._configure_workspace(self._stored_workspace(run_id))
         return await _active(self._foreground).respond_approval(run_id, verdict)
 
     async def respond_approvals(
         self, run_id: str, verdicts: dict[str, ApprovalVerdict]
     ) -> RunResult:
+        await self._configure_workspace(self._stored_workspace(run_id))
         return await _active(self._foreground).respond_approvals(run_id, verdicts)
 
     async def compact(self, run_id: str) -> str:
