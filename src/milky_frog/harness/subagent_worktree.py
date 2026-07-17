@@ -110,13 +110,35 @@ async def finalize_worktree(
     sandbox: Sandbox,
     worktree: SubagentWorktree,
 ) -> WorktreeOutcome:
-    """Remove a clean worktree; preserve a dirty one for parent-Run review."""
+    """Remove a clean worktree; commit and preserve a dirty one for parent-Run review.
+
+    A write-capability subagent may exhaust its model-call budget after
+    writing files but before running ``git commit`` itself — leaving changes
+    on disk that ``merge_worktree``'s ``git merge --no-ff`` would silently
+    skip, since that command merges committed history on the branch, not the
+    working tree. Committing here (rather than relying on the subagent to do
+    it) guarantees any written changes are reachable from the branch tip
+    before a merge is ever attempted.
+    """
+    quoted_path = shlex.quote(str(worktree.path))
     status = await _require_success(
         sandbox,
-        f"git -C {shlex.quote(str(worktree.path))} status --porcelain",
+        f"git -C {quoted_path} status --porcelain",
         action="inspect worktree",
     )
     if status.output.strip():
+        await _require_success(
+            sandbox,
+            f"git -C {quoted_path} add -A",
+            action="stage worktree changes",
+        )
+        await _require_success(
+            sandbox,
+            f"git -C {quoted_path} -c user.name=milky-frog "
+            f"-c user.email=milky-frog@localhost "
+            f"commit -m {shlex.quote(f'subagent: {worktree.branch}')}",
+            action="commit worktree changes",
+        )
         return WorktreeOutcome(worktree, kept=True)
 
     await _require_success(

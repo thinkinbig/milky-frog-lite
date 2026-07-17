@@ -62,7 +62,38 @@ async def test_dirty_worktree_is_preserved(git_workspace: Path) -> None:
     assert worktree.path.is_dir()
     assert worktree.branch == f"subagent/{run_id}"
 
+    # A subagent that never got around to `git commit` must still land its
+    # changes on the branch — otherwise `merge_worktree`'s `git merge --no-ff`
+    # has nothing to merge and silently drops the work.
+    status = await sandbox.run_command(
+        f"git -C {worktree.path} status --porcelain", timeout_seconds=10
+    )
+    assert isinstance(status, CommandResult)
+    assert status.output.strip() == ""
+
     await _git(sandbox, f"git worktree remove --force {worktree.path}")
+
+
+@pytest.mark.asyncio
+async def test_finalize_then_merge_lands_uncommitted_changes(git_workspace: Path) -> None:
+    sandbox = LocalSandbox(git_workspace)
+    await _git(
+        sandbox,
+        "git init && git -c user.name=test -c user.email=test@example.com "
+        "commit --allow-empty -m init",
+    )
+
+    run_id = f"autocommit-{uuid4().hex}"
+    worktree = await create_worktree(sandbox, git_workspace, run_id)
+    (worktree.path / "change.txt").write_text("written by subagent", encoding="utf-8")
+
+    outcome = await finalize_worktree(sandbox, worktree)
+    assert outcome.kept is True
+
+    await merge_and_remove_worktree(sandbox, worktree.path, worktree.branch)
+
+    assert not worktree.path.exists()
+    assert (git_workspace / "change.txt").read_text(encoding="utf-8") == "written by subagent"
 
 
 @pytest.mark.asyncio
