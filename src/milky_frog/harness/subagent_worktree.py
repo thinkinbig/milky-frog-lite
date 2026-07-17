@@ -10,6 +10,12 @@ from milky_frog.core.sandbox import CommandResult, CommandStartError, CommandTim
 
 _WORKTREE_TIMEOUT_SECONDS = 30.0
 _SUBAGENT_REF_NAMESPACE = "subagent"
+# Every commit the harness makes on a subagent's behalf (the auto-commit in
+# finalize_worktree, the merge commit in merge_and_remove_worktree) uses this
+# fixed identity rather than relying on the host's global git config — a
+# clean environment (CI, a fresh container) has no user.name/user.email set,
+# and `git commit`/`git merge --no-ff` refuse to create a commit without one.
+_GIT_IDENTITY = "-c user.name=milky-frog -c user.email=milky-frog@localhost"
 
 
 class SubagentWorktreeError(RuntimeError):
@@ -120,7 +126,8 @@ async def merge_and_remove_worktree(
     """
     quoted_branch = shlex.quote(branch)
     outcome = await sandbox.run_command(
-        f"git merge --no-ff {quoted_branch}", timeout_seconds=_WORKTREE_TIMEOUT_SECONDS
+        f"git {_GIT_IDENTITY} merge --no-ff {quoted_branch}",
+        timeout_seconds=_WORKTREE_TIMEOUT_SECONDS,
     )
     match outcome:
         case CommandStartError(message=message):
@@ -174,8 +181,7 @@ async def finalize_worktree(
         )
         await _require_success(
             sandbox,
-            f"git -C {quoted_path} -c user.name=milky-frog "
-            f"-c user.email=milky-frog@localhost "
+            f"git -C {quoted_path} {_GIT_IDENTITY} "
             f"commit -m {shlex.quote(f'subagent: {worktree.branch}')}",
             action="commit worktree changes",
         )
