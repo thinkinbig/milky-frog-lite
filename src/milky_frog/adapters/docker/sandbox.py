@@ -21,6 +21,7 @@ import logging
 import os
 import uuid
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from milky_frog.adapters.docker.cli import (
@@ -42,6 +43,26 @@ _NONINTERACTIVE_ENV: dict[str, str] = {
 }
 
 WORKSPACE_LABEL = "milky-frog.workspace"
+
+
+@dataclass(frozen=True, slots=True)
+class BindMount:
+    """An extra ``-v`` mount alongside the Workspace, at matching host/container paths.
+
+    Used to give a container access to a linked git worktree's metadata: the
+    worktree's ``.git`` file points to an absolute *host* path outside the
+    Workspace (``<main-repo>/.git/worktrees/<id>``), which the Workspace bind
+    mount alone never exposes. Mounting host path X at the identical
+    container path X lets that absolute pointer keep resolving inside the
+    container without rewriting it.
+    """
+
+    host_path: str
+    read_only: bool = False
+
+    def flag(self) -> tuple[str, str]:
+        suffix = ":ro" if self.read_only else ""
+        return ("-v", f"{self.host_path}:{self.host_path}{suffix}")
 
 
 def _workspace_digest(workspace: Path) -> str:
@@ -88,11 +109,13 @@ class ContainerRegistry:
         workspace_mount: str,
         cli: DockerCli,
         mask_paths: Sequence[str] = (),
+        extra_mounts: Sequence[BindMount] = (),
     ) -> None:
         self._image = image
         self._workspace_mount = workspace_mount
         self._cli = cli
         self._mask_paths = tuple(mask_paths)
+        self._extra_mounts = tuple(extra_mounts)
         self._containers: dict[Path, str] = {}
         self._lock = asyncio.Lock()
         self._closed = False
@@ -108,6 +131,18 @@ class ContainerRegistry:
         flags: list[str] = []
         for relative in self._mask_paths:
             flags.extend(("-v", f"{self._workspace_mount}/{relative}"))
+        return flags
+
+    def _extra_mount_flags(self) -> list[str]:
+        """Extra bind mounts (e.g. linked-worktree git metadata), in given order.
+
+        Order matters: a later mount whose path nests inside an earlier one
+        overlays just that subpath, so callers list broader/read-only mounts
+        first and narrower/writable ones after.
+        """
+        flags: list[str] = []
+        for mount in self._extra_mounts:
+            flags.extend(mount.flag())
         return flags
 
     async def acquire(self, workspace: Path) -> str:
@@ -136,6 +171,7 @@ class ContainerRegistry:
                     f"{WORKSPACE_LABEL}={workspace_digest}",
                     "-v",
                     f"{workspace}:{self._workspace_mount}",
+                    *self._extra_mount_flags(),
                     *self._mask_flags(),
                     "-w",
                     self._workspace_mount,
@@ -297,6 +333,7 @@ class DockerSandboxFactory:
         cli: DockerCli | None = None,
         config: ProjectConfig | None = None,
         mask_paths: Sequence[str] = (),
+        extra_mounts: Sequence[BindMount] = (),
     ) -> None:
         self._cli = cli if cli is not None else SubprocessDockerCli()
         self._workspace_mount = workspace_mount
@@ -306,6 +343,7 @@ class DockerSandboxFactory:
             workspace_mount=workspace_mount,
             cli=self._cli,
             mask_paths=mask_paths,
+            extra_mounts=extra_mounts,
         )
 
     def __call__(self, workspace: Path) -> Sandbox:

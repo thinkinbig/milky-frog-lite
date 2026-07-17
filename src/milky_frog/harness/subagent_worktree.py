@@ -5,9 +5,11 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from milky_frog.adapters.docker import BindMount
 from milky_frog.core.sandbox import CommandResult, CommandStartError, CommandTimeout, Sandbox
 
 _WORKTREE_TIMEOUT_SECONDS = 30.0
+_SUBAGENT_REF_NAMESPACE = "subagent"
 
 
 class SubagentWorktreeError(RuntimeError):
@@ -63,6 +65,44 @@ async def create_worktree(
     if not resolved.is_dir():
         raise SubagentWorktreeError(f"git reported success but worktree is missing: {resolved}")
     return SubagentWorktree(resolved, branch)
+
+
+def git_docker_mounts(worktree: SubagentWorktree) -> list[BindMount]:
+    """Bind mounts letting git work inside a Container Sandbox for this worktree.
+
+    A linked worktree's ``.git`` is a pointer file (``gitdir: <main-repo>/.git/
+    worktrees/<id>``) into the *main* repository's admin directory — a host
+    path entirely outside the worktree's own directory tree. Bind-mounting
+    only the worktree (as ``DockerSandbox`` normally does for the Workspace)
+    leaves that pointer dangling inside the container, so every git command
+    fails with "not a git repository".
+
+    Mounts the whole main ``.git`` read-only (so git can resolve history,
+    config, and other branches' refs) and overlays only what this worktree's
+    branch actually needs to write: the shared object database, this
+    worktree's own admin subdir (its HEAD/index/reflog), and the
+    ``refs/heads/subagent/`` namespace that ``create_worktree`` scopes every
+    subagent branch under — never the parent's own branch refs.
+    """
+    gitdir_line = (worktree.path / ".git").read_text(encoding="utf-8").strip()
+    prefix = "gitdir:"
+    if not gitdir_line.startswith(prefix):
+        raise SubagentWorktreeError(f"unexpected worktree .git pointer: {gitdir_line!r}")
+    worktree_admin_dir = Path(gitdir_line[len(prefix) :].strip()).resolve(strict=True)
+    main_git_dir = worktree_admin_dir.parent.parent
+
+    subagent_refs_dir = main_git_dir / "refs" / "heads" / _SUBAGENT_REF_NAMESPACE
+    subagent_reflogs_dir = main_git_dir / "logs" / "refs" / "heads" / _SUBAGENT_REF_NAMESPACE
+    subagent_refs_dir.mkdir(parents=True, exist_ok=True)
+    subagent_reflogs_dir.mkdir(parents=True, exist_ok=True)
+
+    return [
+        BindMount(str(main_git_dir), read_only=True),
+        BindMount(str(main_git_dir / "objects")),
+        BindMount(str(worktree_admin_dir)),
+        BindMount(str(subagent_refs_dir)),
+        BindMount(str(subagent_reflogs_dir)),
+    ]
 
 
 async def merge_and_remove_worktree(

@@ -6,12 +6,14 @@ from milky_frog.adapters.docker.cli import (
     docker_is_available,
 )
 from milky_frog.adapters.docker.sandbox import (
+    BindMount,
     ContainerRegistry,
     DockerSandbox,
     DockerSandboxFactory,
 )
 
 __all__ = [
+    "BindMount",
     "ContainerRegistry",
     "DockerCli",
     "DockerCliResult",

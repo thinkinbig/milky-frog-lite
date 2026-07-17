@@ -11,6 +11,7 @@ from milky_frog.harness.subagent_worktree import (
     SubagentWorktreeError,
     create_worktree,
     finalize_worktree,
+    git_docker_mounts,
     merge_and_remove_worktree,
 )
 
@@ -160,5 +161,39 @@ async def test_merge_and_remove_worktree_aborts_and_preserves_on_conflict(
 
     assert worktree.path.is_dir()
     assert (git_workspace / "change.txt").read_text(encoding="utf-8") == "from parent"
+
+    await _git(sandbox, f"git worktree remove --force {worktree.path}")
+
+
+@pytest.mark.asyncio
+async def test_git_docker_mounts_exposes_only_what_the_branch_needs(git_workspace: Path) -> None:
+    sandbox = LocalSandbox(git_workspace)
+    await _git(
+        sandbox,
+        "git init && git -c user.name=test -c user.email=test@example.com "
+        "commit --allow-empty -m init",
+    )
+    run_id = f"mounts-{uuid4().hex}"
+    worktree = await create_worktree(sandbox, git_workspace, run_id)
+    main_git_dir = (git_workspace / ".git").resolve()
+
+    mounts = git_docker_mounts(worktree)
+
+    assert mounts[0].host_path == str(main_git_dir)
+    assert mounts[0].read_only is True
+
+    writable_paths = {m.host_path for m in mounts[1:]}
+    assert all(not m.read_only for m in mounts[1:])
+    assert str(main_git_dir / "objects") in writable_paths
+    assert str(main_git_dir / "worktrees" / run_id) in writable_paths
+    assert str(main_git_dir / "refs" / "heads" / "subagent") in writable_paths
+    assert str(main_git_dir / "logs" / "refs" / "heads" / "subagent") in writable_paths
+
+    # The writable ref/reflog namespace dirs must exist on disk before Docker
+    # tries to bind-mount them, or `docker run` fails with "no such file".
+    assert (main_git_dir / "refs" / "heads" / "subagent").is_dir()
+    assert (main_git_dir / "logs" / "refs" / "heads" / "subagent").is_dir()
+    # Never the parent's own branch namespace.
+    assert str(main_git_dir / "refs" / "heads") not in writable_paths
 
     await _git(sandbox, f"git worktree remove --force {worktree.path}")

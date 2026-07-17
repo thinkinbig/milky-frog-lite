@@ -35,7 +35,11 @@ from milky_frog.harness.harness import AgentHarness
 from milky_frog.harness.mcp import McpClientManager, load_mcp_config
 from milky_frog.harness.prompt import make_context_loader
 from milky_frog.harness.skills import SkillCatalog
-from milky_frog.harness.subagent_worktree import create_worktree, finalize_worktree
+from milky_frog.harness.subagent_worktree import (
+    create_worktree,
+    finalize_worktree,
+    git_docker_mounts,
+)
 from milky_frog.harness.tools import ToolRegistry
 from milky_frog.harness.tools.builtins import (
     SubagentOutcome,
@@ -271,7 +275,20 @@ class AgentSession:
                     workspace,
                     uuid4().hex,
                 )
-                write_sandbox_factory = make_sandbox_factory(parent_config)
+                # Not make_sandbox_factory(parent_config): a linked worktree's
+                # .git points outside the worktree directory, so the container
+                # needs extra bind mounts for git to work at all — see
+                # git_docker_mounts.
+                from milky_frog.adapters.docker import DockerSandboxFactory
+
+                assert parent_config.sandbox.image is not None
+                write_sandbox_factory = DockerSandboxFactory(
+                    image=parent_config.sandbox.image,
+                    workspace_mount=parent_config.sandbox.workspace_mount,
+                    mask_paths=parent_config.sandbox.mask_paths,
+                    config=parent_config,
+                    extra_mounts=git_docker_mounts(worktree),
+                )
                 nested_write_harness = make_agent_harness(
                     model=_active(self._model),
                     checkpoints=store,
