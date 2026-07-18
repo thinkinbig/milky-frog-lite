@@ -242,6 +242,7 @@ class AgentSession:
                 token_counter=counter,
                 max_retries=self._settings.max_retries,
                 retry_base_delay=self._settings.retry_base_delay,
+                home=self._settings.home,
             )
             runtime = make_harness_runtime(
                 assembly,

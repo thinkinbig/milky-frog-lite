@@ -94,7 +94,9 @@ class SubagentRuntime:
         try:
             sandbox_factory = self._make_worktree_sandbox(config, worktree)
             harness = self._assembly.make_harness(
-                ToolRegistry(write_subagent_tools(jina_api_key=self._jina_api_key)),
+                ToolRegistry(
+                    write_subagent_tools(jina_api_key=self._jina_api_key, home=self._assembly.home)
+                ),
                 sandbox_factory=sandbox_factory,
                 auto_approve=True,
             )

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from milky_frog.adapters.local import LocalSandbox
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import (
     MessageRole,
@@ -21,7 +22,8 @@ from milky_frog.events.events import RunBeforeResume
 from milky_frog.harness.context import ContextManager
 from milky_frog.harness.prompt import make_context_loader
 from milky_frog.harness.skills import SkillCatalog
-from milky_frog.harness.tools import ToolRegistry
+from milky_frog.harness.tools import ToolContext, ToolRegistry
+from milky_frog.harness.tools.builtins import LoadSkillTool
 from tests.stubs import make_harness
 
 
@@ -32,6 +34,53 @@ def _write_skill(directory: Path, name: str, description: str, instructions: str
         f"---\nname: {name}\ndescription: {description}\n---\n{instructions}\n",
         encoding="utf-8",
     )
+
+
+async def test_load_skill_reads_a_bundled_skill_outside_the_workspace(tmp_path: Path) -> None:
+    """Bundled skills live in the milky-frog source tree, not the Workspace.
+
+    The advertised ``<location>`` was a host-absolute path outside the Sandbox,
+    so ``read_file`` on it always failed (#108, cause 2). ``load_skill`` goes
+    through ``SkillIndex.load`` and never touches the Sandbox path resolver.
+    """
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+
+    result = await LoadSkillTool(home).execute(
+        ToolContext("run-1", workspace, sandbox=LocalSandbox(workspace)),
+        LoadSkillTool.input_model(name="tdd"),
+    )
+
+    assert not result.is_error
+    assert "red" in result.content.lower()
+
+
+async def test_load_skill_reports_available_names_for_an_unknown_skill(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    result = await LoadSkillTool(tmp_path / "home").execute(
+        ToolContext("run-1", workspace, sandbox=LocalSandbox(workspace)),
+        LoadSkillTool.input_model(name="nope"),
+    )
+
+    assert result.is_error
+    assert "tdd" in result.content
+
+
+async def test_load_skill_prefers_a_project_skill_over_the_bundled_one(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    _write_skill(workspace / ".milky-frog" / "skills", "tdd", "project tdd", "project instructions")
+
+    result = await LoadSkillTool(tmp_path / "home").execute(
+        ToolContext("run-1", workspace, sandbox=LocalSandbox(workspace)),
+        LoadSkillTool.input_model(name="tdd"),
+    )
+
+    assert not result.is_error
+    assert "project instructions" in result.content
 
 
 def test_project_skill_overrides_user_skill(tmp_path: Path) -> None:
