@@ -1,20 +1,17 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import TracebackType
-from typing import Literal
-from uuid import uuid4
 
-from milky_frog.adapters.local import LocalSandbox
 from milky_frog.adapters.models import OpenAIModel
 from milky_frog.core.runtime.assemble import (
-    make_agent_harness,
+    HarnessAssembly,
+    make_harness_runtime,
     make_sandbox_factory,
     make_session_handlers,
 )
@@ -26,8 +23,6 @@ from milky_frog.core.shutdown import ShutdownManager
 from milky_frog.domain import (
     DEFAULT_MAX_MODEL_CALLS,
     ApprovalVerdict,
-    RunCancellation,
-    RunRequest,
     RunResult,
 )
 from milky_frog.events import EventHub, Handler
@@ -36,21 +31,7 @@ from milky_frog.harness.harness import AgentHarness
 from milky_frog.harness.mcp import McpClientManager, load_mcp_config
 from milky_frog.harness.prompt import make_context_loader
 from milky_frog.harness.skills import SkillCatalog
-from milky_frog.harness.subagent_worktree import (
-    SubagentWorktreeError,
-    create_worktree,
-    finalize_worktree,
-    git_docker_mounts,
-)
 from milky_frog.harness.tools import ToolRegistry
-from milky_frog.harness.tools.builtins import (
-    SubagentOutcome,
-    SubagentRejected,
-    SubagentTool,
-    default_tools,
-    read_only_tools,
-    write_subagent_tools,
-)
 from milky_frog.project import load_project_config, project_root
 from milky_frog.settings import Settings
 from milky_frog.tokens import TokenCounter, make_token_counter
@@ -124,7 +105,6 @@ class AgentSession:
         self._mcp_manager: McpClientManager | None = None
         self._registry: ToolRegistry | None = None
         self._workspace: Path | None = None
-        self._nested_harness: AgentHarness | None = None
         self._mcp_reload_lock: asyncio.Lock = asyncio.Lock()
 
     @property
@@ -245,121 +225,6 @@ class AgentSession:
         try:
             sandbox_factory = self._config.sandbox_factory or _WorkspaceSandboxFactory()
 
-            async def _run_subagent(
-                prompt: str,
-                capability: Literal["read_only", "write"],
-                max_model_calls: int | None,
-                cancellation: RunCancellation | None,
-                workspace: Path,
-                parent_run_id: str,
-            ) -> SubagentOutcome:
-                calls = DEFAULT_MAX_MODEL_CALLS if max_model_calls is None else max_model_calls
-                if capability == "read_only":
-                    result = await nested_harness.run(
-                        RunRequest(
-                            prompt=prompt,
-                            workspace=workspace,
-                            max_model_calls=calls,
-                            cancellation=cancellation,
-                            run_kind="subagent",
-                            parent_run_id=parent_run_id,
-                        )
-                    )
-                    return SubagentOutcome(result)
-
-                parent_config = load_project_config(workspace)
-                if parent_config.sandbox.kind != "docker":
-                    raise SubagentRejected(
-                        'subagent write capability requires [sandbox].kind = "docker"'
-                    )
-                management_sandbox = LocalSandbox(workspace, parent_config)
-                worktree = await create_worktree(
-                    management_sandbox,
-                    workspace,
-                    uuid4().hex,
-                )
-                # Not make_sandbox_factory(parent_config): a linked worktree's
-                # .git points outside the worktree directory, so the container
-                # needs extra bind mounts for git to work at all — see
-                # git_docker_mounts.
-                from milky_frog.adapters.docker import DockerSandboxFactory
-
-                image = parent_config.sandbox.image
-                if image is None:
-                    # Same class of misconfiguration as the kind check above, so
-                    # it gets the same answer the model can act on. An assert
-                    # would surface as a bare AssertionError, and `python -O`
-                    # would strip it and let image=None reach `docker run`.
-                    raise SubagentRejected(
-                        "subagent write capability requires [sandbox].image when "
-                        '[sandbox].kind = "docker"'
-                    )
-                write_sandbox_factory = DockerSandboxFactory(
-                    image=image,
-                    workspace_mount=parent_config.sandbox.workspace_mount,
-                    mask_paths=parent_config.sandbox.mask_paths,
-                    config=parent_config,
-                    extra_mounts=git_docker_mounts(worktree),
-                )
-                nested_write_harness = make_agent_harness(
-                    model=_active(self._model),
-                    checkpoints=store,
-                    hub=_active(self._hub),
-                    tools=ToolRegistry(
-                        write_subagent_tools(jina_api_key=self._settings.jina_api_key)
-                    ),
-                    sandbox_factory=write_sandbox_factory,
-                    context_loader=make_context_loader(self._settings.home),
-                    token_counter=counter,
-                    max_retries=self._settings.max_retries,
-                    retry_base_delay=self._settings.retry_base_delay,
-                )
-                nested_write_harness.policy.auto_approve()
-                try:
-                    try:
-                        result = await nested_write_harness.run(
-                            RunRequest(
-                                prompt=prompt,
-                                workspace=worktree.path,
-                                max_model_calls=calls,
-                                cancellation=cancellation,
-                                run_kind="subagent",
-                                parent_run_id=parent_run_id,
-                            )
-                        )
-                    finally:
-                        await write_sandbox_factory.aclose()
-                except BaseException:
-                    # The nested Run raised (model error, cancellation, container
-                    # failure) and nothing downstream holds a reference to the
-                    # worktree any more, so `git worktree list` would accumulate a
-                    # stale entry per failure. finalize_worktree rather than an
-                    # unconditional delete: a Run that failed *after* writing
-                    # something keeps that work committed on its branch — this
-                    # module never destroys unreviewed work — while the common case
-                    # of failing before any write leaves nothing and is removed.
-                    with contextlib.suppress(SubagentWorktreeError):
-                        await finalize_worktree(management_sandbox, worktree)
-                    raise
-                worktree_outcome = await finalize_worktree(management_sandbox, worktree)
-                return SubagentOutcome(
-                    result,
-                    worktree=worktree.path,
-                    branch=worktree.branch,
-                    worktree_kept=worktree_outcome.kept,
-                )
-
-            # SubagentTool must be part of the constructor tuple (not added via
-            # a later .register() call) so ToolRegistry treats it as a builtin —
-            # otherwise a later reload_mcp()/replace_mcp_tools() would drop it.
-            registry = ToolRegistry(
-                (
-                    *default_tools(jina_api_key=self._settings.jina_api_key),
-                    SubagentTool(_run_subagent),
-                )
-            )
-            self._registry = registry
-
             self._handlers = make_session_handlers(
                 self._settings,
                 store,
@@ -368,36 +233,22 @@ class AgentSession:
             for bundle in self._handlers:
                 bundle.register(self._hub)
 
-            self._harness = make_agent_harness(
+            assembly = HarnessAssembly(
                 model=self._model,
                 checkpoints=store,
                 hub=self._hub,
-                tools=registry,
                 sandbox_factory=sandbox_factory,
                 context_loader=make_context_loader(self._settings.home),
                 token_counter=counter,
                 max_retries=self._settings.max_retries,
                 retry_base_delay=self._settings.retry_base_delay,
             )
-
-            # Shares the session hub: handlers key their work by run_id, while
-            # presentation handlers filter nested Runs themselves.
-            nested_registry = ToolRegistry(
-                read_only_tools(jina_api_key=self._settings.jina_api_key)
+            runtime = make_harness_runtime(
+                assembly,
+                jina_api_key=self._settings.jina_api_key,
             )
-            nested_harness = make_agent_harness(
-                model=self._model,
-                checkpoints=store,
-                hub=self._hub,
-                tools=nested_registry,
-                sandbox_factory=sandbox_factory,
-                context_loader=make_context_loader(self._settings.home),
-                token_counter=counter,
-                max_retries=self._settings.max_retries,
-                retry_base_delay=self._settings.retry_base_delay,
-            )
-            nested_harness.policy.auto_approve()
-            self._nested_harness = nested_harness
+            self._harness = runtime.foreground
+            self._registry = runtime.registry
 
             self._foreground = ForegroundRun(
                 self._harness,
@@ -449,7 +300,6 @@ class AgentSession:
         self._hub = None
         self._registry = None
         self._workspace = None
-        self._nested_harness = None
 
     async def reload_mcp(self) -> int:
         """Diff the new config against running servers and connect/disconnect only what changed.

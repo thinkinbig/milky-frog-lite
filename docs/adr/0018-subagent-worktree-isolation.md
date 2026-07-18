@@ -322,14 +322,52 @@ Subagent finished (run_id=<id>, worktree=<path>, branch=subagent/<id>)
 一次 `subagent`（无论是最初的委派还是这次的 integrator 建议）时看不到具体在
 委派什么。加了 `prompt` 进这个键列表。
 
+### 更新记录（2026-07-18）：Worktree 提供子 Workspace，Sandbox 与其组合
+
+最初实现把 read-only Harness、write Harness、Worktree、Container Sandbox 和 git
+mount 全部内联在 `AgentSession` 的资源启动方法中。功能正确，但让 composition root
+知道了每一种 nested Run 的实现细节，并重复传递 model、Checkpoint、EventHub、
+context、token counter 和 retry 配置。新增 Run 变体时，这些装配参数和生命周期很
+容易分叉。
+
+补充并澄清以下关系：
+
+```text
+parent Run / parent Workspace
+  → provision child Workspace (git worktree)
+  → compose a Sandbox for that child Workspace
+  → assemble and run the nested Harness
+  → close Sandbox resources
+  → finalize or preserve the worktree
+```
+
+- 父子关系属于 **Run / Workspace**。write nested Run 的 Workspace 由 git worktree
+  提供；read-only nested Run 则复用父 Workspace。
+- Worktree 不是 Sandbox 的上级、下级或另一种 Sandbox。它是提供子 Workspace 的
+  具体机制；Sandbox 是绑定到该 Workspace 的执行策略，两者在 nested Run 的装配点
+  组合。
+- `HarnessAssembly` 冻结一个 `AgentSession` 内所有 Harness 共享的装配原料；不同
+  Run 变体只选择 Tool registry、approval 模式和必要时的 Sandbox factory。
+- `HarnessRuntime` 是 `AgentSession` 持有的 foreground Harness 与可热更新 Tool
+  registry；它不暴露仅供测试使用的 nested runner。
+- `SubagentRuntime` 实现 `SubagentRunner` interface，完整拥有 read-only/write
+  nested Run 的配置校验、Worktree 创建、Container Sandbox + git mount、临时
+  Harness、Sandbox 关闭和 Worktree 收尾。`AgentSession` 不再知道这些细节。
+- write nested Run 被取消或抛出异常时，仍先关闭其 Container Sandbox；干净
+  Worktree 被移除，有未审查改动的 Worktree 被提交并保留，原始异常不被清理失败
+  覆盖。
+
+这个调整不改变本 ADR 已有的用户行为：write 仍强制 Container Sandbox，nested
+Run 仍不能递归，Checkpoint/生命周期 signal 仍共享，产生改动后仍确定性触发
+`merge_worktree` approval follow-up。
+
 ## 参见
 
 - `core/sandbox.py`、`adapters/local/sandbox.py`、`adapters/docker/sandbox.py`
   —— 本设计原样复用的 Sandbox seam。
 - `harness/harness.py` —— `AgentHarness.run`，嵌套 Run 复用的形状。
-- `app/session.py` —— 当前 `AgentSession.__aenter__` 装配 `make_agent_harness`
-  和 `default_tools()` 的地方；也是 `SubagentRunner` 闭包和第二个 `ToolRegistry`
-  应该被构造的地方。
+- `core/runtime/assemble.py`、`core/runtime/subagent.py` —— 共享 Harness 装配与
+  nested Run composition；`AgentSession` 只持有装配结果和 session 资源生命周期。
 - `events/loop.py`（`AgentLoop._execute_decided_batch`）、`harness/state.py`
   （`append_synthetic_tool_call`）、`harness/tools/builtins/merge_worktree.py`
   —— 上面"更新记录"里合并确认机制的实现。

@@ -347,6 +347,42 @@ async def test_shutdown_cancels_connect_and_closes_context_from_owner_task(
 
 
 @pytest.mark.asyncio
+async def test_repeated_cancellation_waits_for_mcp_owner_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _BlockingExitContext()
+
+    async def fake_connect(
+        name: str,
+        cfg: McpServerConfig,
+        stack: contextlib.AsyncExitStack,
+    ) -> list[object]:
+        del name, cfg
+        await stack.enter_async_context(context)
+        return []
+
+    manager = McpClientManager()
+    await manager.__aenter__()
+    monkeypatch.setattr(manager, "_connect", fake_connect)
+    await manager.connect_server("server", McpServerConfig(command="fake"))
+
+    closing = asyncio.create_task(manager.__aexit__(None, None, None))
+    await context.exit_started.wait()
+    closing.cancel()
+    await asyncio.sleep(0)
+    assert closing.done() is False
+    closing.cancel()
+    await asyncio.sleep(0)
+    assert closing.done() is False
+    context.release_exit.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await closing
+    assert context.entered_by is context.exited_by
+    assert manager.running_servers == frozenset()
+
+
+@pytest.mark.asyncio
 async def test_cancelling_connect_cleans_up_its_owner_task(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

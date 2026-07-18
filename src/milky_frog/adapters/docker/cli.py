@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from milky_frog.adapters.process import make_command_result
+from milky_frog.core.cleanup import complete_cleanup
 from milky_frog.core.sandbox import CommandOutcome, CommandStartError, CommandTimeout
 
 DOCKER_BINARY = "docker"
@@ -67,7 +68,7 @@ class SubprocessDockerCli:
             with contextlib.suppress(ProcessLookupError):
                 process.kill()
             with contextlib.suppress(BaseException):
-                await communicate
+                await complete_cleanup(communicate, propagate_cancellation=False)
             raise
 
         return DockerCliResult(
@@ -95,13 +96,13 @@ class SubprocessDockerCli:
             # process may survive until the container itself is removed.
             with contextlib.suppress(ProcessLookupError):
                 process.kill()
-            await communicate
+            await complete_cleanup(communicate, propagate_cancellation=True)
             return CommandTimeout(timeout_seconds)
         except BaseException:
             with contextlib.suppress(ProcessLookupError):
                 process.kill()
             with contextlib.suppress(BaseException):
-                await communicate
+                await complete_cleanup(communicate, propagate_cancellation=False)
             raise
 
         return make_command_result(

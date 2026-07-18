@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from milky_frog.core.cleanup import complete_cleanup
 from milky_frog.domain import ToolResult
 from milky_frog.harness.mcp.config import McpServerConfig
 from milky_frog.harness.tools.base import ToolContext
@@ -161,7 +162,10 @@ class McpClientManager:
             try:
                 return await asyncio.shield(owner.ready)
             except asyncio.CancelledError:
-                await self._stop_server(name)
+                await complete_cleanup(
+                    self._stop_server(name),
+                    propagate_cancellation=False,
+                )
                 raise
 
     async def connect_many(self, servers: dict[str, McpServerConfig]) -> None:
@@ -313,6 +317,9 @@ class McpClientManager:
         return tools
 
     async def __aexit__(self, *args: Any) -> None:
+        await complete_cleanup(self._close_all(), propagate_cancellation=True)
+
+    async def _close_all(self) -> None:
         async with self._lifecycle_lock:
             self._closed = True
             await asyncio.gather(*(self._stop_server(name) for name in tuple(self._owners)))

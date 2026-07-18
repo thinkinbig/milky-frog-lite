@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,7 @@ from stubs import (
 )
 
 from milky_frog.adapters.docker import BindMount, DockerSandboxFactory
-from milky_frog.adapters.docker.cli import DockerUnavailable
+from milky_frog.adapters.docker.cli import DockerCliResult, DockerUnavailable
 from milky_frog.adapters.docker.sandbox import WORKSPACE_LABEL
 from milky_frog.core.sandbox import (
     CommandPresentation,
@@ -300,6 +301,46 @@ async def test_aclose_keeps_removing_after_a_removal_fails(tmp_path: Path) -> No
     await factory.aclose()
 
     assert sorted(cli.removed_ids()) == ["c-1", "c-2"]
+
+
+async def test_repeated_cancellation_waits_for_every_container_removal(tmp_path: Path) -> None:
+    class SlowRemoveDockerCli(StubDockerCli):
+        def __init__(self) -> None:
+            super().__init__(container_id="c", unique_ids=True)
+            self.removing = asyncio.Event()
+            self.release = asyncio.Event()
+            self.finished: list[str] = []
+
+        async def capture(self, argv: Sequence[str]) -> DockerCliResult:
+            result = await super().capture(argv)
+            if argv[:3] == ["docker", "rm", "-f"]:
+                self.removing.set()
+                await self.release.wait()
+                self.finished.append(argv[-1])
+            return result
+
+    cli = SlowRemoveDockerCli()
+    factory = _factory(cli)
+    first = tmp_path / "one"
+    second = tmp_path / "two"
+    first.mkdir()
+    second.mkdir()
+    await factory(first).run_command("echo hi", timeout_seconds=5)
+    await factory(second).run_command("echo hi", timeout_seconds=5)
+
+    closing = asyncio.create_task(factory.aclose())
+    await cli.removing.wait()
+    closing.cancel()
+    await asyncio.sleep(0)
+    assert closing.done() is False
+    closing.cancel()
+    await asyncio.sleep(0)
+    assert closing.done() is False
+    cli.release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await closing
+    assert sorted(cli.finished) == ["c-1", "c-2"]
 
 
 async def test_cancelled_docker_run_removes_the_container_by_name(tmp_path: Path) -> None:

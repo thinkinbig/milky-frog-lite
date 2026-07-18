@@ -1,13 +1,21 @@
 from __future__ import annotations
 
+import logging
 import stat
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
 
+import milky_frog.harness.subagent_worktree as subagent_worktree_module
 from milky_frog.adapters.local import LocalSandbox
-from milky_frog.core.sandbox import CommandResult
+from milky_frog.core.sandbox import (
+    CommandOutcome,
+    CommandPresentation,
+    CommandResult,
+    CommandTimeout,
+    Sandbox,
+)
 from milky_frog.harness.subagent_worktree import (
     MergeConflictError,
     SubagentWorktreeError,
@@ -283,6 +291,172 @@ async def test_worktree_root_is_private_and_cleaned_up(git_workspace: Path) -> N
 
     assert not worktree.path.exists()
     assert not root.exists()
+
+
+@pytest.mark.asyncio
+async def test_create_worktree_removes_temp_root_when_add_fails_before_creation(
+    git_workspace: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sandbox = LocalSandbox(git_workspace)
+    await _git(
+        sandbox,
+        "git init && git -c user.name=test -c user.email=test@example.com "
+        "commit --allow-empty -m init",
+    )
+    root = tmp_path / "failed-provision"
+
+    def make_temp_root(*, prefix: str) -> str:
+        assert prefix == "milky-frog-worktree-"
+        root.mkdir(mode=0o700)
+        return str(root)
+
+    async def fail_add(
+        sandbox: Sandbox,
+        command: str,
+        *,
+        action: str,
+    ) -> CommandResult:
+        del sandbox, command, action
+        raise SubagentWorktreeError("injected add failure")
+
+    monkeypatch.setattr(subagent_worktree_module.tempfile, "mkdtemp", make_temp_root)
+    monkeypatch.setattr(subagent_worktree_module, "_require_success", fail_add)
+
+    with pytest.raises(SubagentWorktreeError, match="injected add failure"):
+        await create_worktree(sandbox, git_workspace, "before-add")
+
+    assert not root.exists()
+    listed = await sandbox.run_command("git worktree list --porcelain", timeout_seconds=10)
+    assert isinstance(listed, CommandResult)
+    assert listed.output.count("worktree ") == 1
+
+
+@pytest.mark.asyncio
+async def test_create_worktree_rolls_back_after_git_add_succeeds(
+    git_workspace: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sandbox = LocalSandbox(git_workspace)
+    await _git(
+        sandbox,
+        "git init && git -c user.name=test -c user.email=test@example.com "
+        "commit --allow-empty -m init",
+    )
+    root = tmp_path / "partially-provisioned"
+
+    def make_temp_root(*, prefix: str) -> str:
+        assert prefix == "milky-frog-worktree-"
+        root.mkdir(mode=0o700)
+        return str(root)
+
+    def fail_after_add(worktree_path: Path) -> tuple[Path, Path]:
+        del worktree_path
+        raise SubagentWorktreeError("injected post-add failure")
+
+    monkeypatch.setattr(subagent_worktree_module.tempfile, "mkdtemp", make_temp_root)
+    monkeypatch.setattr(subagent_worktree_module, "_worktree_git_dirs", fail_after_add)
+
+    with pytest.raises(SubagentWorktreeError, match="injected post-add failure"):
+        await create_worktree(sandbox, git_workspace, "after-add")
+
+    assert not root.exists()
+    listed = await sandbox.run_command("git worktree list --porcelain", timeout_seconds=10)
+    assert isinstance(listed, CommandResult)
+    assert listed.output.count("worktree ") == 1
+    branch = await sandbox.run_command(
+        "git show-ref --verify --quiet refs/heads/subagent/after-add",
+        timeout_seconds=10,
+    )
+    assert isinstance(branch, CommandResult)
+    assert branch.exit_code == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure_outcome", "expected_detail"),
+    [
+        (CommandResult(1, "injected rollback failure"), "injected rollback failure"),
+        (CommandTimeout(2.0), "timed out after 2s"),
+    ],
+    ids=("nonzero", "timeout"),
+)
+async def test_create_worktree_preserves_root_when_rollback_command_fails(
+    git_workspace: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    failure_outcome: CommandOutcome,
+    expected_detail: str,
+) -> None:
+    sandbox = LocalSandbox(git_workspace)
+    await _git(
+        sandbox,
+        "git init && git -c user.name=test -c user.email=test@example.com "
+        "commit --allow-empty -m init",
+    )
+    root = tmp_path / "failed-rollback"
+    run_id = "rollback-failure"
+    worktree_path = root / run_id
+    real_run_command = LocalSandbox.run_command
+
+    def make_temp_root(*, prefix: str) -> str:
+        assert prefix == "milky-frog-worktree-"
+        root.mkdir(mode=0o700)
+        return str(root)
+
+    def fail_after_add(path: Path) -> tuple[Path, Path]:
+        del path
+        raise SubagentWorktreeError("injected post-add failure")
+
+    async def fail_worktree_removal(
+        target: LocalSandbox,
+        command: str,
+        *,
+        timeout_seconds: float,
+        presentation: CommandPresentation = CommandPresentation.PLAIN,
+    ) -> CommandOutcome:
+        if target is sandbox and command.startswith("git worktree remove --force"):
+            return failure_outcome
+        return await real_run_command(
+            target,
+            command,
+            timeout_seconds=timeout_seconds,
+            presentation=presentation,
+        )
+
+    monkeypatch.setattr(subagent_worktree_module.tempfile, "mkdtemp", make_temp_root)
+    monkeypatch.setattr(subagent_worktree_module, "_worktree_git_dirs", fail_after_add)
+    monkeypatch.setattr(LocalSandbox, "run_command", fail_worktree_removal)
+
+    with (
+        caplog.at_level(logging.ERROR),
+        pytest.raises(SubagentWorktreeError, match="injected post-add failure"),
+    ):
+        await create_worktree(sandbox, git_workspace, run_id)
+
+    assert root.is_dir()
+    assert worktree_path.is_dir()
+    assert expected_detail in caplog.text
+    assert f"subagent/{run_id}" in caplog.text
+
+    removed = await real_run_command(
+        sandbox,
+        f"git worktree remove --force {worktree_path}",
+        timeout_seconds=10,
+    )
+    assert isinstance(removed, CommandResult)
+    assert removed.exit_code == 0, removed.output
+    deleted = await real_run_command(
+        sandbox,
+        f"git branch -D subagent/{run_id}",
+        timeout_seconds=10,
+    )
+    assert isinstance(deleted, CommandResult)
+    assert deleted.exit_code == 0, deleted.output
+    root.rmdir()
 
 
 def test_git_docker_mounts_does_not_mutate_the_repository(git_workspace: Path) -> None:
