@@ -17,7 +17,7 @@ whose shape it owns itself (not a cross-stage contract).
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from milky_frog.domain import RunStatus
@@ -55,6 +55,22 @@ class ReadRef:
     is_error: bool
 
 
+@dataclass(frozen=True, slots=True)
+class FileEvent:
+    """One file-touching Tool call, in the order the Run made it.
+
+    ``reads`` and ``edits`` below are flat per-kind projections and cannot say
+    whether a read came *before* or *after* an edit of the same path. That
+    ordering is the whole question for the edit->re-read pathology, so the
+    ordered sequence is recorded as its own field and the projections are kept
+    for the metrics that genuinely don't need order (footprint, failed reads).
+    """
+
+    kind: str  # read | edit
+    path: str  # workspace-relative
+    is_error: bool
+
+
 @dataclass
 class RunRecord:
     run_index: int
@@ -65,6 +81,8 @@ class RunRecord:
     edits: list[str]
     tool_calls: int
     final_message: str
+    events: list[FileEvent] = field(default_factory=list)
+    """Ordered file-touch sequence; empty for artifacts recorded before this existed."""
 
 
 @dataclass
@@ -107,6 +125,10 @@ def load_runs(path: Path) -> RunsArtifact:
                     edits=r["edits"],
                     tool_calls=r["tool_calls"],
                     final_message=r["final_message"],
+                    # Absent in artifacts recorded before the sequence existed;
+                    # the scorer reports re-read attribution as unavailable
+                    # rather than zero when it is missing.
+                    events=[FileEvent(**e) for e in r.get("events", [])],
                 )
                 for r in t["runs"]
             ],

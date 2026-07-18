@@ -36,6 +36,7 @@ from pathlib import Path
 from evals._settings import with_pinned_home, without_observability
 from evals.read_collector import ReadCollector
 from evals.read_noise.schema import (
+    FileEvent,
     ReadNoiseTask,
     ReadRef,
     RunRecord,
@@ -112,20 +113,22 @@ async def _run_once(
             result = await session.start_new(task.problem_statement, workspace)
 
         run_id = result.run_id
-        read_refs = [
-            ReadRef(normalize_read_path(r.path, workspace), r.is_error)
-            for r in reads.reads.get(run_id, [])
+        events = [
+            FileEvent(t.kind, normalize_read_path(t.path, workspace), t.is_error)
+            for t in reads.touches.get(run_id, [])
         ]
-        edits = [normalize_read_path(p, workspace) for p in reads.edits.get(run_id, [])]
         return RunRecord(
             run_index=run_index,
             status=result.status.value,
             termination=termination_kind(result.status),
             model_calls=result.model_calls,
-            reads=read_refs,
-            edits=edits,
+            # Per-kind projections of ``events``, kept for the order-free
+            # metrics (footprint, failed reads, the gold-edit gate).
+            reads=[ReadRef(e.path, e.is_error) for e in events if e.kind == "read"],
+            edits=[e.path for e in events if e.kind == "edit"],
             tool_calls=len(tools.calls.get(run_id, [])),
             final_message=result.final_message,
+            events=events,
         )
     finally:
         os.chdir(origin)  # restore before rmtree — can't remove the cwd
