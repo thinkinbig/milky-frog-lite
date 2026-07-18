@@ -46,10 +46,20 @@ class DelayedTool:
     description = "Sleeps then echoes label"
     input_model: type[BaseModel] = DelayedToolInput
 
+    def __init__(self) -> None:
+        self._in_flight = 0
+        self.peak_in_flight = 0
+        """Most executions alive at once — the direct observation of concurrency."""
+
     async def execute(self, context: ToolContext, input: BaseModel) -> ToolResult:
         del context
         parsed = DelayedToolInput.model_validate(input)
-        await asyncio.sleep(parsed.delay)
+        self._in_flight += 1
+        self.peak_in_flight = max(self.peak_in_flight, self._in_flight)
+        try:
+            await asyncio.sleep(parsed.delay)
+        finally:
+            self._in_flight -= 1
         return ToolResult(parsed.label)
 
 
@@ -104,20 +114,23 @@ async def test_respond_approvals_runs_approved_subset_concurrently(tmp_path: Pat
     )
     _seed_pending(store, run_id, tmp_path, calls)
 
+    tool = DelayedTool()
     harness = make_harness(
         model=_CompletesNextTurnModel(),
-        tools=ToolRegistry((DelayedTool(),)),
+        tools=ToolRegistry((tool,)),
         checkpoints=store,
         hub=EventHub(),
     )
     verdicts = {call.id: ApprovalVerdict(ApprovalDecision.APPROVE) for call in calls}
 
-    start = asyncio.get_event_loop().time()
     result = await harness.respond_approvals(run_id, max_model_calls=2, verdicts=verdicts)
-    elapsed = asyncio.get_event_loop().time() - start
 
     assert result.status is RunStatus.COMPLETED
-    assert elapsed < 0.35  # sequential would be >= 0.6s
+    # Observe the overlap itself rather than inferring it from wall-clock time:
+    # a total-elapsed threshold also measures how loaded the machine is, and
+    # flaked on CI at 0.44s for three 0.2s sleeps — concurrent (sequential would
+    # be >= 0.6s), just not within the margin the threshold allowed.
+    assert tool.peak_in_flight == len(calls)
 
 
 @pytest.mark.asyncio
