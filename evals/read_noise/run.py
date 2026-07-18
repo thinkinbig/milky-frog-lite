@@ -211,7 +211,21 @@ def main() -> None:
         tasks=results,
     )
     dump_runs(artifact, args.out)
-    print(f"\nwrote {args.out.relative_to(REPO_ROOT)}")
+    print(f"\nwrote {_display_path(args.out)}")
+
+
+def _display_path(path: Path) -> str:
+    """Shorten to a repo-relative path when possible.
+
+    ``relative_to`` raises for any path outside the repo *and* for relative
+    paths, so an ``--out`` the caller passed as anything but an absolute path
+    inside the repo used to crash the process after a completed sweep — losing
+    the exit code of an hour-long run over a cosmetic line.
+    """
+    try:
+        return path.resolve().relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return str(path)
 
 
 if __name__ == "__main__":
