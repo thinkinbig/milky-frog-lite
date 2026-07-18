@@ -14,6 +14,7 @@ from milky_frog.harness.tools.builtins import (
     ReadFileTool,
     WriteFileTool,
     default_tools,
+    write_subagent_tools,
 )
 from milky_frog.project import ProjectConfig
 
@@ -46,7 +47,16 @@ def test_tool_context_make_output_path_without_prefix(tmp_path: Path) -> None:
 def test_default_tools_exposes_all_builtin_tools() -> None:
     names = {tool.name for tool in default_tools()}
 
-    assert names == {"read_file", "write_file", "edit_file", "list_dir", "grep", "bash", "fetch"}
+    assert names == {
+        "read_file",
+        "write_file",
+        "edit_file",
+        "list_dir",
+        "grep",
+        "bash",
+        "fetch",
+        "merge_worktree",
+    }
 
 
 def test_default_tools_omits_web_search_without_jina_key() -> None:
@@ -680,3 +690,15 @@ async def test_edit_write_error_returns_error(tmp_path: Path, monkeypatch) -> No
 
     assert result.is_error
     assert "OSError" in result.content
+
+
+def test_write_subagent_tools_excludes_merge_worktree() -> None:
+    """A write subagent's harness runs with auto_approve, so merge_worktree must
+    not be in its registry — otherwise the requires_approval that makes merging a
+    human decision is bypassed and it could merge any branch it names."""
+    names = {tool.name for tool in write_subagent_tools()}
+
+    assert "merge_worktree" not in names
+    assert "merge_worktree" in {tool.name for tool in default_tools()}
+    # Everything else the write capability advertises is still there.
+    assert {"write_file", "edit_file", "bash", "read_file"} <= names

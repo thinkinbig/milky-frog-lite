@@ -339,3 +339,76 @@ def test_always_allow_tool_approves_matching_calls_then_prompts_next_tool() -> N
     prompt = host._conversation_widget.mounted_widgets[-1]
     assert prompt.position == 3
     assert prompt.tool_name == "fetch"
+
+
+def test_always_allow_tool_does_not_reprompt_a_decided_call() -> None:
+    """A pre-approved call further down the batch is never asked about again.
+
+    With the tools interleaved (bash, fetch, bash), "always allow bash" decides
+    call-1 and call-3 but leaves call-2 in the middle. Answering call-2 must
+    dispatch the batch, not walk the cursor back onto the already-approved
+    call-3 — where the next answer would overwrite the always-allow.
+    """
+    vm, host = _vm()
+    vm.begin(
+        ApprovalRequired(
+            run_id="run-1",
+            approvals=(
+                PendingApproval("call-1", "bash", "first?"),
+                PendingApproval("call-2", "fetch", "second?"),
+                PendingApproval("call-3", "bash", "third?"),
+            ),
+        )
+    )
+
+    vm.handle_option("allow_tool")
+    assert host._conversation_widget.mounted_widgets[-1].tool_name == "fetch"
+
+    vm.handle_option("deny")
+
+    assert host.started_approvals == [
+        (
+            "run-1",
+            {
+                "call-1": ApprovalVerdict(ApprovalDecision.APPROVE),
+                "call-2": ApprovalVerdict(ApprovalDecision.DENY),
+                "call-3": ApprovalVerdict(ApprovalDecision.APPROVE),
+            },
+        )
+    ]
+    assert vm.is_pending is False
+
+
+def test_always_allow_all_dispatches_the_whole_batch() -> None:
+    vm, host = _vm()
+    vm.begin(_batch_event())
+
+    vm.handle_option("allow_all")
+
+    assert host.session.policy.auto_approve_calls == 1
+    assert host.started_approvals == [
+        (
+            "run-1",
+            {
+                "call-1": ApprovalVerdict(ApprovalDecision.APPROVE),
+                "call-2": ApprovalVerdict(ApprovalDecision.APPROVE),
+                "call-3": ApprovalVerdict(ApprovalDecision.APPROVE),
+            },
+        )
+    ]
+
+
+def test_empty_batch_dispatches_without_clearing_the_worker_busy_flag() -> None:
+    """An empty batch hands straight off to ``_start_approvals``.
+
+    ``begin`` must not clear ``busy`` after that hand-off: the App would look
+    idle while its approval worker runs, so Esc could not cancel it and a second
+    Run could be started on top.
+    """
+    vm, host = _vm()
+
+    vm.begin(ApprovalRequired(run_id="run-1", approvals=()))
+
+    assert host.started_approvals == [("run-1", {})]
+    assert host.session.busy is True
+    assert vm.is_pending is False

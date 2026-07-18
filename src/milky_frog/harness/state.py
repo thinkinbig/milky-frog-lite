@@ -14,6 +14,7 @@ INTERRUPTED_TOOL_RESULT = (
 __all__ = [
     "INTERRUPTED_TOOL_RESULT",
     "append_model_response",
+    "append_synthetic_tool_call",
     "append_tool_result",
     "append_user_message",
     "seal",
@@ -66,6 +67,20 @@ def append_model_response(state: RunState, response: ModelResponse) -> RunState:
     )
 
 
+def append_synthetic_tool_call(state: RunState, call: ToolCall) -> RunState:
+    """Append a harness-synthesized tool call as its own assistant message.
+
+    Not tied to a ``ModelResponse``: no model turn happened, so this does not
+    bump ``completed_model_calls`` or record usage. ``unmatched_tool_calls``
+    scans the whole transcript, so this call joins any sibling still awaiting
+    approval instead of masking it — see that function.
+    """
+    return replace(
+        state,
+        messages=(*state.messages, Message(MessageRole.ASSISTANT, "", (call,))),
+    )
+
+
 def append_tool_result(state: RunState, call: ToolCall, result: ToolResult) -> RunState:
     return replace(
         state,
@@ -96,22 +111,27 @@ def seal(state: RunState) -> tuple[RunState, bool]:
 
 
 def unmatched_tool_calls(messages: tuple[Message, ...]) -> tuple[ToolCall, ...]:
-    last_assistant = next(
-        (
-            index
-            for index in reversed(range(len(messages)))
-            if messages[index].role is MessageRole.ASSISTANT
-        ),
-        None,
-    )
-    if last_assistant is None:
-        return ()
-    assistant = messages[last_assistant]
-    if not assistant.tool_calls:
-        return ()
+    """Every Tool call in the transcript that still has no matching Tool result.
+
+    Scans the whole transcript rather than just the trailing assistant message.
+    A harness-synthesized follow-up (``append_synthetic_tool_call``) lands in an
+    assistant message of its own, so a last-message-only scan would hide any
+    sibling call from the preceding model turn that is still waiting on
+    approval — leaving it permanently undecidable and the transcript malformed
+    (an assistant ``tool_calls`` entry with no Tool result, which providers
+    reject). Two follow-ups in one batch hid each other the same way.
+
+    Returned in transcript order, so the first entry is the oldest pending call.
+    """
     satisfied = {
         message.tool_call_id
-        for message in messages[last_assistant + 1 :]
-        if message.role is MessageRole.TOOL
+        for message in messages
+        if message.role is MessageRole.TOOL and message.tool_call_id is not None
     }
-    return tuple(call for call in assistant.tool_calls if call.id not in satisfied)
+    return tuple(
+        call
+        for message in messages
+        if message.role is MessageRole.ASSISTANT
+        for call in message.tool_calls
+        if call.id not in satisfied
+    )

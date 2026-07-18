@@ -96,6 +96,13 @@ Caveats:
   container may keep running until the container is removed at session exit.
 - MCP servers still run on the host, not in the container.
 
+Writable subagents require this Docker configuration. A `subagent` call with
+`capability = "write"` creates a dedicated `subagent/<id>` git branch and linked
+worktree, then runs the nested Run with all built-in Tools except `subagent`.
+A clean worktree is removed automatically; a worktree with unreviewed changes is
+kept, and its path and branch are returned to the parent Run. The default
+`capability = "read_only"` does not create a worktree.
+
 ## Security
 
 Shell commands require your approval before they run, and structured file operations are
@@ -198,6 +205,12 @@ session 内复用，退出时移除。文件类 Tool（`read_file`、`write_file
 - `bash` 超时只会杀掉宿主机侧的 `docker exec`；容器内的进程可能一直运行到
   session 退出、容器被移除为止。
 - MCP server 仍运行在宿主机上，而不在容器内。
+
+可写 subagent 强制要求上述 Docker 配置。使用 `capability = "write"` 调用
+`subagent` 时，会创建独立的 `subagent/<id>` 分支和 linked worktree，并向 nested
+Run 提供除 `subagent` 外的全部内建 Tool。干净 worktree 会自动移除；包含未审查改动
+的 worktree 会保留，并把路径和分支返回父 Run。默认的
+`capability = "read_only"` 不创建 worktree。
 
 ## 安全边界
 

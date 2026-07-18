@@ -20,14 +20,20 @@ from milky_frog.domain import (
     RunState,
     StreamDone,
     TextDelta,
+    ToolCall,
     ToolDecision,
+    ToolResult,
     ToolRunCancelled,
     is_cancelled,
 )
 from milky_frog.events.hub import EventHub
 from milky_frog.events.tool_step import ToolStepExecutor
 from milky_frog.harness.context import ContextManager
-from milky_frog.harness.state import append_model_response, append_tool_result
+from milky_frog.harness.state import (
+    append_model_response,
+    append_synthetic_tool_call,
+    append_tool_result,
+)
 from milky_frog.harness.tools import ToolRegistry
 from milky_frog.models import Model
 
@@ -163,26 +169,53 @@ class AgentLoop:
                 )
 
                 if runnable:
-                    for call, _decision in runnable:
-                        await self._hub.before_tool(run_id, call)
+                    state, cancelled, resolved = await self._execute_decided_batch(
+                        run_id, state, sandbox, runnable, cancellation
+                    )
 
-                    batch = [
-                        (
-                            call,
-                            self._tool_step.execute_decided(
-                                run_id, state.workspace, sandbox, call, cancellation, decision
-                            ),
-                        )
-                        for call, decision in runnable
-                    ]
-                    resolved, cancelled = await self._tool_step.resolve_batch(batch)
-
-                    for call, outcome in resolved:
-                        state = append_tool_result(state, call, outcome)
-                        await self._hub.after_tool(run_id, call, outcome, state)
-
+                    # A Tool's outcome can request a follow-up call (e.g. subagent
+                    # leaving an unmerged worktree) that must pause the Run for a
+                    # human decision — deterministically, not by hoping the model
+                    # raises it. The synthesized call goes through the same policy
+                    # check as any model-issued call: NEEDS_APPROVAL joins this
+                    # batch's own pause, ALLOW/DENY execute immediately.
+                    # Before synthesizing: a synthetic call appended to a run that
+                    # is finishing cancelled would persist a tool call nothing
+                    # will ever execute, which resume then repairs into an
+                    # "interrupted" result — so the merge silently never happens.
                     if cancelled:
                         return await self._hub.finish_cancelled(state)
+
+                    synthesized: list[ToolCall] = []
+                    for call, outcome in resolved:
+                        if outcome.follow_up is not None:
+                            synthetic = ToolCall(
+                                id=f"{call.id}:follow-up",
+                                name=outcome.follow_up.tool_name,
+                                arguments=outcome.follow_up.arguments,
+                            )
+                            state = append_synthetic_tool_call(state, synthetic)
+                            synthesized.append(synthetic)
+
+                    if synthesized:
+                        synth_decisions = [
+                            (call, self._tool_step.decide(call)) for call in synthesized
+                        ]
+                        synth_runnable = [
+                            (call, decision)
+                            for call, decision in synth_decisions
+                            if decision is not ToolDecision.NEEDS_APPROVAL
+                        ]
+                        needs_approval = needs_approval + tuple(
+                            call
+                            for call, decision in synth_decisions
+                            if decision is ToolDecision.NEEDS_APPROVAL
+                        )
+                        state, synth_cancelled, _synth_resolved = await self._execute_decided_batch(
+                            run_id, state, sandbox, synth_runnable, cancellation
+                        )
+                        if synth_cancelled:
+                            return await self._hub.finish_cancelled(state)
 
                 if needs_approval:
                     # No ``before_tool`` here: it fires when the approved call
@@ -204,6 +237,45 @@ class AgentLoop:
             raise
         except Exception as error:
             return await self._hub.finish_failed(state, error)
+
+    async def _execute_decided_batch(
+        self,
+        run_id: str,
+        state: RunState,
+        sandbox: Sandbox,
+        decided: list[tuple[ToolCall, ToolDecision]],
+        cancellation: RunCancellation | None,
+    ) -> tuple[RunState, bool, list[tuple[ToolCall, ToolResult]]]:
+        """Execute a batch of calls whose policy decision is already known.
+
+        Shared by the model-issued batch and any harness-synthesized follow-up
+        calls (``ToolResult.follow_up``) that resolve to ALLOW/DENY instead of
+        NEEDS_APPROVAL — both fold their results into ``state`` the same way.
+        Returns the updated state, whether anything was cancelled, and the
+        resolved ``(call, result)`` pairs so the caller can inspect them (e.g.
+        for a further follow-up).
+        """
+        if not decided:
+            return state, False, []
+        for call, _decision in decided:
+            await self._hub.before_tool(run_id, call)
+
+        batch = [
+            (
+                call,
+                self._tool_step.execute_decided(
+                    run_id, state.workspace, sandbox, call, cancellation, decision
+                ),
+            )
+            for call, decision in decided
+        ]
+        resolved, cancelled = await self._tool_step.resolve_batch(batch)
+
+        for call, outcome in resolved:
+            state = append_tool_result(state, call, outcome)
+            await self._hub.after_tool(run_id, call, outcome, state)
+
+        return state, cancelled, resolved
 
     async def _model_turn(
         self,

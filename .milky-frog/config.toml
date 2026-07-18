@@ -23,3 +23,9 @@ prune_on_start = true        # Automatically prune stale checkpoints on startup
 
 # Additional host env var names forwarded to subprocesses (uppercase identifiers).
 # env_allowlist_extra = ["MY_BUILD_VAR", "DEPLOY_TOKEN"]
+
+[sandbox]
+kind = "docker"
+image = "python:3.12-bookworm"
+workspace_mount = "/mnt/workspace"
+mask_paths = [".venv", "node_modules"]

@@ -41,12 +41,11 @@ class ApprovalViewModel:
         self._position = 0
         self._verdicts = {}
         self._deny_reason_mode = False
-        self._show_current()
-
+        # Before ``_show_current``: an empty batch dispatches straight through to
+        # ``_start_approvals``, which sets ``busy`` itself. Clearing it afterwards
+        # would leave the App idle while its approval worker is still running.
         self._app.session.busy = False
-        prompt_input = self._app.query_one("#prompt-input", Input)
-        prompt_input.disabled = True
-        prompt_input.placeholder = "Type a task and press Enter..."
+        self._show_current()
 
     def _current(self) -> PendingApproval | None:
         event = self._pending
@@ -54,7 +53,24 @@ class ApprovalViewModel:
             return None
         return event.approvals[self._position]
 
+    def _skip_decided(self) -> None:
+        """Advance the cursor past calls that already hold a verdict.
+
+        ``allow_tool`` / ``allow_all`` decide calls ahead of the cursor, so the
+        next call to prompt for is the next *undecided* one — never simply the
+        next one. Re-prompting a decided call would let a later answer overwrite
+        the always-allow the user just set.
+        """
+        event = self._pending
+        if event is None:
+            return
+        while self._position < len(event.approvals):
+            if event.approvals[self._position].call_id not in self._verdicts:
+                break
+            self._position += 1
+
     def _show_current(self) -> None:
+        self._skip_decided()
         current = self._current()
         event = self._pending
         if current is None or event is None:
@@ -80,8 +96,9 @@ class ApprovalViewModel:
         if current is None:
             return
         self._verdicts[current.call_id] = verdict
-        self._position += 1
         self._deny_reason_mode = False
+        # No manual advance: ``_show_current`` skips every decided call, and the
+        # one just recorded is now one of them.
         self._show_current()
 
     def _dispatch_batch(self) -> None:
@@ -178,18 +195,11 @@ class ApprovalViewModel:
             for approval in event.approvals[self._position :]:
                 if approval.tool_name == current.tool_name:
                     self._verdicts[approval.call_id] = ApprovalVerdict(ApprovalDecision.APPROVE)
-            self._position += 1
-            while self._position < len(event.approvals):
-                call_id = event.approvals[self._position].call_id
-                if call_id not in self._verdicts:
-                    break
-                self._position += 1
             self._show_current()
         elif action == "allow_all":
             self._app.session.policy.auto_approve()
             for approval in event.approvals[self._position :]:
                 self._verdicts[approval.call_id] = ApprovalVerdict(ApprovalDecision.APPROVE)
-            self._position = len(event.approvals)
             self._show_current()
 
     @staticmethod

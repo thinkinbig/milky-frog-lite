@@ -190,4 +190,7 @@ class FakeTuiHost:
         raise LookupError(f"No widget matches {selector!r}")
 
     def _start_approvals(self, run_id: str, verdicts: dict[str, object]) -> None:
+        # Mirrors ``MilkyFrogApp._start_approvals``, which marks the App busy for
+        # the approval worker it launches. VMs are allowed to depend on that.
+        self.session.busy = True
         self.started_approvals.append((run_id, verdicts))

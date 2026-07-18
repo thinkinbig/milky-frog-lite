@@ -12,7 +12,7 @@ from stubs import (
     StubDockerCli,
 )
 
-from milky_frog.adapters.docker import DockerSandboxFactory
+from milky_frog.adapters.docker import BindMount, DockerSandboxFactory
 from milky_frog.adapters.docker.cli import DockerUnavailable
 from milky_frog.adapters.docker.sandbox import WORKSPACE_LABEL
 from milky_frog.core.sandbox import (
@@ -375,6 +375,36 @@ async def test_no_mask_paths_means_no_extra_volumes(tmp_path: Path) -> None:
 
     argv = _run_argv(cli)
     assert argv.count("-v") == 1
+
+
+async def test_extra_mounts_are_added_at_matching_host_and_container_paths(
+    tmp_path: Path,
+) -> None:
+    """A linked worktree's .git pointer file names an absolute host path outside
+    the Workspace bind mount — extra_mounts must expose that exact path inside
+    the container too, or every git command fails with "not a git repository"."""
+    cli = StubDockerCli()
+    git_dir = tmp_path / "main-repo" / ".git"
+    objects_dir = git_dir / "objects"
+    factory = DockerSandboxFactory(
+        image="python:3.12",
+        workspace_mount="/mnt/workspace",
+        cli=cli,
+        extra_mounts=(BindMount(str(git_dir), read_only=True), BindMount(str(objects_dir))),
+    )
+
+    await factory(tmp_path).run_command("echo hi", timeout_seconds=5)
+
+    argv = _run_argv(cli)
+    assert f"{git_dir}:{git_dir}:ro" in argv
+    assert f"{objects_dir}:{objects_dir}" in argv
+    # extra mounts must come before mask-path volumes and after the workspace
+    # bind mount, so a narrower writable overlay can sit on top of a broader
+    # read-only one given in the same order.
+    workspace_index = argv.index(f"{tmp_path}:/mnt/workspace")
+    git_dir_index = argv.index(f"{git_dir}:{git_dir}:ro")
+    objects_index = argv.index(f"{objects_dir}:{objects_dir}")
+    assert workspace_index < git_dir_index < objects_index
 
 
 async def test_containers_are_removed_with_their_anonymous_volumes(tmp_path: Path) -> None:
