@@ -16,6 +16,7 @@ venv/
 .pyrefly/
 .ruff_cache/
 htmlcov/
+evals/.cache/
 
 # Build artifacts
 build/
