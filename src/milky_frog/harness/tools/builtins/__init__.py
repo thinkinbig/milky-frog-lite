@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from milky_frog.harness.tools.base import Tool
 from milky_frog.harness.tools.builtins.bash import BashTool
 from milky_frog.harness.tools.builtins.edit import EditFileTool
 from milky_frog.harness.tools.builtins.fetch import FetchTool
 from milky_frog.harness.tools.builtins.grep import GrepTool
 from milky_frog.harness.tools.builtins.list_dir import ListDirTool
+from milky_frog.harness.tools.builtins.load_skill import LoadSkillTool
 from milky_frog.harness.tools.builtins.merge_worktree import MergeWorktreeTool
 from milky_frog.harness.tools.builtins.read import ReadFileTool
 from milky_frog.harness.tools.builtins.subagent import (
@@ -18,13 +21,17 @@ from milky_frog.harness.tools.builtins.web_search import WebSearchTool
 from milky_frog.harness.tools.builtins.write import WriteFileTool
 
 
-def default_tools(*, jina_api_key: str | None = None) -> tuple[Tool, ...]:
+def default_tools(*, jina_api_key: str | None = None, home: Path | None = None) -> tuple[Tool, ...]:
     """The built-in Tools wired into every Run by default.
 
     ``jina_api_key`` (from ``MILKY_FROG_JINA_API_KEY``) is optional: it lets
     ``fetch`` retry blocked requests via Jina Reader, and gates ``web_search``
     entirely — without a key, web_search is omitted rather than registered in
     a broken state.
+
+    ``home`` (the agent home directory) gates ``load_skill`` the same way: the
+    tool needs a home to resolve user Skills, so without one it is omitted
+    rather than registered against a guessed path.
     """
     tools: list[Tool] = [
         ReadFileTool(),
@@ -36,12 +43,16 @@ def default_tools(*, jina_api_key: str | None = None) -> tuple[Tool, ...]:
         FetchTool(jina_api_key=jina_api_key),
         MergeWorktreeTool(),
     ]
+    if home is not None:
+        tools.append(LoadSkillTool(home))
     if jina_api_key:
         tools.append(WebSearchTool(jina_api_key))
     return tuple(tools)
 
 
-def write_subagent_tools(*, jina_api_key: str | None = None) -> tuple[Tool, ...]:
+def write_subagent_tools(
+    *, jina_api_key: str | None = None, home: Path | None = None
+) -> tuple[Tool, ...]:
     """``default_tools`` minus ``merge_worktree``, for a ``write`` nested Run.
 
     A write subagent works inside its own throwaway worktree and its harness
@@ -52,7 +63,7 @@ def write_subagent_tools(*, jina_api_key: str | None = None) -> tuple[Tool, ...]
     """
     return tuple(
         tool
-        for tool in default_tools(jina_api_key=jina_api_key)
+        for tool in default_tools(jina_api_key=jina_api_key, home=home)
         if tool.name != MergeWorktreeTool.name
     )
 
@@ -81,6 +92,7 @@ __all__ = [
     "FetchTool",
     "GrepTool",
     "ListDirTool",
+    "LoadSkillTool",
     "MergeWorktreeTool",
     "ReadFileTool",
     "SubagentOutcome",

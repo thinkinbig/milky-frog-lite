@@ -145,18 +145,19 @@ def format_skills_for_prompt(
 ) -> str:
     lines = [
         "\n\nThe following skills provide specialized instructions for specific tasks.",
-        "Use read_file to load a skill's SKILL.md when the task matches its description.",
-        "When a skill file references a relative path, resolve it against the skill directory.",
+        "Use the load_skill tool with the skill's name when the task matches its description.",
+        "Skills live outside the workspace, so read_file cannot open them.",
+        "When a skill's instructions reference a relative path, resolve it against the",
+        "directory reported by load_skill.",
         "",
         "<available_skills>",
     ]
-    for name, description, location in skills:
+    for name, description, _location in skills:
         lines.extend(
             (
                 "  <skill>",
                 f"    <name>{escape(name)}</name>",
                 f"    <description>{escape(description)}</description>",
-                f"    <location>{escape(location.resolve().as_posix())}</location>",
                 "  </skill>",
             )
         )

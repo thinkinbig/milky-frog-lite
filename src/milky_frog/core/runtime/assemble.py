@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 from milky_frog.adapters.local import LocalSandbox
 from milky_frog.checkpoint import CheckpointStore
@@ -43,6 +44,8 @@ class HarnessAssembly:
     token_counter: TokenCounter | None = None
     max_retries: int = 3
     retry_base_delay: float = 1.0
+    home: Path | None = None
+    """Agent home directory; gates the ``load_skill`` Tool (see ``default_tools``)."""
 
     def make_harness(
         self,
@@ -94,7 +97,10 @@ def make_harness_runtime(
     # SubagentTool must be a constructor Tool (not registered later) so MCP
     # reloads preserve it as a builtin.
     registry = ToolRegistry(
-        (*default_tools(jina_api_key=jina_api_key), SubagentTool(subagent_runner))
+        (
+            *default_tools(jina_api_key=jina_api_key, home=assembly.home),
+            SubagentTool(subagent_runner),
+        )
     )
     return HarnessRuntime(
         foreground=assembly.make_harness(registry),
