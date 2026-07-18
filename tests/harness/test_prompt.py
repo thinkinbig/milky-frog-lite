@@ -98,7 +98,10 @@ def test_system_prompt_injects_skills_and_append_rules(tmp_path: Path) -> None:
     assert "<available_skills>" in prompt
     assert "<name>review</name>" in prompt
     assert "<name>tdd</name>" in prompt
-    assert "Use read_file to load a skill's SKILL.md" in prompt
+    assert "Use the load_skill tool with the skill's name" in prompt
+    # Skills resolve outside the Sandbox, so advertising a host path invited a
+    # read_file that could only fail (#108, cause 2).
+    assert "SKILL.md" not in prompt
 
 
 def test_build_system_prompt_is_pure_assembly(tmp_path: Path) -> None:
