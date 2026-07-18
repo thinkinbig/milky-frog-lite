@@ -172,6 +172,12 @@ def main() -> None:
     ap.add_argument("--repeats", type=int, default=3, help="Runs per task (N)")
     ap.add_argument("--max-model-calls", type=int, default=30, help="generous cap")
     ap.add_argument("--out", type=Path, default=RESULTS / "read_noise_runs.json")
+    ap.add_argument(
+        "--label",
+        type=str,
+        default=None,
+        help="name of the Harness arm being measured, recorded in the artifact meta",
+    )
     args = ap.parse_args()
 
     tasks = load_tasks(args.dataset)
@@ -207,11 +213,30 @@ def main() -> None:
             "repeats": args.repeats,
             "dataset": args.dataset.name,
             "tasks": len(results),
+            # Which Harness this measured. A comparative benchmark's artifact is
+            # unreadable without it: two arms differ only in the Harness code,
+            # which is invisible in the numbers themselves.
+            "arm": args.label,
+            "harness_commit": _harness_commit(),
         },
         tasks=results,
     )
     dump_runs(artifact, args.out)
     print(f"\nwrote {_display_path(args.out)}")
+
+
+def _harness_commit() -> str | None:
+    """The milky-frog commit under test; None outside a git checkout."""
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "rev-parse", "--short", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return done.stdout.strip()
 
 
 def _display_path(path: Path) -> str:

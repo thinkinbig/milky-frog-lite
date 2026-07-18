@@ -1,0 +1,1384 @@
+{
+  "meta": {
+    "model": "deepseek-v4-flash",
+    "max_model_calls": 30,
+    "repeats": 3,
+    "dataset": "read_noise_tasks.json",
+    "tasks": 5,
+    "arm": "baseline (no fix)",
+    "harness_commit": "88c3111"
+  },
+  "tasks": [
+    {
+      "task_id": "pallets__flask-5014",
+      "repo": "pallets/flask",
+      "base_commit": "7ee9ceb71e868944a46e1ff00b506772a53a4f1d",
+      "relevant_files": [
+        "src/flask/blueprints.py"
+      ],
+      "added_files": [],
+      "runs": [
+        {
+          "run_index": 0,
+          "status": "completed",
+          "termination": "completed",
+          "model_calls": 20,
+          "reads": [
+            {
+              "path": "/home/zeyuli/Code/milky-frog-lite/src/milky_frog/harness/skills/bundled/using-superpowers/SKILL.md",
+              "is_error": true
+            },
+            {
+              "path": "src/flask/blueprints.py",
+              "is_error": false
+            },
+            {
+              "path": "src/flask/blueprints.py",
+              "is_error": false
+            },
+            {
+              "path": "tests/test_blueprints.py",
+              "is_error": false
+            }
+          ],
+          "edits": [
+            "src/flask/blueprints.py",
+            "tests/test_blueprints.py"
+          ],
+          "tool_calls": 19,
+          "final_message": "Everything works correctly. Here's a summary of the changes:\n\n**`src/flask/blueprints.py`** — Added an empty-name check in `Blueprint.__init__`, right before the existing dot check:\n\n```python\nif not name:\n    raise ValueError(\"'name' must not be empty.\")\n```\n\n**`tests/test_blueprints.py`** — Added a test following the existing pattern for dotted-name validation:\n\n```python\ndef test_empty_name_not_allowed(app, client):\n    with pytest.raises(ValueError):\n        flask.Blueprint(\"\", __name__)\n```\n\nThe new validation:\n- Raises `ValueError(\"'name' must not be empty.\")` when an empty string is passed as `name`\n- Sits alongside the existing check that rejects dots in names\n- The existing check for dots (`\".\" in name`) is unaffected",
+          "events": [
+            {
+              "kind": "read",
+              "path": "/home/zeyuli/Code/milky-frog-lite/src/milky_frog/harness/skills/bundled/using-superpowers/SKILL.md",
+              "is_error": true
+            },
+            {
+              "kind": "read",
+              "path": "src/flask/blueprints.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "src/flask/blueprints.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "tests/test_blueprints.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "src/flask/blueprints.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "tests/test_blueprints.py",
+              "is_error": false
+            }
+          ]
+        },
+        {
+          "run_index": 1,
+          "status": "paused_limit",
+          "termination": "capped",
+          "model_calls": 30,
+          "reads": [
+            {
+              "path": "src/flask/blueprints.py",
+              "is_error": false
+            },
+            {
+              "path": "src/flask/blueprints.py",
+              "is_error": false
+            },
+            {
+              "path": "tests/test_blueprints.py",
+              "is_error": false
+            },
+            {
+              "path": "src/flask/blueprints.py",
+              "is_error": false
+            },
+            {
+              "path": "tests/test_blueprints.py",
+              "is_error": false
+            }
+          ],
+          "edits": [
+            "src/flask/blueprints.py",
+            "tests/test_blueprints.py"
+          ],
+          "tool_calls": 31,
+          "final_message": "model call limit reached (30)",
+          "events": [
+            {
+              "kind": "read",
+              "path": "src/flask/blueprints.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "src/flask/blueprints.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "src/flask/blueprints.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "tests/test_blueprints.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "tests/test_blueprints.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "src/flask/blueprints.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "tests/test_blueprints.py",
+              "is_error": false
+            }
+          ]
+        },
+        {
+          "run_index": 2,
+          "status": "paused_limit",
+          "termination": "capped",
+          "model_calls": 30,
+          "reads": [
+            {
+              "path": "src/flask/blueprints.py",
+              "is_error": false
+            },
+            {
+              "path": "src/flask/blueprints.py",
+              "is_error": false
+            },
+            {
+              "path": "tests/test_blueprints.py",
+              "is_error": false
+            }
+          ],
+          "edits": [
+            "src/flask/blueprints.py",
+            "tests/test_blueprints.py"
+          ],
+          "tool_calls": 31,
+          "final_message": "model call limit reached (30)",
+          "events": [
+            {
+              "kind": "read",
+              "path": "src/flask/blueprints.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "src/flask/blueprints.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "src/flask/blueprints.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "tests/test_blueprints.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "tests/test_blueprints.py",
+              "is_error": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "psf__requests-2317",
+      "repo": "psf/requests",
+      "base_commit": "091991be0da19de9108dbe5e3752917fea3d7fdc",
+      "relevant_files": [
+        "requests/sessions.py"
+      ],
+      "added_files": [],
+      "runs": [
+        {
+          "run_index": 0,
+          "status": "completed",
+          "termination": "completed",
+          "model_calls": 6,
+          "reads": [
+            {
+              "path": "/home/zeyuli/Code/milky-frog-lite/src/milky_frog/harness/skills/bundled/debug/SKILL.md",
+              "is_error": true
+            },
+            {
+              "path": "requests/compat.py",
+              "is_error": false
+            },
+            {
+              "path": "requests/sessions.py",
+              "is_error": false
+            },
+            {
+              "path": "requests/models.py",
+              "is_error": false
+            }
+          ],
+          "edits": [],
+          "tool_calls": 10,
+          "final_message": "Here's my analysis of the bug.\n\n---\n\n## Root Cause Analysis\n\n**This is a bug in `requests` (version 2.4.3).** Here's the chain of failure:\n\n### The problematic line\n\n**`requests/sessions.py:428`**\n\n```python\nmethod = builtin_str(method)\n```\n\n### Why it breaks on Python 3 but not Python 2\n\nIn **`requests/compat.py`**, `builtin_str` is defined as:\n\n| Python 2 (line 96) | Python 3 (line 111) |\n|---|---|\n| `builtin_str = str` | `builtin_str = str` |\n\nIdentical, right? But `str` behaves **differently** between versions:\n\n| Call | Python 2 result | Python 3 result |\n|---|---|---|\n| `str(b'GET')` | `\"GET\"` | `\"b'GET'\"` |\n\nIn **Python 2**, `bytes` is just an alias for `str`, so `str(b'GET')` gives you `\"GET\"` — it works.\n\nIn **Python 3**, `bytes` and `str` are different types. Calling `str()` on a `bytes` object returns the **repr** of the bytes literal, i.e. `\"b'GET'\"`, not the decoded content `\"GET\"`.\n\nThen at line 432:\n\n```python\nmethod = method.upper()  # \"b'GET'\" → \"B'GET'\"\n```\n\nThe HTTP method becomes `\"B'GET'\"`, which is meaningless to any HTTP server — hence the 404.\n\n### Why neutronclient triggers it\n\nYou mentioned neutronclient does:\n\n```python\nargs = utils.safe_encode_list(args)\n```\n\nThis converts all values (including the HTTP method) to `bytes`. On Python 3 that produces `b'GET'` which then hits the `requests` bug.\n\n### The fix\n\nThe `request()` method in `Session` should handle `bytes`-typed methods by **decoding** them, not by calling `str()` which takes the repr. The fix is on **line 428** of `requests/sessions.py`:\n\n**Current (broken):**\n```python\nmethod = builtin_str(method)\n```\n\n**Fixed:**\n```python\nif isinstance(method, bytes):\n    method = method.decode('ascii')\nelse:\n    method = builtin_str(method)\n```\n\nOr more compactly:\n```python\nmethod = method.decode('ascii') if isinstance(method, bytes) else builtin_str(method)\n```\n\nThis ensures a `bytes` method like `b'GET'` is decoded to `\"GET\"` before use, while all other types (`str`, etc.) continue to work as before.",
+          "events": [
+            {
+              "kind": "read",
+              "path": "/home/zeyuli/Code/milky-frog-lite/src/milky_frog/harness/skills/bundled/debug/SKILL.md",
+              "is_error": true
+            },
+            {
+              "kind": "read",
+              "path": "requests/compat.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "requests/sessions.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "requests/models.py",
+              "is_error": false
+            }
+          ]
+        },
+        {
+          "run_index": 1,
+          "status": "completed",
+          "termination": "completed",
+          "model_calls": 11,
+          "reads": [
+            {
+              "path": "requests/sessions.py",
+              "is_error": false
+            },
+            {
+              "path": "requests/compat.py",
+              "is_error": false
+            },
+            {
+              "path": "requests/sessions.py",
+              "is_error": false
+            },
+            {
+              "path": "requests/sessions.py",
+              "is_error": false
+            }
+          ],
+          "edits": [
+            "requests/sessions.py"
+          ],
+          "tool_calls": 12,
+          "final_message": "The other `builtin_str` calls in `models.py` operate on numeric values (Content-Length), not on string/bytes input, so they are fine.\n\n---\n\n## Summary\n\n**Bug:** In `requests/sessions.py` line 428, the call `builtin_str(method)` on Python 3 converts `b'GET'` to the literal string `\"b'GET'\"` instead of `\"GET\"`.\n\n**Why this happens:**\n- On Python 3, `builtin_str = str`, and `str(b'GET')` produces `\"b'GET'\"` (the `repr()` of the bytes object).\n- On Python 2, `str` and `bytes` are the same type, so `str(b'GET')` correctly gives `\"GET\"`.\n- This is triggered when a library like `python-neutronclient` passes binary strings via `safe_encode_list`, which hits the `method` parameter.\n\n**Fix applied:** Replace the unconditional `builtin_str(method)` with a decode-via-`isinstance` check, following the same pattern already used throughout the `requests` codebase (e.g., `models.py` lines 130, 342):\n\n```python\nif isinstance(method, bytes):\n    method = method.decode('utf-8')\nelse:\n    method = builtin_str(method)\n```\n\nThis is a bug in `requests` — the library should handle bytes input gracefully rather than producing a silently mangled method string that causes 404 errors.",
+          "events": [
+            {
+              "kind": "read",
+              "path": "requests/sessions.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "requests/compat.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "requests/sessions.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "requests/sessions.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "requests/sessions.py",
+              "is_error": false
+            }
+          ]
+        },
+        {
+          "run_index": 2,
+          "status": "completed",
+          "termination": "completed",
+          "model_calls": 12,
+          "reads": [
+            {
+              "path": "sessions.py",
+              "is_error": true
+            },
+            {
+              "path": "requests/sessions.py",
+              "is_error": false
+            },
+            {
+              "path": "requests/__init__.py",
+              "is_error": false
+            },
+            {
+              "path": "requests/sessions.py",
+              "is_error": false
+            }
+          ],
+          "edits": [
+            "requests/sessions.py"
+          ],
+          "tool_calls": 11,
+          "final_message": "The fix works correctly:\n\n| Input | Old `builtin_str()` | New code |\n|---|---|---|\n| `b'GET'` | `\"b'GET'\"` ❌ | `\"GET\"` ✅ |\n| `'POST'` | `\"POST\"` ✅ | `\"POST\"` ✅ |\n\n---\n\n### Summary\n\n**The bug:** In `requests/sessions.py:428`, `builtin_str(method)` calls `str(b'GET')` on Python 3, which produces the literal string `\"b'GET'\"` (the repr of the bytes object) instead of decoding it to `\"GET\"`. The HTTP request then sends `\"b'GET'\"` as the method, which the server doesn't understand → 404.\n\n**Why Python 2 worked:** In Python 2, `builtin_str = str` but `str` *is* the byte-string type, so `str(b'GET')` just returns `b'GET'` (which is `'GET'`) — no problem.\n\n**The fix** (applied):\n```python\nif isinstance(method, bytes):\n    method = method.decode('utf-8')\nelse:\n    method = builtin_str(method)\n```\n\nThis checks whether `method` is `bytes` and, if so, decodes it properly to a `str` using UTF-8. Non-bytes values fall through to the original `builtin_str()` call, preserving existing behavior for strings and other types.\n\nThe real culprit is `neutronclient` calling `utils.safe_encode_list(args)` which converts the method to `bytes`, but `requests` should be resilient to receiving `bytes` for the method parameter — HTTP methods are always ASCII-safe text, so decoding is safe here.",
+          "events": [
+            {
+              "kind": "read",
+              "path": "sessions.py",
+              "is_error": true
+            },
+            {
+              "kind": "read",
+              "path": "requests/sessions.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "requests/__init__.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "requests/sessions.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "requests/sessions.py",
+              "is_error": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "pylint-dev__pylint-4970",
+      "repo": "pylint-dev/pylint",
+      "base_commit": "40cc2ffd7887959157aaf469e09585ec2be7f528",
+      "relevant_files": [
+        "pylint/checkers/similar.py"
+      ],
+      "added_files": [],
+      "runs": [
+        {
+          "run_index": 0,
+          "status": "completed",
+          "termination": "completed",
+          "model_calls": 29,
+          "reads": [
+            {
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "path": "tests/checkers/unittest_similar.py",
+              "is_error": false
+            },
+            {
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "path": "tests/checkers/unittest_similar.py",
+              "is_error": false
+            },
+            {
+              "path": "tests/checkers/unittest_similar.py",
+              "is_error": false
+            }
+          ],
+          "edits": [
+            "pylint/checkers/similar.py",
+            "pylint/checkers/similar.py",
+            "tests/checkers/unittest_similar.py"
+          ],
+          "tool_calls": 31,
+          "final_message": "All 19 tests pass (17 existing + 2 new). Here's a summary of the changes:\n\n## Changes Made\n\n### Problem\nSetting `min-similarity-lines` to `0` did not explicitly disable the duplicate code check. While the existing code happened to produce empty results at `0` due to `range(0)` producing no iterations in `hash_lineset`, this behavior was accidental and fragile. There was no guard for negative values either.\n\n### Fix (2 files changed)\n\n**`pylint/checkers/similar.py`** — Two explicit early-return guards:\n\n1. **`hash_lineset()`** — Added `if min_common_lines <= 0: return hash2index, index2lines` at the top, before any computation. This avoids setting up empty shifted-line iterators and makes the intent clear.\n\n2. **`Similar._find_common()`** — Added `if self.min_lines <= 0: return` at the top. This is the primary entry-point guard — if `min_lines` is `0` or negative, the generator yields nothing, effectively disabling all duplicate code detection.\n\n**`tests/checkers/unittest_similar.py`** — Two new tests:\n\n- `test_min_similarity_lines_zero_disables_check` — Verifies that `--duplicates=0` produces `TOTAL lines=62 duplicates=0 percent=0.00`.\n- `test_min_similarity_lines_negative_disables_check` — Same for `--duplicates=-1`.",
+          "events": [
+            {
+              "kind": "read",
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "tests/checkers/unittest_similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "tests/checkers/unittest_similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "tests/checkers/unittest_similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "tests/checkers/unittest_similar.py",
+              "is_error": false
+            }
+          ]
+        },
+        {
+          "run_index": 1,
+          "status": "completed",
+          "termination": "completed",
+          "model_calls": 30,
+          "reads": [
+            {
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "path": "tests/checkers/unittest_similar.py",
+              "is_error": false
+            },
+            {
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "path": "/home/zeyuli/Code/milky-frog-lite/src/milky_frog/harness/skills/bundled/verification-before-completion/SKILL.md",
+              "is_error": true
+            }
+          ],
+          "edits": [
+            "pylint/checkers/similar.py",
+            "pylint/checkers/similar.py",
+            "pylint/checkers/similar.py",
+            "pylint/checkers/similar.py",
+            "pylintrc",
+            "examples/pylintrc",
+            "tests/checkers/unittest_similar.py",
+            "tests/checkers/unittest_similar.py"
+          ],
+          "tool_calls": 36,
+          "final_message": "All 19 tests pass (17 existing + 2 new). Here's a summary of the changes:\n\n## Summary\n\n**Problem:** Setting `min-similarity-lines` to `0` in the rcfile should disable the duplicate-code check (R0801), consistent with how other linters handle \"0 means disabled\" for numerical options.\n\n### Changes made\n\n**`pylint/checkers/similar.py`** — 3 changes:\n\n1. **`hash_lineset`** (line 240): Added early return when `min_common_lines <= 0`, returning empty dicts. This avoids creating an empty set of shifted-line iterators (`range(0)`) and the confusing `zip(*[])` behavior. Also updated the docstring to document that 0 or less disables similarity detection.\n\n2. **`_find_common`** (line 478): Added explicit `if self.min_lines < 1: return` guard. This short-circuits the entire similarity search early, avoiding unnecessary function calls and making the intent clear.\n\n3. **`min-similarity-lines` option help text** (line 743): Updated from `\"Minimum lines number of a similarity.\"` to `\"Minimum lines number of a similarity. Use 0 to disable similarity detection.\"`\n\n**`pylintrc`** and **`examples/pylintrc`** — Updated comments to document that 0 disables detection.\n\n**`tests/checkers/unittest_similar.py`** — Added 2 tests:\n- `test_min_similarity_lines_zero_disables_check`\n- `test_min_similarity_lines_zero_ignore_comments_disables_check`\n\nBoth verify that `--duplicates=0` (the CLI equivalent of `min-similarity-lines=0`) produces zero duplicates and no similarity errors.",
+          "events": [
+            {
+              "kind": "read",
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "tests/checkers/unittest_similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "pylint/checkers/similar.py",
+              "is_error": true
+            },
+            {
+              "kind": "edit",
+              "path": "pylintrc",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "examples/pylintrc",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "tests/checkers/unittest_similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "tests/checkers/unittest_similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "/home/zeyuli/Code/milky-frog-lite/src/milky_frog/harness/skills/bundled/verification-before-completion/SKILL.md",
+              "is_error": true
+            }
+          ]
+        },
+        {
+          "run_index": 2,
+          "status": "paused_limit",
+          "termination": "capped",
+          "model_calls": 30,
+          "reads": [
+            {
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "path": "tests/checkers/unittest_similar.py",
+              "is_error": false
+            },
+            {
+              "path": "tests/checkers/unittest_similar.py",
+              "is_error": false
+            }
+          ],
+          "edits": [
+            "pylint/checkers/similar.py",
+            "pylint/checkers/similar.py",
+            "tests/checkers/unittest_similar.py"
+          ],
+          "tool_calls": 34,
+          "final_message": "model call limit reached (30)",
+          "events": [
+            {
+              "kind": "read",
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "tests/checkers/unittest_similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "pylint/checkers/similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "tests/checkers/unittest_similar.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "tests/checkers/unittest_similar.py",
+              "is_error": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "mwaskom__seaborn-3069",
+      "repo": "mwaskom/seaborn",
+      "base_commit": "54cab15bdacfaa05a88fbc5502a5b322d99f148e",
+      "relevant_files": [
+        "seaborn/_core/plot.py"
+      ],
+      "added_files": [],
+      "runs": [
+        {
+          "run_index": 0,
+          "status": "paused_limit",
+          "termination": "capped",
+          "model_calls": 30,
+          "reads": [
+            {
+              "path": "seaborn/_core/scales.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "path": "tests/_core/test_scales.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "path": "tests/_core/test_plot.py",
+              "is_error": false
+            },
+            {
+              "path": "tests/_core/test_plot.py",
+              "is_error": false
+            },
+            {
+              "path": "/home/zeyuli/Code/milky-frog-lite/src/milky_frog/harness/skills/bundled/brainstorming/SKILL.md",
+              "is_error": true
+            },
+            {
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            }
+          ],
+          "edits": [
+            "seaborn/_core/plot.py",
+            "seaborn/_core/plot.py",
+            "seaborn/_core/plot.py"
+          ],
+          "tool_calls": 39,
+          "final_message": "model call limit reached (30)",
+          "events": [
+            {
+              "kind": "read",
+              "path": "seaborn/_core/scales.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "tests/_core/test_scales.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "tests/_core/test_plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "tests/_core/test_plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "/home/zeyuli/Code/milky-frog-lite/src/milky_frog/harness/skills/bundled/brainstorming/SKILL.md",
+              "is_error": true
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            }
+          ]
+        },
+        {
+          "run_index": 1,
+          "status": "paused_limit",
+          "termination": "capped",
+          "model_calls": 30,
+          "reads": [
+            {
+              "path": "seaborn/_core/scales.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/categorical.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/categorical.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/_compat.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/_core/subplots.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/_core/subplots.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/_core/subplots.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            }
+          ],
+          "edits": [
+            "seaborn/_core/plot.py",
+            "seaborn/_core/plot.py"
+          ],
+          "tool_calls": 37,
+          "final_message": "model call limit reached (30)",
+          "events": [
+            {
+              "kind": "read",
+              "path": "seaborn/_core/scales.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/categorical.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/categorical.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/_compat.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/_core/subplots.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/_core/subplots.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/_core/subplots.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            }
+          ]
+        },
+        {
+          "run_index": 2,
+          "status": "paused_limit",
+          "termination": "capped",
+          "model_calls": 30,
+          "reads": [
+            {
+              "path": "seaborn/_core/scales.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/_core/rules.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "path": "seaborn/objects.py",
+              "is_error": false
+            }
+          ],
+          "edits": [
+            "seaborn/_core/plot.py",
+            "seaborn/_core/plot.py"
+          ],
+          "tool_calls": 36,
+          "final_message": "model call limit reached (30)",
+          "events": [
+            {
+              "kind": "read",
+              "path": "seaborn/_core/scales.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/_core/rules.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "seaborn/_core/plot.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "seaborn/objects.py",
+              "is_error": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "pytest-dev__pytest-5631",
+      "repo": "pytest-dev/pytest",
+      "base_commit": "cb828ebe70b4fa35cd5f9a7ee024272237eab351",
+      "relevant_files": [
+        "src/_pytest/compat.py"
+      ],
+      "added_files": [],
+      "runs": [
+        {
+          "run_index": 0,
+          "status": "completed",
+          "termination": "completed",
+          "model_calls": 12,
+          "reads": [
+            {
+              "path": "/home/zeyuli/Code/milky-frog-lite/src/milky_frog/harness/skills/bundled/debug/SKILL.md",
+              "is_error": true
+            },
+            {
+              "path": "src/_pytest/compat.py",
+              "is_error": false
+            },
+            {
+              "path": "testing/python/integration.py",
+              "is_error": false
+            },
+            {
+              "path": "testing/python/integration.py",
+              "is_error": false
+            },
+            {
+              "path": "src/_pytest/compat.py",
+              "is_error": false
+            },
+            {
+              "path": "src/_pytest/compat.py",
+              "is_error": false
+            }
+          ],
+          "edits": [
+            "src/_pytest/compat.py"
+          ],
+          "tool_calls": 11,
+          "final_message": "The fix is applied. Here's a summary of the change:\n\n**File:** `src/_pytest/compat.py:94`\n\n**Before:**\n```python\np.new in sentinels\n```\n\n**After:**\n```python\nany(p.new is s for s in sentinels)\n```\n\n**Why:** When `p.new` is a numpy array (e.g. from `@patch(target='XXXXXX', new=np.array([-5.5, 3.0]))`), Python's `in` operator evaluates `p.new == s` for each sentinel `s`. NumPy overrides `==` to return an element-wise array of booleans instead of a scalar, and when `in`'s internal `any()` tries to evaluate the truth value of that array, it raises `ValueError: The truth value of an array with more than one element is ambiguous`.\n\nThe fix uses `any(p.new is s for s in sentinels)` which performs identity comparisons (`is`) against the sentinel singleton objects (`DEFAULT`). Identity comparison always returns a single Python `bool`, regardless of what `__eq__` the object defines, so it works correctly with numpy arrays and any other type that overrides equality.",
+          "events": [
+            {
+              "kind": "read",
+              "path": "/home/zeyuli/Code/milky-frog-lite/src/milky_frog/harness/skills/bundled/debug/SKILL.md",
+              "is_error": true
+            },
+            {
+              "kind": "read",
+              "path": "src/_pytest/compat.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "testing/python/integration.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "testing/python/integration.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "src/_pytest/compat.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "src/_pytest/compat.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "src/_pytest/compat.py",
+              "is_error": false
+            }
+          ]
+        },
+        {
+          "run_index": 1,
+          "status": "completed",
+          "termination": "completed",
+          "model_calls": 8,
+          "reads": [
+            {
+              "path": "src/_pytest/compat.py",
+              "is_error": false
+            },
+            {
+              "path": "src/_pytest/compat.py",
+              "is_error": false
+            }
+          ],
+          "edits": [
+            "src/_pytest/compat.py"
+          ],
+          "tool_calls": 7,
+          "final_message": "The fix is clean. Here's what changed and why:\n\n**Problem:** On line 71 (original), `p.new in sentinels` uses Python's `in` operator. When `p.new` is a numpy array, `in` delegates to `__contains__`, which for numpy arrays returns an element-wise boolean array (e.g., `array([True, False])`) instead of a single `bool`. That array can't be used as a truth value, hence `ValueError: The truth value of an array with more than one element is ambiguous`.\n\n**Fix:** Replaced `p.new in sentinels` with `any(p.new is s for s in sentinels)`. This uses identity checks (`is`) instead of equality (`==` / `__contains__`). Since `sentinels` contains sentinel objects like `mock.DEFAULT`, identity comparison is the correct semantic — we want to know if `p.new` *is* the sentinel object, not if it's equal to it. And `any(...)` always returns a single Python `bool`, which works correctly regardless of the type of `p.new`.",
+          "events": [
+            {
+              "kind": "read",
+              "path": "src/_pytest/compat.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "src/_pytest/compat.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "src/_pytest/compat.py",
+              "is_error": false
+            }
+          ]
+        },
+        {
+          "run_index": 2,
+          "status": "completed",
+          "termination": "completed",
+          "model_calls": 21,
+          "reads": [
+            {
+              "path": "src/_pytest/compat.py",
+              "is_error": false
+            },
+            {
+              "path": "src/_pytest/compat.py",
+              "is_error": false
+            },
+            {
+              "path": "src/_pytest/compat.py",
+              "is_error": false
+            },
+            {
+              "path": "src/_pytest/compat.py",
+              "is_error": false
+            },
+            {
+              "path": "testing/python/integration.py",
+              "is_error": false
+            },
+            {
+              "path": "testing/python/integration.py",
+              "is_error": false
+            },
+            {
+              "path": "testing/python/integration.py",
+              "is_error": false
+            },
+            {
+              "path": "testing/python/integration.py",
+              "is_error": false
+            }
+          ],
+          "edits": [
+            "src/_pytest/compat.py",
+            "testing/python/integration.py"
+          ],
+          "tool_calls": 20,
+          "final_message": "All 5 tests pass (4 existing + 1 new), 4 skipped (missing `mock` package, unrelated).\n\n## Summary\n\n**Root cause:** In `src/_pytest/compat.py`, line 68, the expression `p.new in sentinels` uses Python's `in` operator which calls `__eq__` under the hood. When `p.new` is a numpy array, `__eq__` returns an element-wise array of booleans instead of a scalar — making the list comprehension and `len()` call raise `ValueError: The truth value of an array with more than one element is ambiguous`.\n\n**Fix:** Replaced `p.new in sentinels` with `any(p.new is s for s in sentinels)`. Since `sentinels` contains singleton objects (`unittest.mock.DEFAULT` or `mock.DEFAULT`), identity comparison (`is`) is the correct semantics — we want to check if `p.new` *is* one of those sentinel objects, not if it's equal to one.\n\n**Changes made:**\n1. `src/_pytest/compat.py` — Fixed the `num_mock_patch_args` function to use `any(p.new is s for s in sentinels)` instead of `p.new in sentinels`.\n2. `testing/python/integration.py` — Added `test_getfuncargnames_patch_with_numpy_array` to prevent regression.",
+          "events": [
+            {
+              "kind": "read",
+              "path": "src/_pytest/compat.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "src/_pytest/compat.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "src/_pytest/compat.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "src/_pytest/compat.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "src/_pytest/compat.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "testing/python/integration.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "testing/python/integration.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "testing/python/integration.py",
+              "is_error": false
+            },
+            {
+              "kind": "read",
+              "path": "testing/python/integration.py",
+              "is_error": false
+            },
+            {
+              "kind": "edit",
+              "path": "testing/python/integration.py",
+              "is_error": false
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
