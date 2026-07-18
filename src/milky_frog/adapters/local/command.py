@@ -7,6 +7,7 @@ import signal
 from pathlib import Path
 
 from milky_frog.adapters.process import make_command_result, with_presentation_env
+from milky_frog.core.cleanup import complete_cleanup
 from milky_frog.core.sandbox import (
     CommandOutcome,
     CommandPresentation,
@@ -35,10 +36,12 @@ async def _communicate_with_timeout(
         )
     except TimeoutError:
         _kill_process(process)
-        await communicate_task
+        await complete_cleanup(communicate_task, propagate_cancellation=True)
         raise
     except BaseException:
         _kill_process(process)
+        with contextlib.suppress(BaseException):
+            await complete_cleanup(communicate_task, propagate_cancellation=False)
         raise
     return stdout if stdout is not None else b""
 

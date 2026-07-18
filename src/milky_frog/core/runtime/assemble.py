@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from milky_frog.adapters.local import LocalSandbox
 from milky_frog.checkpoint import CheckpointStore
@@ -22,6 +23,83 @@ from milky_frog.models import Model, RetryingModel
 from milky_frog.project import ProjectConfig
 from milky_frog.settings import Settings
 from milky_frog.tokens import TokenCounter
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessAssembly:
+    """Shared ingredients for every Harness owned by one AgentSession.
+
+    Run variants choose only their Tool registry, approval mode, and (for a
+    write nested Run) a Workspace-specific Sandbox factory. The model,
+    Checkpoint, lifecycle hub, context, token, and retry wiring stay identical
+    by construction.
+    """
+
+    model: Model
+    checkpoints: CheckpointStore
+    hub: EventHub
+    sandbox_factory: SandboxFactory = LocalSandbox
+    context_loader: ContextLoader | None = None
+    token_counter: TokenCounter | None = None
+    max_retries: int = 3
+    retry_base_delay: float = 1.0
+
+    def make_harness(
+        self,
+        tools: ToolRegistry,
+        *,
+        sandbox_factory: SandboxFactory | None = None,
+        auto_approve: bool = False,
+    ) -> AgentHarness:
+        """Build one Harness variant without repeating shared composition."""
+        selected_sandbox_factory = (
+            self.sandbox_factory if sandbox_factory is None else sandbox_factory
+        )
+        harness = make_agent_harness(
+            self.model,
+            self.checkpoints,
+            self.hub,
+            tools=tools,
+            sandbox_factory=selected_sandbox_factory,
+            context_loader=self.context_loader,
+            token_counter=self.token_counter,
+            max_retries=self.max_retries,
+            retry_base_delay=self.retry_base_delay,
+        )
+        if auto_approve:
+            harness.policy.auto_approve()
+        return harness
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessRuntime:
+    """Foreground Harness plus the mutable Tool registry shared with MCP."""
+
+    foreground: AgentHarness
+    registry: ToolRegistry
+
+
+def make_harness_runtime(
+    assembly: HarnessAssembly,
+    *,
+    jina_api_key: str | None = None,
+) -> HarnessRuntime:
+    """Assemble the foreground and nested Run variants for one AgentSession."""
+    # Local import keeps the high-level runtime constructor here without making
+    # SubagentRuntime and its HarnessAssembly dependency an import cycle.
+    from milky_frog.core.runtime.subagent import SubagentRuntime
+    from milky_frog.harness.tools.builtins import SubagentTool
+
+    subagent_runner = SubagentRuntime(assembly, jina_api_key=jina_api_key)
+    # SubagentTool must be a constructor Tool (not registered later) so MCP
+    # reloads preserve it as a builtin.
+    registry = ToolRegistry(
+        (*default_tools(jina_api_key=jina_api_key), SubagentTool(subagent_runner))
+    )
+    return HarnessRuntime(
+        foreground=assembly.make_harness(registry),
+        registry=registry,
+    )
 
 
 def make_sandbox_factory(config: ProjectConfig) -> SandboxFactory:
@@ -82,7 +160,7 @@ def make_agent_harness(
     retry_base_delay: float = 1.0,
     jina_api_key: str | None = None,
 ) -> AgentHarness:
-    """Wire the Harness runtime stack — shared by ``AgentSession`` and tests."""
+    """Wire the Harness runtime graph shared by ``AgentSession`` and tests."""
     registry = (
         tools if tools is not None else ToolRegistry(default_tools(jina_api_key=jina_api_key))
     )

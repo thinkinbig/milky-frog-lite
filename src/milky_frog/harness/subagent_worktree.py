@@ -1,13 +1,22 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 import shlex
+import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from milky_frog.adapters.docker import BindMount
-from milky_frog.core.sandbox import CommandResult, CommandStartError, CommandTimeout, Sandbox
+from milky_frog.core.cleanup import complete_cleanup
+from milky_frog.core.sandbox import (
+    CommandOutcome,
+    CommandResult,
+    CommandStartError,
+    CommandTimeout,
+    Sandbox,
+)
 
 _WORKTREE_TIMEOUT_SECONDS = 30.0
 _SUBAGENT_REF_NAMESPACE = "subagent"
@@ -17,6 +26,8 @@ _SUBAGENT_REF_NAMESPACE = "subagent"
 # clean environment (CI, a fresh container) has no user.name/user.email set,
 # and `git commit`/`git merge --no-ff` refuse to create a commit without one.
 _GIT_IDENTITY = "-c user.name=milky-frog -c user.email=milky-frog@localhost"
+
+logger = logging.getLogger(__name__)
 
 
 class SubagentWorktreeError(RuntimeError):
@@ -65,26 +76,147 @@ async def create_worktree(
     # host anyone could pre-create it — or symlink it — and choose where every
     # worktree (i.e. a copy of the repo's working tree) lands. mkdtemp gives an
     # owner-only 0700 directory with a random name instead.
+    branch = f"{_SUBAGENT_REF_NAMESPACE}/{run_id}"
+    await _require_branch_absent(sandbox, branch)
     root = Path(tempfile.mkdtemp(prefix="milky-frog-worktree-"))
     path = root / run_id
-    branch = f"{_SUBAGENT_REF_NAMESPACE}/{run_id}"
     quoted_path = shlex.quote(str(path))
     quoted_branch = shlex.quote(branch)
     command = f"git worktree add {quoted_path} -b {quoted_branch} HEAD"
-    await _require_success(sandbox, command, action="create worktree")
-    resolved = path.resolve(strict=True)
-    if not resolved.is_dir():
-        raise SubagentWorktreeError(f"git reported success but worktree is missing: {resolved}")
+    try:
+        await _require_success(sandbox, command, action="create worktree")
+        resolved = path.resolve(strict=True)
+        if not resolved.is_dir():
+            raise SubagentWorktreeError(f"git reported success but worktree is missing: {resolved}")
 
-    # git writes the new branch's loose ref and reflog under these, so they
-    # normally exist by now — but a repo with packed refs or
-    # core.logAllRefUpdates=false may not have them, and a bind mount needs an
-    # existing host path. Doing it here (where creating the worktree and branch
-    # is the whole point) keeps ``git_docker_mounts`` a pure query.
-    main_git_dir, _admin = _worktree_git_dirs(resolved)
-    for ref_dir in _subagent_ref_dirs(main_git_dir):
-        ref_dir.mkdir(parents=True, exist_ok=True)
-    return SubagentWorktree(resolved, branch)
+        # git writes the new branch's loose ref and reflog under these, so they
+        # normally exist by now — but a repo with packed refs or
+        # core.logAllRefUpdates=false may not have them, and a bind mount needs an
+        # existing host path. Doing it here (where creating the worktree and branch
+        # is the whole point) keeps ``git_docker_mounts`` a pure query.
+        main_git_dir, _admin = _worktree_git_dirs(resolved)
+        for ref_dir in _subagent_ref_dirs(main_git_dir):
+            ref_dir.mkdir(parents=True, exist_ok=True)
+        return SubagentWorktree(resolved, branch)
+    except BaseException:
+        try:
+            await complete_cleanup(
+                _rollback_worktree_creation(sandbox, path, branch, root),
+                propagate_cancellation=False,
+            )
+        except BaseException:
+            logger.exception("failed to roll back worktree creation at %s", path)
+        raise
+
+
+async def _rollback_worktree_creation(
+    sandbox: Sandbox,
+    path: Path,
+    branch: str,
+    root: Path,
+) -> None:
+    """Remove every artifact a failed ``git worktree add`` may have created."""
+    worktree_removed = False
+    try:
+        outcome = await sandbox.run_command(
+            f"git worktree remove --force {shlex.quote(str(path))}",
+            timeout_seconds=_WORKTREE_TIMEOUT_SECONDS,
+        )
+    except BaseException:
+        logger.exception("failed to remove partially created worktree at %s", path)
+    else:
+        try:
+            registered = await _worktree_is_registered(sandbox, path)
+        except BaseException:
+            logger.exception("failed to verify worktree rollback at %s", path)
+            registered = None
+        worktree_removed = registered is False
+        if not worktree_removed:
+            logger.error(
+                "failed to remove partially created worktree at %s: %s",
+                path,
+                _outcome_detail(outcome),
+            )
+
+    try:
+        outcome = await sandbox.run_command(
+            f"git branch -D {shlex.quote(branch)}",
+            timeout_seconds=_WORKTREE_TIMEOUT_SECONDS,
+        )
+    except BaseException:
+        logger.exception("failed to remove partially created worktree branch %s", branch)
+    else:
+        try:
+            branch_exists = await _branch_exists(sandbox, branch)
+        except BaseException:
+            logger.exception("failed to verify worktree branch rollback for %s", branch)
+            branch_exists = None
+        if branch_exists is not False:
+            logger.error(
+                "failed to remove partially created worktree branch %s: %s",
+                branch,
+                _outcome_detail(outcome),
+            )
+
+    if worktree_removed:
+        # ``root`` is the private, owner-only directory created immediately
+        # above; a failed provision has never exposed it to a nested Run.
+        shutil.rmtree(root, ignore_errors=True)
+
+
+async def _worktree_is_registered(sandbox: Sandbox, path: Path) -> bool | None:
+    """Return registration state, or ``None`` when git cannot answer."""
+    outcome = await sandbox.run_command(
+        "git worktree list --porcelain",
+        timeout_seconds=_WORKTREE_TIMEOUT_SECONDS,
+    )
+    if not isinstance(outcome, CommandResult) or outcome.exit_code != 0:
+        return None
+    target = path.resolve(strict=False)
+    registered = (
+        Path(line.removeprefix("worktree ")).resolve(strict=False)
+        for line in outcome.output.splitlines()
+        if line.startswith("worktree ")
+    )
+    return target in registered
+
+
+async def _branch_exists(sandbox: Sandbox, branch: str) -> bool | None:
+    """Return branch state, or ``None`` when git cannot answer."""
+    ref = shlex.quote(f"refs/heads/{branch}")
+    outcome = await sandbox.run_command(
+        f"git show-ref --verify --quiet {ref}",
+        timeout_seconds=_WORKTREE_TIMEOUT_SECONDS,
+    )
+    match outcome:
+        case CommandResult(exit_code=0):
+            return True
+        case CommandResult(exit_code=1):
+            return False
+        case _:
+            return None
+
+
+def _outcome_detail(outcome: CommandOutcome) -> str:
+    match outcome:
+        case CommandStartError(message=message):
+            return message
+        case CommandTimeout(seconds=seconds):
+            return f"timed out after {seconds:g}s"
+        case CommandResult(exit_code=exit_code, output=output):
+            return output.strip() or f"exit code {exit_code}"
+
+
+async def _require_branch_absent(sandbox: Sandbox, branch: str) -> None:
+    """Refuse to provision over a branch the caller does not own."""
+    branch_exists = await _branch_exists(sandbox, branch)
+    match branch_exists:
+        case False:
+            return
+        case True:
+            raise SubagentWorktreeError(f"worktree branch already exists: {branch}")
+        case None:
+            raise SubagentWorktreeError(f"failed to inspect worktree branch {branch}")
 
 
 def _worktree_git_dirs(worktree_path: Path) -> tuple[Path, Path]:

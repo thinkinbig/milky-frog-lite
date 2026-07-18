@@ -32,6 +32,7 @@ from milky_frog.adapters.docker.cli import (
 )
 from milky_frog.adapters.local import LocalSandbox
 from milky_frog.adapters.process import with_presentation_env
+from milky_frog.core.cleanup import complete_cleanup
 from milky_frog.core.sandbox import CommandOutcome, CommandPresentation, Sandbox
 from milky_frog.project import ProjectConfig
 
@@ -187,13 +188,19 @@ class ContainerRegistry:
             # process's container — and without this the container is orphaned
             # with nothing left holding a reference to it.
             with contextlib.suppress(BaseException):
-                await self._cli.capture([DOCKER_BINARY, "rm", "-f", "-v", container_name])
+                await complete_cleanup(
+                    self._cli.capture([DOCKER_BINARY, "rm", "-f", "-v", container_name]),
+                    propagate_cancellation=False,
+                )
             raise
         if result.exit_code != 0:
             # The name is unique to this start attempt, so it cannot belong to
             # a concurrently running milky-frog process — safe to remove.
             with contextlib.suppress(Exception):
-                await self._cli.capture([DOCKER_BINARY, "rm", "-f", "-v", container_name])
+                await complete_cleanup(
+                    self._cli.capture([DOCKER_BINARY, "rm", "-f", "-v", container_name]),
+                    propagate_cancellation=True,
+                )
             raise DockerUnavailable(
                 f"failed to start container from image {self._image!r}: "
                 f"{result.stderr.strip() or result.stdout.strip()}"
@@ -205,11 +212,17 @@ class ContainerRegistry:
             # cannot use its id — best-effort cleanup by name so the next
             # acquire() for this Workspace doesn't hit "name already in use".
             with contextlib.suppress(Exception):
-                await self._cli.capture([DOCKER_BINARY, "rm", "-f", "-v", container_name])
+                await complete_cleanup(
+                    self._cli.capture([DOCKER_BINARY, "rm", "-f", "-v", container_name]),
+                    propagate_cancellation=True,
+                )
             raise DockerUnavailable("docker run returned no container id")
         return container_id
 
     async def aclose(self) -> None:
+        await complete_cleanup(self._close_all(), propagate_cancellation=True)
+
+    async def _close_all(self) -> None:
         async with self._lock:
             if self._closed:
                 return

@@ -38,11 +38,11 @@ class SubagentRejected(RuntimeError):
 
 
 class SubagentRunner(Protocol):
-    """Runs a nested, read-only Run against the parent's workspace.
+    """Run nested work with the requested capability against a parent Workspace.
 
-    Owned and constructed by ``AgentSession`` (the only place holding every
-    ingredient — model, hub, checkpoints, sandbox_factory — needed to build a
-    second ``AgentHarness``), then injected into ``SubagentTool``.
+    The runtime composition layer owns the concrete runner and injects it into
+    ``SubagentTool``; the Tool knows nothing about Harness, Worktree, or Sandbox
+    construction.
     """
 
     async def __call__(
