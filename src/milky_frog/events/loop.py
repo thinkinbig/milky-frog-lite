@@ -179,6 +179,13 @@ class AgentLoop:
                     # raises it. The synthesized call goes through the same policy
                     # check as any model-issued call: NEEDS_APPROVAL joins this
                     # batch's own pause, ALLOW/DENY execute immediately.
+                    # Before synthesizing: a synthetic call appended to a run that
+                    # is finishing cancelled would persist a tool call nothing
+                    # will ever execute, which resume then repairs into an
+                    # "interrupted" result — so the merge silently never happens.
+                    if cancelled:
+                        return await self._hub.finish_cancelled(state)
+
                     synthesized: list[ToolCall] = []
                     for call, outcome in resolved:
                         if outcome.follow_up is not None:
@@ -189,9 +196,6 @@ class AgentLoop:
                             )
                             state = append_synthetic_tool_call(state, synthetic)
                             synthesized.append(synthetic)
-
-                    if cancelled:
-                        return await self._hub.finish_cancelled(state)
 
                     if synthesized:
                         synth_decisions = [

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import shlex
 import tempfile
 from dataclasses import dataclass
@@ -59,10 +60,14 @@ async def create_worktree(
         raise SubagentWorktreeError(
             f"worktree management Sandbox must target the parent Workspace: {base}"
         )
-    root = Path(tempfile.gettempdir()) / "milky-frog-worktrees"
-    root.mkdir(parents=True, exist_ok=True)
+    # mkdtemp, not a fixed <tmp>/milky-frog-worktrees: that shared name is
+    # predictable and was created with mkdir(exist_ok=True), so on a multi-user
+    # host anyone could pre-create it — or symlink it — and choose where every
+    # worktree (i.e. a copy of the repo's working tree) lands. mkdtemp gives an
+    # owner-only 0700 directory with a random name instead.
+    root = Path(tempfile.mkdtemp(prefix="milky-frog-worktree-"))
     path = root / run_id
-    branch = f"subagent/{run_id}"
+    branch = f"{_SUBAGENT_REF_NAMESPACE}/{run_id}"
     quoted_path = shlex.quote(str(path))
     quoted_branch = shlex.quote(branch)
     command = f"git worktree add {quoted_path} -b {quoted_branch} HEAD"
@@ -70,7 +75,38 @@ async def create_worktree(
     resolved = path.resolve(strict=True)
     if not resolved.is_dir():
         raise SubagentWorktreeError(f"git reported success but worktree is missing: {resolved}")
+
+    # git writes the new branch's loose ref and reflog under these, so they
+    # normally exist by now — but a repo with packed refs or
+    # core.logAllRefUpdates=false may not have them, and a bind mount needs an
+    # existing host path. Doing it here (where creating the worktree and branch
+    # is the whole point) keeps ``git_docker_mounts`` a pure query.
+    main_git_dir, _admin = _worktree_git_dirs(resolved)
+    for ref_dir in _subagent_ref_dirs(main_git_dir):
+        ref_dir.mkdir(parents=True, exist_ok=True)
     return SubagentWorktree(resolved, branch)
+
+
+def _worktree_git_dirs(worktree_path: Path) -> tuple[Path, Path]:
+    """Resolve ``(main repo .git dir, this worktree's admin subdir)``.
+
+    A linked worktree's ``.git`` is a pointer file (``gitdir: <main-repo>/.git/
+    worktrees/<id>``) rather than a directory.
+    """
+    gitdir_line = (worktree_path / ".git").read_text(encoding="utf-8").strip()
+    prefix = "gitdir:"
+    if not gitdir_line.startswith(prefix):
+        raise SubagentWorktreeError(f"unexpected worktree .git pointer: {gitdir_line!r}")
+    worktree_admin_dir = Path(gitdir_line[len(prefix) :].strip()).resolve(strict=True)
+    return worktree_admin_dir.parent.parent, worktree_admin_dir
+
+
+def _subagent_ref_dirs(main_git_dir: Path) -> tuple[Path, Path]:
+    """The ref and reflog directories scoping every subagent branch."""
+    return (
+        main_git_dir / "refs" / "heads" / _SUBAGENT_REF_NAMESPACE,
+        main_git_dir / "logs" / "refs" / "heads" / _SUBAGENT_REF_NAMESPACE,
+    )
 
 
 def git_docker_mounts(worktree: SubagentWorktree) -> list[BindMount]:
@@ -89,19 +125,12 @@ def git_docker_mounts(worktree: SubagentWorktree) -> list[BindMount]:
     worktree's own admin subdir (its HEAD/index/reflog), and the
     ``refs/heads/subagent/`` namespace that ``create_worktree`` scopes every
     subagent branch under — never the parent's own branch refs.
+
+    A pure query: ``create_worktree`` has already prepared every path named
+    here, so calling this never mutates the repository.
     """
-    gitdir_line = (worktree.path / ".git").read_text(encoding="utf-8").strip()
-    prefix = "gitdir:"
-    if not gitdir_line.startswith(prefix):
-        raise SubagentWorktreeError(f"unexpected worktree .git pointer: {gitdir_line!r}")
-    worktree_admin_dir = Path(gitdir_line[len(prefix) :].strip()).resolve(strict=True)
-    main_git_dir = worktree_admin_dir.parent.parent
-
-    subagent_refs_dir = main_git_dir / "refs" / "heads" / _SUBAGENT_REF_NAMESPACE
-    subagent_reflogs_dir = main_git_dir / "logs" / "refs" / "heads" / _SUBAGENT_REF_NAMESPACE
-    subagent_refs_dir.mkdir(parents=True, exist_ok=True)
-    subagent_reflogs_dir.mkdir(parents=True, exist_ok=True)
-
+    main_git_dir, worktree_admin_dir = _worktree_git_dirs(worktree.path)
+    subagent_refs_dir, subagent_reflogs_dir = _subagent_ref_dirs(main_git_dir)
     return [
         BindMount(str(main_git_dir), read_only=True),
         BindMount(str(main_git_dir / "objects")),
@@ -135,10 +164,18 @@ async def merge_and_remove_worktree(
         case CommandTimeout(seconds=seconds):
             raise SubagentWorktreeError(f"failed to merge {branch}: timed out after {seconds:g}s")
         case CommandResult(exit_code=exit_code, output=output) if exit_code != 0:
+            # Ask before aborting — `merge --abort` clears the conflicted index.
+            conflicted = await _has_unmerged_paths(sandbox)
             await sandbox.run_command(
                 "git merge --abort", timeout_seconds=_WORKTREE_TIMEOUT_SECONDS
             )
             detail = output.strip() or f"exit code {exit_code}"
+            if not conflicted:
+                # A merge that never started: unknown branch, unborn HEAD, or a
+                # dirty parent tree. Raising MergeConflictError here would make
+                # MergeWorktreeTool offer a conflict-resolution subagent for a
+                # conflict that does not exist.
+                raise SubagentWorktreeError(f"failed to merge {branch}: {detail}")
             raise MergeConflictError(
                 f"merge conflict on {branch}, aborted ({detail}); "
                 f"worktree preserved at {worktree} for manual resolution",
@@ -146,26 +183,47 @@ async def merge_and_remove_worktree(
                 branch=branch,
             )
 
-    await _require_success(
-        sandbox,
-        f"git worktree remove {shlex.quote(str(worktree))}",
-        action="remove merged worktree",
+    await _remove_worktree_dir(sandbox, worktree, action="remove merged worktree")
+
+
+async def _has_unmerged_paths(sandbox: Sandbox) -> bool:
+    """Whether the index holds conflicted paths — i.e. a real content conflict.
+
+    ``git merge`` exits non-zero both for a genuine conflict and for a merge
+    that never started (unknown branch, unborn HEAD, dirty working tree). Only
+    the former leaves unmerged entries in the index, so only the former has
+    anything for a human — or a resolution subagent — to resolve.
+    """
+    outcome = await sandbox.run_command(
+        "git ls-files --unmerged", timeout_seconds=_WORKTREE_TIMEOUT_SECONDS
     )
+    match outcome:
+        case CommandResult(exit_code=0, output=output):
+            return bool(output.strip())
+        case _:
+            return False
 
 
 async def finalize_worktree(
     sandbox: Sandbox,
     worktree: SubagentWorktree,
 ) -> WorktreeOutcome:
-    """Remove a clean worktree; commit and preserve a dirty one for parent-Run review.
+    """Preserve a worktree that produced work; remove one that produced none.
 
-    A write-capability subagent may exhaust its model-call budget after
-    writing files but before running ``git commit`` itself — leaving changes
-    on disk that ``merge_worktree``'s ``git merge --no-ff`` would silently
-    skip, since that command merges committed history on the branch, not the
-    working tree. Committing here (rather than relying on the subagent to do
-    it) guarantees any written changes are reachable from the branch tip
-    before a merge is ever attempted.
+    Two ways a subagent leaves work behind, and both must be kept:
+
+    - **Uncommitted.** It may exhaust its model-call budget after writing files
+      but before running ``git commit`` — changes that ``merge_worktree``'s
+      ``git merge --no-ff`` would silently skip, since that merges committed
+      history, not the working tree. Committing here guarantees they are
+      reachable from the branch tip before any merge is attempted.
+    - **Already committed.** A well-behaved subagent commits its own work, so
+      the tree is clean. Deciding on ``status --porcelain`` alone would call
+      that "nothing to do", delete the worktree, and skip the merge follow-up —
+      silently dropping the subagent's entire output.
+
+    So the kept/removed decision is "is the branch ahead of the parent's HEAD",
+    which covers both; a dirty tree is just one way to get there.
     """
     quoted_path = shlex.quote(str(worktree.path))
     status = await _require_success(
@@ -185,14 +243,47 @@ async def finalize_worktree(
             f"commit -m {shlex.quote(f'subagent: {worktree.branch}')}",
             action="commit worktree changes",
         )
+
+    if await _commits_ahead_of_head(sandbox, worktree.branch):
         return WorktreeOutcome(worktree, kept=True)
 
+    await _remove_worktree_dir(sandbox, worktree.path, action="remove clean worktree")
+    return WorktreeOutcome(worktree, kept=False)
+
+
+async def _remove_worktree_dir(sandbox: Sandbox, path: Path, *, action: str) -> None:
+    """Remove a worktree, then drop the private temp root ``create_worktree`` made."""
     await _require_success(
         sandbox,
-        f"git worktree remove {shlex.quote(str(worktree.path))}",
-        action="remove clean worktree",
+        f"git worktree remove {shlex.quote(str(path))}",
+        action=action,
     )
-    return WorktreeOutcome(worktree, kept=False)
+    # That root holds nothing but this one worktree and is owner-only, so it is
+    # ours to remove — but never at the cost of failing the removal itself.
+    with contextlib.suppress(OSError):
+        path.parent.rmdir()
+
+
+async def _commits_ahead_of_head(sandbox: Sandbox, branch: str) -> bool:
+    """Whether ``branch`` carries commits the parent Workspace's HEAD lacks.
+
+    ``sandbox`` targets the parent Workspace, so ``HEAD`` here is the merge
+    destination — the same ref ``merge_and_remove_worktree`` merges into.
+    """
+    counted = await _require_success(
+        sandbox,
+        f"git rev-list --count {shlex.quote(branch)} --not HEAD",
+        action="count worktree commits",
+    )
+    tail = counted.output.strip().splitlines()
+    if not tail:
+        return False
+    try:
+        return int(tail[-1].strip()) > 0
+    except ValueError as error:
+        raise SubagentWorktreeError(
+            f"could not read commit count for {branch}: {counted.output.strip()!r}"
+        ) from error
 
 
 async def _require_success(sandbox: Sandbox, command: str, *, action: str) -> CommandResult:

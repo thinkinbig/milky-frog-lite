@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -36,6 +37,7 @@ from milky_frog.harness.mcp import McpClientManager, load_mcp_config
 from milky_frog.harness.prompt import make_context_loader
 from milky_frog.harness.skills import SkillCatalog
 from milky_frog.harness.subagent_worktree import (
+    SubagentWorktreeError,
     create_worktree,
     finalize_worktree,
     git_docker_mounts,
@@ -47,6 +49,7 @@ from milky_frog.harness.tools.builtins import (
     SubagentTool,
     default_tools,
     read_only_tools,
+    write_subagent_tools,
 )
 from milky_frog.project import load_project_config, project_root
 from milky_frog.settings import Settings
@@ -281,9 +284,18 @@ class AgentSession:
                 # git_docker_mounts.
                 from milky_frog.adapters.docker import DockerSandboxFactory
 
-                assert parent_config.sandbox.image is not None
+                image = parent_config.sandbox.image
+                if image is None:
+                    # Same class of misconfiguration as the kind check above, so
+                    # it gets the same answer the model can act on. An assert
+                    # would surface as a bare AssertionError, and `python -O`
+                    # would strip it and let image=None reach `docker run`.
+                    raise SubagentRejected(
+                        "subagent write capability requires [sandbox].image when "
+                        '[sandbox].kind = "docker"'
+                    )
                 write_sandbox_factory = DockerSandboxFactory(
-                    image=parent_config.sandbox.image,
+                    image=image,
                     workspace_mount=parent_config.sandbox.workspace_mount,
                     mask_paths=parent_config.sandbox.mask_paths,
                     config=parent_config,
@@ -293,7 +305,9 @@ class AgentSession:
                     model=_active(self._model),
                     checkpoints=store,
                     hub=_active(self._hub),
-                    tools=ToolRegistry(default_tools(jina_api_key=self._settings.jina_api_key)),
+                    tools=ToolRegistry(
+                        write_subagent_tools(jina_api_key=self._settings.jina_api_key)
+                    ),
                     sandbox_factory=write_sandbox_factory,
                     context_loader=make_context_loader(self._settings.home),
                     token_counter=counter,
@@ -302,20 +316,31 @@ class AgentSession:
                 )
                 nested_write_harness.policy.auto_approve()
                 try:
-                    result = await nested_write_harness.run(
-                        RunRequest(
-                            prompt=prompt,
-                            workspace=worktree.path,
-                            max_model_calls=calls,
-                            cancellation=cancellation,
-                            run_kind="subagent",
-                            parent_run_id=parent_run_id,
+                    try:
+                        result = await nested_write_harness.run(
+                            RunRequest(
+                                prompt=prompt,
+                                workspace=worktree.path,
+                                max_model_calls=calls,
+                                cancellation=cancellation,
+                                run_kind="subagent",
+                                parent_run_id=parent_run_id,
+                            )
                         )
-                    )
-                finally:
-                    aclose = getattr(write_sandbox_factory, "aclose", None)
-                    if aclose is not None:
-                        await aclose()
+                    finally:
+                        await write_sandbox_factory.aclose()
+                except BaseException:
+                    # The nested Run raised (model error, cancellation, container
+                    # failure) and nothing downstream holds a reference to the
+                    # worktree any more, so `git worktree list` would accumulate a
+                    # stale entry per failure. finalize_worktree rather than an
+                    # unconditional delete: a Run that failed *after* writing
+                    # something keeps that work committed on its branch — this
+                    # module never destroys unreviewed work — while the common case
+                    # of failing before any write leaves nothing and is removed.
+                    with contextlib.suppress(SubagentWorktreeError):
+                        await finalize_worktree(management_sandbox, worktree)
+                    raise
                 worktree_outcome = await finalize_worktree(management_sandbox, worktree)
                 return SubagentOutcome(
                     result,

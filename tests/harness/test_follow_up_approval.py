@@ -24,12 +24,19 @@ from milky_frog.domain import (
     ModelRequest,
     ModelResponse,
     RunRequest,
+    RunState,
     RunStatus,
     StreamDone,
     ToolCall,
 )
 from milky_frog.events import EventHub
-from milky_frog.harness.state import unmatched_tool_calls
+from milky_frog.events.emitter import format_approval_message
+from milky_frog.harness.state import (
+    append_model_response,
+    append_synthetic_tool_call,
+    append_tool_result,
+    unmatched_tool_calls,
+)
 from milky_frog.harness.tools import ToolContext, ToolRegistry, ToolResult
 from tests.stubs import make_harness
 
@@ -177,3 +184,64 @@ async def test_denying_follow_up_never_executes_it(tmp_path: Path) -> None:
 
     assert result.status is RunStatus.COMPLETED
     assert confirm.calls == []
+
+
+def test_synthetic_call_does_not_hide_a_sibling_awaiting_approval() -> None:
+    """A follow-up lands in its own assistant message; siblings must survive it.
+
+    ``unmatched_tool_calls`` scanning only the trailing assistant message would
+    drop ``call-bash`` here, so its verdict could never be applied and the
+    transcript would keep an assistant ``tool_calls`` entry with no Tool result
+    — which providers reject on the next turn.
+    """
+    state = RunState("run-1", Path("/tmp"))
+    state = append_model_response(
+        state,
+        ModelResponse(
+            content="",
+            tool_calls=(
+                ToolCall("call-subagent", "subagent", {"capability": "write"}),
+                ToolCall("call-bash", "bash", {"command": "ls"}),
+            ),
+        ),
+    )
+    state = append_tool_result(state, ToolCall("call-subagent", "subagent", {}), ToolResult("done"))
+    state = append_synthetic_tool_call(
+        state, ToolCall("call-subagent:follow-up", "merge_worktree", {})
+    )
+
+    assert [call.id for call in unmatched_tool_calls(state.messages)] == [
+        "call-bash",
+        "call-subagent:follow-up",
+    ]
+
+
+def test_two_synthetic_calls_in_one_batch_both_stay_pending() -> None:
+    """Two write subagents each leaving a worktree must both get a merge decision."""
+    state = RunState("run-2", Path("/tmp"))
+    state = append_model_response(
+        state,
+        ModelResponse(
+            content="",
+            tool_calls=(ToolCall("a", "subagent", {}), ToolCall("b", "subagent", {})),
+        ),
+    )
+    state = append_tool_result(state, ToolCall("a", "subagent", {}), ToolResult("done"))
+    state = append_tool_result(state, ToolCall("b", "subagent", {}), ToolResult("done"))
+    state = append_synthetic_tool_call(state, ToolCall("a:follow-up", "merge_worktree", {}))
+    state = append_synthetic_tool_call(state, ToolCall("b:follow-up", "merge_worktree", {}))
+
+    assert [call.id for call in unmatched_tool_calls(state.messages)] == [
+        "a:follow-up",
+        "b:follow-up",
+    ]
+
+
+def test_long_prompt_is_truncated_in_the_approval_preview() -> None:
+    """A multi-KB subagent prompt must not push the approval menu off screen."""
+    message = format_approval_message(
+        ToolCall("c1", "subagent", {"prompt": "x" * 5000, "capability": "write"})
+    )
+
+    assert len(message) < 400
+    assert "…" in message

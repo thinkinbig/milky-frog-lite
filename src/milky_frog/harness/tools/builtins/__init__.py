@@ -41,6 +41,22 @@ def default_tools(*, jina_api_key: str | None = None) -> tuple[Tool, ...]:
     return tuple(tools)
 
 
+def write_subagent_tools(*, jina_api_key: str | None = None) -> tuple[Tool, ...]:
+    """``default_tools`` minus ``merge_worktree``, for a ``write`` nested Run.
+
+    A write subagent works inside its own throwaway worktree and its harness
+    runs with ``policy.auto_approve()``, so leaving ``merge_worktree``
+    registered would let it merge any branch it names with no human in the
+    loop — defeating the ``requires_approval = True`` that exists to make
+    "should this land" a human decision. Merging is the *parent* Run's call.
+    """
+    return tuple(
+        tool
+        for tool in default_tools(jina_api_key=jina_api_key)
+        if tool.name != MergeWorktreeTool.name
+    )
+
+
 def read_only_tools(*, jina_api_key: str | None = None) -> tuple[Tool, ...]:
     """The read-only subset of ``default_tools`` for a nested ``subagent`` Run.
 
@@ -75,4 +91,5 @@ __all__ = [
     "WriteFileTool",
     "default_tools",
     "read_only_tools",
+    "write_subagent_tools",
 ]
