@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-from difflib import unified_diff
-
 from pydantic import BaseModel, Field
 
 from milky_frog.core.sandbox import SandboxViolation
 from milky_frog.domain import ToolResult
 from milky_frog.harness.tools.base import ToolContext
-from milky_frog.harness.tools.truncate import truncate_tool_output
-
-_DIFF_CONTEXT_LINES = 3
 
 
 class EditFileInput(BaseModel):
@@ -26,8 +21,7 @@ class EditFileTool:
     description = (
         "Replace an exact string in a workspace text file. `old` must appear exactly once "
         "(include enough surrounding context to make it unique); it is replaced with `new`. "
-        "The path must stay inside the workspace; sensitive paths are denied. "
-        "Returns a unified diff of the change — do not re-read the file to verify it."
+        "The path must stay inside the workspace; sensitive paths are denied."
     )
     input_model: type[BaseModel] = EditFileInput
 
@@ -55,30 +49,8 @@ class EditFileTool:
                 "add surrounding context",
                 is_error=True,
             )
-        updated = content.replace(params.old, params.new)
         try:
-            resolved.write_text(updated, encoding="utf-8")
+            resolved.write_text(content.replace(params.old, params.new), encoding="utf-8")
         except OSError as error:
             return ToolResult(f"{type(error).__name__}: {error}", is_error=True)
-        diff = _render_diff(params.path, content, updated)
-        diff = truncate_tool_output(
-            diff,
-            max_chars=sandbox.config.read_output_max_chars,
-            workspace=sandbox.workspace,
-            label="edit_diff",
-            counter=context.token_counter,
-        )
-        return ToolResult(f"edited {params.path}\n{diff}")
-
-
-def _render_diff(path: str, before: str, after: str) -> str:
-    """Unified diff of the change, so the Agent need not re-read to verify it."""
-    return "".join(
-        unified_diff(
-            before.splitlines(keepends=True),
-            after.splitlines(keepends=True),
-            fromfile=f"a/{path}",
-            tofile=f"b/{path}",
-            n=_DIFF_CONTEXT_LINES,
-        )
-    )
+        return ToolResult(f"edited {params.path}")

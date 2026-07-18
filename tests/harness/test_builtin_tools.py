@@ -16,7 +16,7 @@ from milky_frog.harness.tools.builtins import (
     default_tools,
     write_subagent_tools,
 )
-from milky_frog.project import DEFAULT_READ_OUTPUT_MAX_CHARS, ProjectConfig
+from milky_frog.project import ProjectConfig
 
 
 def _context(
@@ -196,41 +196,6 @@ async def test_edit_file_replaces_unique_occurrence(tmp_path: Path) -> None:
 
     assert not result.is_error
     assert (tmp_path / "f.txt").read_text(encoding="utf-8") == "alpha BETA gamma"
-
-
-async def test_edit_file_returns_diff_of_the_change(tmp_path: Path) -> None:
-    """The result shows what the edit produced, so the Agent need not re-read.
-
-    Duplicate reads in the read-noise benchmark were dominated by the Agent
-    re-reading the file it had just edited to verify the result (#108).
-    """
-    (tmp_path / "f.txt").write_text("one\ntwo\nthree\n", encoding="utf-8")
-
-    result = await EditFileTool().execute(
-        _context(tmp_path), EditFileTool.input_model(path="f.txt", old="two", new="TWO")
-    )
-
-    assert not result.is_error
-    assert "-two" in result.content
-    assert "+TWO" in result.content
-    # Unchanged neighbours are the context the Agent would otherwise re-read for.
-    assert "one" in result.content
-    assert "three" in result.content
-
-
-async def test_edit_file_diff_is_truncated_for_large_changes(tmp_path: Path) -> None:
-    """A whole-file rewrite must not replay the whole file into the transcript."""
-    lines = 20_000
-    (tmp_path / "big.txt").write_text("old\n" * lines, encoding="utf-8")
-
-    result = await EditFileTool().execute(
-        _context(tmp_path),
-        EditFileTool.input_model(path="big.txt", old="old\n" * lines, new="new\n" * lines),
-    )
-
-    assert not result.is_error
-    # The unified diff of this change is ~200k chars; the read cap must bound it.
-    assert len(result.content) < DEFAULT_READ_OUTPUT_MAX_CHARS + 1000
 
 
 async def test_edit_file_rejects_non_unique_match(tmp_path: Path) -> None:
