@@ -15,8 +15,6 @@ class AttachOutcome:
 
     run_id: str
     kind: str  # "prompt_continue" | "approval_pending" | "advance" | "attached"
-    tool_name: str = ""
-    approval_reason: str = ""
     pending_calls: tuple[ToolCall, ...] = ()
 
 
@@ -46,15 +44,10 @@ class RunController:
         stored = self._checkpoints.get_run(run_id)
         if stored is not None and stored.status is RunStatus.WAITING_FOR_APPROVAL:
             state = self._checkpoints.load_state(run_id)
-            pending = unmatched_tool_calls(state.messages)
-            tool_name = pending[0].name if pending else ""
-            reason = stored.final_message or "Tool approval required"
             return AttachOutcome(
                 run_id=run_id,
                 kind="approval_pending",
-                tool_name=tool_name,
-                approval_reason=reason,
-                pending_calls=pending,
+                pending_calls=unmatched_tool_calls(state.messages),
             )
 
         if advance_pending:

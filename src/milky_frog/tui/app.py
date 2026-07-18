@@ -68,6 +68,29 @@ class TuiLaunch:
     advance_pending: bool = False
 
 
+def _verdict_summary(verdicts: dict[str, ApprovalVerdict]) -> str:
+    """Describe what the user just decided, in their own terms.
+
+    A single call reads as the one decision it was — including the denial reason
+    they typed, which is the whole point of "deny and tell the agent why".
+    Only a real batch gets counted.
+    """
+    if len(verdicts) == 1:
+        verdict = next(iter(verdicts.values()))
+        if verdict.decision is ApprovalDecision.APPROVE:
+            return "Approved"
+        if verdict.denial_reason:
+            return f"Denied (reason: {verdict.denial_reason})"
+        return "Denied"
+
+    approved = sum(verdict.decision is ApprovalDecision.APPROVE for verdict in verdicts.values())
+    denied = len(verdicts) - approved
+    summary = f"Approval batch complete · {approved} approved"
+    if denied:
+        summary += f", {denied} denied"
+    return summary
+
+
 # ── Main App ───────────────────────────────────────────────────────────
 
 
@@ -635,14 +658,9 @@ class MilkyFrogApp(App[None]):
         self.session.busy = True
         self._conv.close_phase()
 
-        approved = sum(
-            verdict.decision is ApprovalDecision.APPROVE for verdict in verdicts.values()
+        self._append(
+            conversation_row(Text("▸", style="bold cyan"), Text(_verdict_summary(verdicts), "dim"))
         )
-        denied = len(verdicts) - approved
-        summary = f"Approval batch complete · {approved} approved"
-        if denied:
-            summary += f", {denied} denied"
-        self._append(conversation_row(Text("▸", style="bold cyan"), Text(summary, style="dim")))
         self.query_one(RunStatusBar).set_working()
         self.query_one("#prompt-input", PromptInput).disabled = True
 

@@ -9,7 +9,6 @@ from milky_frog.checkpoint import CheckpointStore, RunClaimError, StoredRun
 from milky_frog.core.sandbox import Sandbox, SandboxFactory
 from milky_frog.core.session_tool_policy import SessionToolPolicy
 from milky_frog.domain import (
-    ApprovalDecision,
     ApprovalVerdict,
     ResumeError,
     RunCancellation,
@@ -288,9 +287,14 @@ class AgentHarness:
         still_pending = tuple(call for call in pending if call.id not in verdicts)
 
         if decided:
-            for call, verdict in decided:
-                if verdict.decision is ApprovalDecision.APPROVE:
-                    await self._hub.before_tool(run_id, call)
+            # Every decided call gets a ``before_tool``, denials included: a
+            # denial still produces a ``ToolResult`` and an ``after_tool``, and a
+            # result whose opener never fired leaves subscribers with an orphan
+            # (the TUI drops the tool card, so a denied bash call renders as a
+            # bare "denied by user" with no command). Matches
+            # ``AgentLoop._execute_decided_batch``, which also opens DENY calls.
+            for call, _verdict in decided:
+                await self._hub.before_tool(run_id, call)
             batch = [
                 (
                     call,

@@ -21,6 +21,7 @@ from milky_frog.domain import (
     ToolCall,
 )
 from milky_frog.events import EventHub
+from milky_frog.events.events import RunAfterTool, RunBeforeTool
 from milky_frog.harness.state import append_model_response, unmatched_tool_calls
 from milky_frog.harness.tools import ToolContext, ToolRegistry, ToolResult
 from tests.checkpoint_helpers import seed_run, tool_messages
@@ -178,3 +179,54 @@ async def test_respond_approval_applies_verdict_only_to_first_call(tmp_path: Pat
     assert tool_messages(state) == ("a",)  # only the first call was executed
     still_pending = unmatched_tool_calls(state.messages)
     assert {call.id for call in still_pending} == {"call-2"}
+
+
+@pytest.mark.asyncio
+async def test_respond_approvals_opens_every_decided_call_including_denials(
+    tmp_path: Path,
+) -> None:
+    """``before_tool`` fires for denials too, so no ``after_tool`` is an orphan.
+
+    A denial still produces a ``ToolResult`` and an ``after_tool``. Subscribers
+    pair the two — the TUI opens a tool card on ``before_tool`` and completes it
+    on ``after_tool`` — so a result whose opener never fired renders as a bare
+    "denied by user" with no indication of which call was denied.
+    """
+    store = SqliteCheckpointStore(tmp_path / "state.db")
+    run_id = "run-1"
+    calls = (
+        ToolCall("call-1", "echo", {"text": "keep"}),
+        ToolCall("call-2", "echo", {"text": "drop"}),
+    )
+    _seed_pending(store, run_id, tmp_path, calls)
+
+    hub = EventHub()
+    opened: list[str] = []
+    closed: list[str] = []
+
+    @hub.on(RunBeforeTool)
+    async def _record_open(event: RunBeforeTool, _ctx: object = None) -> None:
+        opened.append(event.call.id)
+
+    @hub.on(RunAfterTool)
+    async def _record_close(event: RunAfterTool, _ctx: object = None) -> None:
+        closed.append(event.call.id)
+
+    harness = make_harness(
+        model=_CompletesNextTurnModel(),
+        tools=ToolRegistry((EchoTool(),)),
+        checkpoints=store,
+        hub=hub,
+    )
+
+    await harness.respond_approvals(
+        run_id,
+        max_model_calls=2,
+        verdicts={
+            "call-1": ApprovalVerdict(ApprovalDecision.APPROVE),
+            "call-2": ApprovalVerdict(ApprovalDecision.DENY),
+        },
+    )
+
+    assert opened == ["call-1", "call-2"]
+    assert closed == opened
