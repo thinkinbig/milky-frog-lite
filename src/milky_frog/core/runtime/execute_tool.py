@@ -41,7 +41,9 @@ async def execute_tool(
             search_prefix=search_prefix,
         )
         input_model = tool.input_model.model_validate(call.arguments)
-        result: ToolResult = await run_cancellable(tool.execute(context, input_model), cancellation)
+        result: ToolResult = await run_cancellable(
+            tool.execute(context, input_model), cancellation, keep_completed_work=True
+        )
     except ToolRunCancelled:
         raise
     except Exception as error:
@@ -71,7 +73,21 @@ async def wait_for_cancellation(cancellation: RunCancellation) -> None:
 async def run_cancellable(
     coro: Coroutine[Any, Any, Any],
     cancellation: RunCancellation | None,
+    *,
+    keep_completed_work: bool = False,
 ) -> Any:
+    """Await ``coro``, raising ``ToolRunCancelled`` once ``cancellation`` fires.
+
+    ``asyncio.wait`` can report the work and the cancellation poll as done
+    together, when cancellation lands in the same event-loop iteration the work
+    finishes in. ``keep_completed_work`` decides that tie: Tool execution sets
+    it, because a Tool that already ran has side effects on disk and dropping
+    its result would strand them (resume repairs the missing result into an
+    "interrupted" one, so a completed ``write_file`` silently vanishes from the
+    transcript). A model turn leaves it False — nothing has happened yet, and
+    honoring the interrupt matters more than keeping a response that would only
+    carry the Run onward into more tool calls.
+    """
     task: asyncio.Task[Any] = asyncio.create_task(coro)
     poll: asyncio.Task[None] | None = None
     if cancellation is not None:
@@ -83,6 +99,8 @@ async def run_cancellable(
             {task, poll},
             return_when=asyncio.FIRST_COMPLETED,
         )
+        if keep_completed_work and task in done:
+            return task.result()
         if poll in done:
             raise ToolRunCancelled
         return task.result()

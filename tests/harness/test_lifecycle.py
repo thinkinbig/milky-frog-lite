@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import defaultdict
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -49,10 +50,16 @@ class DelayedTool:
     description = "Sleeps then echoes label"
     input_model: type[BaseModel] = DelayedToolInput
 
+    def __init__(self) -> None:
+        self.completed: defaultdict[str, asyncio.Event] = defaultdict(asyncio.Event)
+        """Per-label completion signal, so a test can act on a finished call
+        instead of sleeping long enough to assume it finished."""
+
     async def execute(self, context: ToolContext, input: BaseModel) -> ToolResult:
         del context
         parsed = DelayedToolInput.model_validate(input)
         await asyncio.sleep(parsed.delay)
+        self.completed[parsed.label].set()
         return ToolResult(parsed.label)
 
 
@@ -630,9 +637,10 @@ async def test_concurrent_batch_cancellation_keeps_already_completed_results(
     )
     cancellation = RunCancellation()
     store = SqliteCheckpointStore(tmp_path / "state.db")
+    tool = DelayedTool()
     harness = make_harness(
         model=MultiCallModel(calls),
-        tools=ToolRegistry((DelayedTool(),)),
+        tools=ToolRegistry((tool,)),
         checkpoints=store,
         hub=EventHub(),
     )
@@ -641,7 +649,12 @@ async def test_concurrent_batch_cancellation_keeps_already_completed_results(
         task = asyncio.create_task(
             harness.run(RunRequest("go", tmp_path, cancellation=cancellation))
         )
-        await asyncio.sleep(0.1)
+        # Cancel once "fast" has actually finished, rather than sleeping long
+        # enough to assume it has — the sleep also had to cover the model call
+        # and checkpoint writes preceding the batch, so its margin varied with
+        # machine load. Waiting on the completion signal cancels at the tightest
+        # point instead: the same event-loop iteration "fast" returns in.
+        await asyncio.wait_for(tool.completed["fast"].wait(), timeout=10)
         cancellation.cancel()
         return await task
 
