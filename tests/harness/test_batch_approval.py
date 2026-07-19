@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
-from pydantic import BaseModel
 
 from milky_frog.checkpoint import SqliteCheckpointStore
 from milky_frog.domain import (
@@ -23,9 +21,9 @@ from milky_frog.domain import (
 from milky_frog.events import EventHub
 from milky_frog.events.events import RunAfterTool, RunBeforeTool
 from milky_frog.harness.state import append_model_response, unmatched_tool_calls
-from milky_frog.harness.tools import ToolContext, ToolRegistry, ToolResult
+from milky_frog.harness.tools import ToolRegistry
 from tests.checkpoint_helpers import seed_run, tool_messages
-from tests.stubs import EchoTool, make_harness
+from tests.stubs import DelayedTool, EchoTool, make_harness
 
 
 class _CompletesNextTurnModel:
@@ -34,33 +32,6 @@ class _CompletesNextTurnModel:
     async def stream(self, request: ModelRequest) -> AsyncIterator[ModelChunk]:
         del request
         yield StreamDone(ModelResponse(content="done"))
-
-
-class DelayedToolInput(BaseModel):
-    label: str
-    delay: float = 0.0
-
-
-class DelayedTool:
-    name = "delayed"
-    description = "Sleeps then echoes label"
-    input_model: type[BaseModel] = DelayedToolInput
-
-    def __init__(self) -> None:
-        self._in_flight = 0
-        self.peak_in_flight = 0
-        """Most executions alive at once — the direct observation of concurrency."""
-
-    async def execute(self, context: ToolContext, input: BaseModel) -> ToolResult:
-        del context
-        parsed = DelayedToolInput.model_validate(input)
-        self._in_flight += 1
-        self.peak_in_flight = max(self.peak_in_flight, self._in_flight)
-        try:
-            await asyncio.sleep(parsed.delay)
-        finally:
-            self._in_flight -= 1
-        return ToolResult(parsed.label)
 
 
 def _seed_pending(

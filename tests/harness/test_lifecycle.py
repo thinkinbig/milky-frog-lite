@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections import defaultdict
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -35,40 +34,7 @@ from milky_frog.events import (
 from milky_frog.harness.state import unmatched_tool_calls
 from milky_frog.harness.tools import ToolContext, ToolRegistry, ToolResult
 from tests.checkpoint_helpers import run_status, tool_messages
-from tests.stubs import EchoTool, FakeModel, SlowStreamModel, make_harness
-
-
-class DelayedToolInput(BaseModel):
-    label: str
-    delay: float = 0.0
-
-
-class DelayedTool:
-    """Sleeps ``delay`` seconds then echoes ``label`` — used to prove concurrency."""
-
-    name = "delayed"
-    description = "Sleeps then echoes label"
-    input_model: type[BaseModel] = DelayedToolInput
-
-    def __init__(self) -> None:
-        self.completed: defaultdict[str, asyncio.Event] = defaultdict(asyncio.Event)
-        """Per-label completion signal, so a test can act on a finished call
-        instead of sleeping long enough to assume it finished."""
-        self._in_flight = 0
-        self.peak_in_flight = 0
-        """Most executions alive at once — the direct observation of concurrency."""
-
-    async def execute(self, context: ToolContext, input: BaseModel) -> ToolResult:
-        del context
-        parsed = DelayedToolInput.model_validate(input)
-        self._in_flight += 1
-        self.peak_in_flight = max(self.peak_in_flight, self._in_flight)
-        try:
-            await asyncio.sleep(parsed.delay)
-        finally:
-            self._in_flight -= 1
-        self.completed[parsed.label].set()
-        return ToolResult(parsed.label)
+from tests.stubs import DelayedTool, EchoTool, FakeModel, SlowStreamModel, make_harness
 
 
 class MultiCallModel:
