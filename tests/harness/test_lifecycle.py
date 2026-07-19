@@ -34,26 +34,7 @@ from milky_frog.events import (
 from milky_frog.harness.state import unmatched_tool_calls
 from milky_frog.harness.tools import ToolContext, ToolRegistry, ToolResult
 from tests.checkpoint_helpers import run_status, tool_messages
-from tests.stubs import EchoTool, FakeModel, SlowStreamModel, make_harness
-
-
-class DelayedToolInput(BaseModel):
-    label: str
-    delay: float = 0.0
-
-
-class DelayedTool:
-    """Sleeps ``delay`` seconds then echoes ``label`` — used to prove concurrency."""
-
-    name = "delayed"
-    description = "Sleeps then echoes label"
-    input_model: type[BaseModel] = DelayedToolInput
-
-    async def execute(self, context: ToolContext, input: BaseModel) -> ToolResult:
-        del context
-        parsed = DelayedToolInput.model_validate(input)
-        await asyncio.sleep(parsed.delay)
-        return ToolResult(parsed.label)
+from tests.stubs import DelayedTool, EchoTool, FakeModel, SlowStreamModel, make_harness
 
 
 class MultiCallModel:
@@ -453,20 +434,22 @@ async def test_concurrent_tool_calls_run_in_parallel(tmp_path: Path) -> None:
     calls = tuple(
         ToolCall(f"call-{i}", "delayed", {"label": f"t{i}", "delay": 0.2}) for i in range(3)
     )
+    tool = DelayedTool()
     harness = make_harness(
         model=MultiCallModel(calls),
-        tools=ToolRegistry((DelayedTool(),)),
+        tools=ToolRegistry((tool,)),
         checkpoints=SqliteCheckpointStore(tmp_path / "state.db"),
         hub=EventHub(),
     )
 
-    start = asyncio.get_event_loop().time()
     result = await harness.run(RunRequest("go", tmp_path, max_model_calls=2))
-    elapsed = asyncio.get_event_loop().time() - start
 
     assert result.status is RunStatus.COMPLETED
-    # Sequential execution would take >= 0.6s; concurrent stays near 0.2s.
-    assert elapsed < 0.35
+    # Observe the overlap itself rather than inferring it from wall-clock time:
+    # a total-elapsed threshold also measures how loaded the machine is, and
+    # flaked on CI at 0.36s for three 0.2s sleeps — concurrent (sequential would
+    # be >= 0.6s), just not within the margin the threshold allowed.
+    assert tool.peak_in_flight == len(calls)
 
 
 @pytest.mark.asyncio
@@ -630,9 +613,10 @@ async def test_concurrent_batch_cancellation_keeps_already_completed_results(
     )
     cancellation = RunCancellation()
     store = SqliteCheckpointStore(tmp_path / "state.db")
+    tool = DelayedTool()
     harness = make_harness(
         model=MultiCallModel(calls),
-        tools=ToolRegistry((DelayedTool(),)),
+        tools=ToolRegistry((tool,)),
         checkpoints=store,
         hub=EventHub(),
     )
@@ -641,7 +625,12 @@ async def test_concurrent_batch_cancellation_keeps_already_completed_results(
         task = asyncio.create_task(
             harness.run(RunRequest("go", tmp_path, cancellation=cancellation))
         )
-        await asyncio.sleep(0.1)
+        # Cancel once "fast" has actually finished, rather than sleeping long
+        # enough to assume it has — the sleep also had to cover the model call
+        # and checkpoint writes preceding the batch, so its margin varied with
+        # machine load. Waiting on the completion signal cancels at the tightest
+        # point instead: the same event-loop iteration "fast" returns in.
+        await asyncio.wait_for(tool.completed["fast"].wait(), timeout=10)
         cancellation.cancel()
         return await task
 

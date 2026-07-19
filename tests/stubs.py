@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import defaultdict
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -97,6 +98,39 @@ class EchoTool:
         assert context.workspace.is_dir()
         parsed = EchoInput.model_validate(input)
         return ToolResult(parsed.text)
+
+
+class DelayedToolInput(BaseModel):
+    label: str
+    delay: float = 0.0
+
+
+class DelayedTool:
+    """Sleeps ``delay`` seconds then echoes ``label`` — used to prove concurrency."""
+
+    name = "delayed"
+    description = "Sleeps then echoes label"
+    input_model: type[BaseModel] = DelayedToolInput
+
+    def __init__(self) -> None:
+        self._in_flight = 0
+        self.peak_in_flight = 0
+        """Most executions alive at once — the direct observation of concurrency."""
+        self.completed: defaultdict[str, asyncio.Event] = defaultdict(asyncio.Event)
+        """Per-label completion signal, so a test can act on a finished call
+        instead of sleeping long enough to assume it finished."""
+
+    async def execute(self, context: ToolContext, input: BaseModel) -> ToolResult:
+        del context
+        parsed = DelayedToolInput.model_validate(input)
+        self._in_flight += 1
+        self.peak_in_flight = max(self.peak_in_flight, self._in_flight)
+        try:
+            await asyncio.sleep(parsed.delay)
+        finally:
+            self._in_flight -= 1
+        self.completed[parsed.label].set()
+        return ToolResult(parsed.label)
 
 
 # ── Model stubs ───────────────────────────────────────────────────────
