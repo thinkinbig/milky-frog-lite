@@ -36,6 +36,7 @@ from pathlib import Path
 from evals._settings import with_pinned_home, without_observability
 from evals.read_collector import ReadCollector
 from evals.read_noise.schema import (
+    FileEvent,
     ReadNoiseTask,
     ReadRef,
     RunRecord,
@@ -112,20 +113,22 @@ async def _run_once(
             result = await session.start_new(task.problem_statement, workspace)
 
         run_id = result.run_id
-        read_refs = [
-            ReadRef(normalize_read_path(r.path, workspace), r.is_error)
-            for r in reads.reads.get(run_id, [])
+        events = [
+            FileEvent(t.kind, normalize_read_path(t.path, workspace), t.is_error)
+            for t in reads.touches.get(run_id, [])
         ]
-        edits = [normalize_read_path(p, workspace) for p in reads.edits.get(run_id, [])]
         return RunRecord(
             run_index=run_index,
             status=result.status.value,
             termination=termination_kind(result.status),
             model_calls=result.model_calls,
-            reads=read_refs,
-            edits=edits,
+            # Per-kind projections of ``events``, kept for the order-free
+            # metrics (footprint, failed reads, the gold-edit gate).
+            reads=[ReadRef(e.path, e.is_error) for e in events if e.kind == "read"],
+            edits=[e.path for e in events if e.kind == "edit"],
             tool_calls=len(tools.calls.get(run_id, [])),
             final_message=result.final_message,
+            events=events,
         )
     finally:
         os.chdir(origin)  # restore before rmtree — can't remove the cwd
@@ -169,6 +172,12 @@ def main() -> None:
     ap.add_argument("--repeats", type=int, default=3, help="Runs per task (N)")
     ap.add_argument("--max-model-calls", type=int, default=30, help="generous cap")
     ap.add_argument("--out", type=Path, default=RESULTS / "read_noise_runs.json")
+    ap.add_argument(
+        "--label",
+        type=str,
+        default=None,
+        help="name of the Harness arm being measured, recorded in the artifact meta",
+    )
     args = ap.parse_args()
 
     tasks = load_tasks(args.dataset)
@@ -204,11 +213,44 @@ def main() -> None:
             "repeats": args.repeats,
             "dataset": args.dataset.name,
             "tasks": len(results),
+            # Which Harness this measured. A comparative benchmark's artifact is
+            # unreadable without it: two arms differ only in the Harness code,
+            # which is invisible in the numbers themselves.
+            "arm": args.label,
+            "harness_commit": _harness_commit(),
         },
         tasks=results,
     )
     dump_runs(artifact, args.out)
-    print(f"\nwrote {args.out.relative_to(REPO_ROOT)}")
+    print(f"\nwrote {_display_path(args.out)}")
+
+
+def _harness_commit() -> str | None:
+    """The milky-frog commit under test; None outside a git checkout."""
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "rev-parse", "--short", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return done.stdout.strip()
+
+
+def _display_path(path: Path) -> str:
+    """Shorten to a repo-relative path when possible.
+
+    ``relative_to`` raises for any path outside the repo *and* for relative
+    paths, so an ``--out`` the caller passed as anything but an absolute path
+    inside the repo used to crash the process after a completed sweep — losing
+    the exit code of an hour-long run over a cosmetic line.
+    """
+    try:
+        return path.resolve().relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return str(path)
 
 
 if __name__ == "__main__":
