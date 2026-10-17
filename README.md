@@ -60,6 +60,12 @@ milky-frog resume [RUN_ID]    # resume an interrupted run
 milky-frog prune              # remove old runs (add --dry-run to preview)
 ```
 
+## Web research (opt-in)
+
+Add free web search and page fetching to coding Runs with
+[Parallel Search MCP](docs/parallel-search-mcp.md). The setup uses the existing
+MCP client and requires no Parallel account or API key.
+
 ## Containerized execution (opt-in)
 
 By default Milky Frog runs Tools on the host under a path-deny policy. To run
@@ -175,6 +181,11 @@ milky-frog show RUN_ID        # 查看某个 Run（加 --json 输出原始数据
 milky-frog resume [RUN_ID]    # 恢复中断的 Run
 milky-frog prune              # 清理旧的 Run（加 --dry-run 预览）
 ```
+
+## 网页检索（可选）
+
+通过 [Parallel Search MCP](docs/parallel-search-mcp.md) 为编码 Run 添加免费的网页搜索与
+页面提取 Tool。该配置使用现有 MCP 客户端，无需 Parallel 账号或 API key（配置指南为英文）。
 
 ## 容器化执行（可选）
 
